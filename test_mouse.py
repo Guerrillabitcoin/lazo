@@ -64,6 +64,23 @@ def test_clipboard_memory() -> None:
     print("portapapeles con historial")
 
 
+def test_notes_order() -> None:
+    import tempfile
+    from pathlib import Path
+
+    folder = Path(tempfile.mkdtemp())
+    control.set_history_path(folder / "clips.json")
+    control.clipboard_history("uno")
+    control.clipboard_history("uno\r\n", auto=True)
+    control.clipboard_history("dos")
+    control.clipboard_history("tres")
+    listed = [item["text"] for item in control.clipboard_history(None)["items"]]
+    if listed != ["tres", "dos", "uno"]:
+        raise SystemExit(listed)
+    control.set_history_path(Path(__file__).with_name("clipboard-history.json"))
+    print("notas sin duplicar y la última arriba")
+
+
 def test_mesa_and_small_cursor() -> None:
     import tempfile
     from pathlib import Path
@@ -178,6 +195,7 @@ if __name__ == "__main__":
     test_backends()
     test_spotify_skips_web()
     test_clipboard_memory()
+    test_notes_order()
     test_mesa_and_small_cursor()
     test_hook_speed()
     test_live_channel()

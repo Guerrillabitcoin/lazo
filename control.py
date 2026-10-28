@@ -25,6 +25,7 @@ _saved_cursor: Any = None
 _history_path = Path(__file__).with_name("clipboard-history.json")
 _history: list[dict[str, Any]] = []
 _history_loaded = False
+_clip_seq = 0
 _CLIP_LIMIT = 40
 _CLIP_CHARS = 8000
 
@@ -1192,27 +1193,54 @@ def status() -> dict[str, Any]:
 
 
 def set_history_path(path: Path) -> None:
-    global _history_path, _history, _history_loaded
+    global _history_path, _history, _history_loaded, _clip_seq
     _history_path = Path(path)
     _history = []
     _history_loaded = False
+    _clip_seq = 0
 
 
-def clipboard_history(text: str | None = None) -> dict[str, Any]:
-    current = _read_clipboard_text() if text is None else text
-    current = current.replace("\x00", "")
-    if len(current) > _CLIP_CHARS:
-        current = current[:_CLIP_CHARS]
+def clipboard_history(text: str | None = None, auto: bool = False) -> dict[str, Any]:
     with _clip_lock:
         _load_history()
-        if current.strip() and (not _history or _history[0].get("text") != current):
-            _history.insert(
-                0,
-                {"id": secrets.token_hex(4), "text": current, "at": int(time.time())},
-            )
-            del _history[_CLIP_LIMIT:]
-            _save_history()
+        if text is not None:
+            clean = _clip_norm(text)
+            if clean:
+                _remember_clip(clean, auto)
+        ranked = sorted(
+            _history,
+            key=lambda item: (float(item.get("at") or 0), int(item.get("seq") or 0)),
+            reverse=True,
+        )
+        _history[:] = ranked
         return {"items": [dict(item) for item in _history]}
+
+
+def _clip_norm(text: str) -> str:
+    clean = text.replace("\x00", "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return clean[:_CLIP_CHARS]
+
+
+def _remember_clip(clean: str, auto: bool) -> None:
+    global _clip_seq
+    for index, item in enumerate(_history):
+        if _clip_norm(str(item.get("text") or "")) == clean:
+            if auto:
+                return
+            _clip_seq += 1
+            item["text"] = clean
+            item["at"] = time.time()
+            item["seq"] = _clip_seq
+            _history.insert(0, _history.pop(index))
+            _save_history()
+            return
+    _clip_seq += 1
+    _history.insert(
+        0,
+        {"id": secrets.token_hex(4), "text": clean, "at": time.time(), "seq": _clip_seq},
+    )
+    del _history[_CLIP_LIMIT:]
+    _save_history()
 
 
 def _load_history() -> None:
@@ -1226,17 +1254,30 @@ def _load_history() -> None:
         return
     if not isinstance(raw, list):
         return
+    kept: dict[str, tuple[tuple[float, int], dict[str, Any]]] = {}
     for item in raw:
-        if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
-            _history.append(
-                {
-                    "id": str(item.get("id") or secrets.token_hex(4)),
-                    "text": str(item["text"])[:_CLIP_CHARS],
-                    "at": int(item.get("at") or 0),
-                }
-            )
-        if len(_history) >= _CLIP_LIMIT:
-            break
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            continue
+        clean = _clip_norm(item["text"])
+        if not clean:
+            continue
+        stamp = (float(item.get("at") or 0), int(item.get("seq") or 0))
+        previous = kept.get(clean)
+        if previous is None or stamp >= previous[0]:
+            kept[clean] = (stamp, item)
+    ranked = sorted(kept.items(), key=lambda pair: pair[1][0], reverse=True)
+    global _clip_seq
+    for clean, (stamp, item) in ranked[:_CLIP_LIMIT]:
+        seq = int(item.get("seq") or 0)
+        _clip_seq = max(_clip_seq, seq)
+        _history.append(
+            {
+                "id": str(item.get("id") or secrets.token_hex(4)),
+                "text": clean,
+                "at": stamp[0],
+                "seq": seq,
+            }
+        )
 
 
 def _save_history() -> None:

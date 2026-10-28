@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.12"
+VERSION = "0.13"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -524,7 +524,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             body = self._read_json()
-            result = control.clipboard_history(str(body.get("text", "")))
+            result = control.clipboard_history(str(body.get("text", "")), auto=bool(body.get("auto")))
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)})
             return

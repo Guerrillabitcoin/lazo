@@ -89,34 +89,38 @@
       const files = document.querySelector("#files");
       let seen = "";
 
-      async function pushText(text) {
+      async function pushText(text, auto) {
         const clean = text || "";
         if (!clean.trim() || clean === seen) return;
         seen = clean;
         await fetch("/api/clipboard", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: clean }),
+          body: JSON.stringify({ text: clean, auto: !!auto }),
         });
         load();
       }
 
-      document.querySelector("#save").addEventListener("click", () => pushText(paste.value));
+      document.querySelector("#save").addEventListener("click", () => pushText(paste.value, false));
       document.addEventListener("paste", (event) => {
         const text = event.clipboardData && event.clipboardData.getData("text");
-        if (text) pushText(text);
+        if (text) pushText(text, false);
       });
 
       async function watchClipboard() {
         try {
           const text = await navigator.clipboard.readText();
-          await pushText(text);
+          await pushText(text, true);
         } catch (_err) {}
       }
 
       function stamp(at) {
         if (!at) return "";
-        return new Date(at * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+        return new Date(at * 1000).toLocaleTimeString("es", {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
       }
 
       function size(bytes) {

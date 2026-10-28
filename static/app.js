@@ -78,7 +78,11 @@ async function refreshStatus() {
 
 function clipTime(at) {
   if (!at) return "";
-  return new Date(at * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+  return new Date(at * 1000).toLocaleTimeString("es", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
 }
 
 async function copyToPhone(text) {
