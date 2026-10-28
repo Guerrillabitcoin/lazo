@@ -81,6 +81,8 @@ def test_mesa_and_small_cursor() -> None:
         raise SystemExit("no borró el archivo")
     if control._windows_base(1) != 32 or control._windows_base(15) != 256:
         raise SystemExit("el cursor normal no es el pequeño")
+    if control.scroll_steps(400) != -2 or control.scroll_steps(-400) != 2 or control.scroll_steps(0) != 0:
+        raise SystemExit("el scroll sigue acumulando demasiado")
     print("mesa y cursor pequeño")
 
 

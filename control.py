@@ -239,15 +239,20 @@ def mouse_up(button: str) -> None:
         mouse.release(_button(button))
 
 
-def scroll_mouse(dy: int) -> None:
-    # El trackpad manda deltaY positivo hacia abajo. pynput sube con positivo.
+def scroll_steps(dy: int) -> int:
     dy = int(dy)
     if dy == 0:
-        return
-    steps = int(round(-dy / 40))
+        return 0
+    steps = int(round(-dy / 90))
     if steps == 0:
         steps = -1 if dy > 0 else 1
-    steps = max(-8, min(8, steps))
+    return max(-2, min(2, steps))
+
+
+def scroll_mouse(dy: int) -> None:
+    steps = scroll_steps(dy)
+    if steps == 0:
+        return
     with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.scroll(0, steps)
@@ -390,6 +395,7 @@ def _media_key(kind: str) -> None:
 def _win_media_key(vk: int) -> str:
     user32 = ctypes.windll.user32
     user32.keybd_event(vk, 0, 0, 0)
+    time.sleep(0.04)
     user32.keybd_event(vk, 0, 2, 0)
     return "Volumen de Windows"
 
@@ -590,16 +596,49 @@ def _windows_list() -> list[dict[str, str]]:
     return rows[:40]
 
 
-def _force_foreground(hwnd: int) -> None:
+def _hwnd(value: int) -> ctypes.c_void_p:
+    return ctypes.c_void_p(int(value))
+
+
+def _user32():
     user32 = ctypes.windll.user32
-    user32.ShowWindow(hwnd, 9)
+    void = ctypes.c_void_p
+    user32.ShowWindow.argtypes = [void, ctypes.c_int]
+    user32.ShowWindow.restype = ctypes.c_bool
+    user32.SetForegroundWindow.argtypes = [void]
+    user32.SetForegroundWindow.restype = ctypes.c_bool
+    user32.BringWindowToTop.argtypes = [void]
+    user32.BringWindowToTop.restype = ctypes.c_bool
+    user32.GetForegroundWindow.restype = void
+    user32.GetWindowThreadProcessId.argtypes = [void, ctypes.c_void_p]
+    user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+    user32.AttachThreadInput.argtypes = [ctypes.c_ulong, ctypes.c_ulong, ctypes.c_bool]
+    user32.AttachThreadInput.restype = ctypes.c_bool
+    user32.IsIconic.argtypes = [void]
+    user32.IsIconic.restype = ctypes.c_bool
+    user32.IsWindow.argtypes = [void]
+    user32.IsWindow.restype = ctypes.c_bool
+    user32.PostMessageW.argtypes = [void, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+    user32.PostMessageW.restype = ctypes.c_bool
+    return user32
+
+
+def _force_foreground(hwnd: int) -> None:
+    user32 = _user32()
+    handle = _hwnd(hwnd)
+    # SW_RESTORE (9) saca la ventana de maximizada. Solo si está minimizada.
+    if user32.IsIconic(handle):
+        user32.ShowWindow(handle, 9)
     fg = user32.GetForegroundWindow()
-    fg_thread = user32.GetWindowThreadProcessId(fg, None)
-    target_thread = user32.GetWindowThreadProcessId(hwnd, None)
-    user32.AttachThreadInput(fg_thread, target_thread, True)
-    user32.SetForegroundWindow(hwnd)
-    user32.BringWindowToTop(hwnd)
-    user32.AttachThreadInput(fg_thread, target_thread, False)
+    fg_thread = user32.GetWindowThreadProcessId(fg, None) if fg else 0
+    target_thread = user32.GetWindowThreadProcessId(handle, None)
+    attached = bool(fg_thread and target_thread and fg_thread != target_thread)
+    if attached:
+        user32.AttachThreadInput(fg_thread, target_thread, True)
+    user32.SetForegroundWindow(handle)
+    user32.BringWindowToTop(handle)
+    if attached:
+        user32.AttachThreadInput(fg_thread, target_thread, False)
 
 
 def _win_hotkey(*vks: int) -> None:
@@ -659,19 +698,21 @@ def _launch_spotify_app() -> None:
 
 
 def _windows_action(hwnd: int, action: str) -> str:
-    user32 = ctypes.windll.user32
+    user32 = _user32()
+    handle = _hwnd(hwnd)
+    if not user32.IsWindow(handle):
+        raise ControlError("Esa ventana ya se cerró. Pulsa Actualizar.")
     if action == "focus":
         _force_foreground(hwnd)
         return "Ventana al frente"
     if action == "minimize":
-        user32.ShowWindow(hwnd, 6)
+        user32.ShowWindow(handle, 6)
         return "Minimizada"
     if action == "maximize":
-        _force_foreground(hwnd)
-        _win_hotkey(0x5B, 0x26)
+        user32.ShowWindow(handle, 3)
         return "Maximizada"
     if action == "close":
-        user32.PostMessageW(hwnd, 0x0010, 0, 0)
+        user32.PostMessageW(handle, 0x0010, 0, 0)
         return "Cerrar enviado"
     if action == "snap_left":
         _force_foreground(hwnd)
@@ -828,7 +869,17 @@ def _find_title(needle: str, exclude: str | None = None) -> dict[str, str] | Non
     return None
 
 
-def youtube(action: str) -> dict[str, str]:
+_levels = {"youtube": 50, "spotify": 50}
+
+
+def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
+    extra = extra or {}
+    if action == "search":
+        return _youtube_search(str(extra.get("query", "")))
+    if action == "open":
+        return _youtube_open(str(extra.get("video", "")))
+    if action == "volume":
+        return _youtube_volume(int(extra.get("level", _levels["youtube"])))
     actions = {
         "play": ["k"],
         "mute": ["m"],
@@ -845,17 +896,94 @@ def youtube(action: str) -> dict[str, str]:
     if action not in actions:
         raise ControlError("acción de YouTube no válida")
     with _lock:
-        # list_windows also takes the lock on other platforms; call unlocked variants.
         row = _find_youtube_unlocked()
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
         _focus_unlocked(row["id"])
-    import time
-
-    time.sleep(0.18)
+    time.sleep(0.12)
     with _lock:
         _chord(actions[action])
-    return {"detail": "YouTube", "title": row["title"]}
+    if action == "volup":
+        _levels["youtube"] = min(100, _levels["youtube"] + 5)
+    elif action == "voldown":
+        _levels["youtube"] = max(0, _levels["youtube"] - 5)
+    return {"detail": "YouTube", "title": row["title"], "level": _levels["youtube"]}
+
+
+def _youtube_volume(level: int) -> dict[str, Any]:
+    level = max(0, min(100, int(level)))
+    steps = int(round((level - _levels["youtube"]) / 5))
+    steps = max(-12, min(12, steps))
+    with _lock:
+        row = _find_youtube_unlocked()
+        if row is None:
+            raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
+        if steps:
+            _focus_unlocked(row["id"])
+    if steps:
+        time.sleep(0.12)
+        with _lock:
+            for _ in range(abs(steps)):
+                _chord(["up" if steps > 0 else "down"])
+        _levels["youtube"] = max(0, min(100, _levels["youtube"] + steps * 5))
+    else:
+        _levels["youtube"] = level
+    return {"detail": "YouTube", "title": row["title"], "level": _levels["youtube"]}
+
+
+def _youtube_search(query: str) -> dict[str, Any]:
+    import urllib.parse
+    import webbrowser
+
+    query = query.strip()[:120]
+    if not query:
+        raise ControlError("escribe qué buscar")
+    webbrowser.open_new("https://www.youtube.com/results?search_query=" + urllib.parse.quote(query))
+    return {
+        "detail": "Búsqueda abierta en el PC",
+        "title": query,
+        "results": _youtube_hits(query),
+        "level": _levels["youtube"],
+    }
+
+
+def _youtube_hits(query: str) -> list[dict[str, str]]:
+    import html
+    import re
+    import urllib.parse
+    import urllib.request
+
+    url = "https://www.youtube.com/results?search_query=" + urllib.parse.quote(query)
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        page = urllib.request.urlopen(request, timeout=5).read().decode("utf-8", "replace")
+    except Exception:
+        return []
+    hits: list[dict[str, str]] = []
+    seen: set[str] = set()
+    pattern = re.compile(r'"videoId":"([\w-]{11})".{0,500}?"text":"((?:\\.|[^"\\]){1,160})"')
+    for video_id, title in pattern.findall(page):
+        if video_id in seen:
+            continue
+        seen.add(video_id)
+        try:
+            title = html.unescape(title.encode("utf-8").decode("unicode_escape"))
+        except UnicodeError:
+            title = html.unescape(title)
+        hits.append({"id": video_id, "title": title[:140]})
+        if len(hits) >= 5:
+            break
+    return hits
+
+
+def _youtube_open(video: str) -> dict[str, Any]:
+    import re
+    import webbrowser
+
+    if not re.fullmatch(r"[\w-]{11}", video):
+        raise ControlError("vídeo no válido")
+    webbrowser.open_new(f"https://www.youtube.com/watch?v={video}")
+    return {"detail": "Vídeo abierto en el PC", "title": "YouTube", "level": _levels["youtube"]}
 
 
 def _find_youtube_unlocked() -> dict[str, str] | None:
@@ -883,43 +1011,64 @@ def _focus_unlocked(window_id: str) -> None:
         _linux_window_action(window_id, "focus")
 
 
-def spotify(action: str) -> dict[str, str]:
-    allowed = {"play", "next", "prev", "volup", "voldown", "status"}
+def spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
+    extra = extra or {}
+    allowed = {"play", "next", "prev", "volup", "voldown", "status", "volume", "mute", "search"}
     if action not in allowed:
         raise ControlError("acción de Spotify no válida")
     with _lock:
         if SYSTEM == "Darwin":
-            return _mac_spotify(action)
+            return _mac_spotify(action, extra)
         if SYSTEM == "Linux":
-            return _linux_spotify(action)
-        return _windows_spotify(action)
+            return _linux_spotify(action, extra)
+        return _windows_spotify(action, extra)
 
 
-def _mac_spotify(action: str) -> dict[str, str]:
-    commands = {
-        "play": "playpause",
-        "next": "next track",
-        "prev": "previous track",
-        "volup": "set sound volume to (sound volume + 10)",
-        "voldown": "set sound volume to (sound volume - 10)",
-        "status": "",
-    }
+def _mac_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
+    extra = extra or {}
+    if action == "search":
+        return _spotify_search(str(extra.get("query", "")))
+    if action == "volume":
+        level = max(0, min(100, int(extra.get("level", _levels["spotify"]))))
+        command = f"set sound volume to {level}"
+        _levels["spotify"] = level
+    elif action == "mute":
+        command = "set sound volume to 0" if _levels["spotify"] else "set sound volume to 40"
+        _levels["spotify"] = 0 if _levels["spotify"] else 40
+    else:
+        commands = {
+            "play": "playpause",
+            "next": "next track",
+            "prev": "previous track",
+            "volup": "set sound volume to (sound volume + 10)",
+            "voldown": "set sound volume to (sound volume - 10)",
+            "status": "",
+        }
+        command = commands[action]
     script = f'''
 tell application "Spotify"
   if it is not running then error "apagado"
-  {commands[action]}
+  {command}
   set who to artist of current track
   set what to name of current track
-  return who & " — " & what
+  set loud to sound volume
+  return who & " — " & what & tab & (loud as text)
 end tell
 '''
     result = _run(["osascript", "-e", script], timeout=6)
     if result.returncode != 0:
         raise ControlError("Abre la app de Spotify en el Mac")
-    return {"detail": "Spotify", "title": result.stdout.strip()[:180]}
+    lines = result.stdout.strip().split("\t")
+    title = lines[0][:180]
+    if len(lines) > 1 and lines[1].isdigit():
+        _levels["spotify"] = int(lines[1])
+    return {"detail": "Spotify", "title": title, "level": _levels["spotify"]}
 
 
-def _linux_spotify(action: str) -> dict[str, str]:
+def _linux_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
+    extra = extra or {}
+    if action == "search":
+        return _spotify_search(str(extra.get("query", "")))
     if not _which("playerctl"):
         raise ControlError("Instala playerctl para Spotify (sudo apt install playerctl)")
     players = _run(["playerctl", "-l"])
@@ -927,46 +1076,105 @@ def _linux_spotify(action: str) -> dict[str, str]:
     player = next((name for name in names if "spotify" in name.lower()), None)
     if player is None:
         raise ControlError("Abre Spotify en este PC")
-    verbs = {
-        "play": ["play-pause"],
-        "next": ["next"],
-        "prev": ["previous"],
-        "volup": ["volume", "0.08+"],
-        "voldown": ["volume", "0.08-"],
-        "status": [],
-    }
-    if verbs[action]:
-        result = _run(["playerctl", "-p", player, *verbs[action]])
+    if action == "volume":
+        level = max(0, min(100, int(extra.get("level", _levels["spotify"]))))
+        verbs = ["volume", str(level / 100)]
+        _levels["spotify"] = level
+    elif action == "mute":
+        verbs = ["volume", "0" if _levels["spotify"] else "0.4"]
+        _levels["spotify"] = 0 if _levels["spotify"] else 40
+    else:
+        verbs = {
+            "play": ["play-pause"],
+            "next": ["next"],
+            "prev": ["previous"],
+            "volup": ["volume", "0.08+"],
+            "voldown": ["volume", "0.08-"],
+            "status": [],
+        }[action]
+    if verbs:
+        result = _run(["playerctl", "-p", player, *verbs])
         if result.returncode != 0:
             raise ControlError("Spotify no respondió")
     meta = _run(["playerctl", "-p", player, "metadata", "--format", "{{artist}} — {{title}}"])
     title = meta.stdout.strip() or "Spotify"
-    return {"detail": "Spotify", "title": title[:180]}
+    return {"detail": "Spotify", "title": title[:180], "level": _levels["spotify"]}
 
 
-def _windows_spotify(action: str) -> dict[str, str]:
+def _windows_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
+    extra = extra or {}
+    if action == "search":
+        return _spotify_search(str(extra.get("query", "")))
     row = pick_spotify_window(_windows_list())
     if row is None:
         if action != "status":
             _launch_spotify_app()
         raise ControlError("Abro la app de Spotify del PC, no la web. Espera un segundo y pulsa otra vez.")
+    title = _spotify_title(row)
+    if action == "status":
+        return {"detail": "Spotify", "title": title, "level": _levels["spotify"]}
+    if action == "volume":
+        return _windows_spotify_volume(int(row["id"]), int(extra.get("level", _levels["spotify"])), title)
+    if action == "mute":
+        target = 0 if _levels["spotify"] else 40
+        return _windows_spotify_volume(int(row["id"]), target, title)
+    # Play, anterior y siguiente son teclas globales. No se toca el tamaño de la ventana.
+    keys = {"play": 0xB3, "next": 0xB0, "prev": 0xB1, "volup": None, "voldown": None}
+    if action in ("volup", "voldown"):
+        return _windows_spotify_volume(
+            int(row["id"]),
+            _levels["spotify"] + (10 if action == "volup" else -10),
+            title,
+        )
+    _win_media_key(keys[action])
+    time.sleep(0.32)
+    fresh = pick_spotify_window(_windows_list())
+    if fresh is not None:
+        title = _spotify_title(fresh)
+    return {"detail": "Spotify", "title": title, "level": _levels["spotify"]}
+
+
+def _spotify_title(row: dict[str, str]) -> str:
     title = row["title"]
     if title.lower() in {"spotify", "spotify premium", "spotify free"}:
-        title = "Spotify"
-    if action == "status":
-        return {"detail": "Spotify", "title": title[:180]}
-    _force_foreground(int(row["id"]))
-    if action == "play":
-        _win_media_key(0xB3)
-    elif action == "next":
-        _win_media_key(0xB0)
-    elif action == "prev":
-        _win_media_key(0xB1)
-    elif action == "volup":
-        _win_hotkey(0x11, 0x26)
-    elif action == "voldown":
-        _win_hotkey(0x11, 0x28)
-    return {"detail": "Spotify", "title": title[:180]}
+        return "Spotify"
+    return title[:180]
+
+
+def _windows_spotify_volume(hwnd: int, level: int, title: str) -> dict[str, Any]:
+    level = max(0, min(100, int(level)))
+    steps = int(round((level - _levels["spotify"]) / 10))
+    steps = max(-10, min(10, steps))
+    if steps:
+        _force_foreground(hwnd)
+        for _ in range(abs(steps)):
+            _win_hotkey(0x11, 0x26 if steps > 0 else 0x28)
+            time.sleep(0.03)
+        _levels["spotify"] = max(0, min(100, _levels["spotify"] + steps * 10))
+    else:
+        _levels["spotify"] = level
+    return {"detail": "Spotify", "title": title, "level": _levels["spotify"]}
+
+
+def _spotify_search(query: str) -> dict[str, Any]:
+    import urllib.parse
+
+    query = query.strip()[:120]
+    if not query:
+        raise ControlError("escribe qué buscar")
+    uri = "spotify:search:" + urllib.parse.quote(query)
+    if SYSTEM == "Windows":
+        subprocess.Popen(["cmd", "/c", "start", "", uri], close_fds=True)
+    elif SYSTEM == "Darwin":
+        subprocess.Popen(["open", uri])
+    else:
+        subprocess.Popen(["xdg-open", uri])
+    return {
+        "detail": "Búsqueda en la app de Spotify",
+        "title": query,
+        "results": [],
+        "level": _levels["spotify"],
+    }
 
 
 def status() -> dict[str, Any]:
@@ -1013,8 +1221,8 @@ def _load_history() -> None:
         return
     _history_loaded = True
     try:
-        raw = json.loads(_history_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        raw = json.loads(_open_seal(_history_path.read_bytes()).decode("utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
         return
     if not isinstance(raw, list):
         return
@@ -1033,7 +1241,8 @@ def _load_history() -> None:
 
 def _save_history() -> None:
     try:
-        _history_path.write_text(json.dumps(_history, ensure_ascii=False), encoding="utf-8")
+        raw = json.dumps(_history, ensure_ascii=False).encode("utf-8")
+        _history_path.write_bytes(_seal(raw))
     except OSError:
         return
 
@@ -1176,7 +1385,7 @@ def save_file(name: str, data: bytes) -> dict[str, Any]:
     if total > _FILE_TOTAL:
         raise ControlError("La mesa está llena. Quita algún archivo.")
     file_id = secrets.token_hex(4)
-    (_files_dir / file_id).write_bytes(data)
+    (_files_dir / file_id).write_bytes(_seal(data))
     rows.insert(0, {"id": file_id, "name": clean, "size": len(data), "at": int(time.time())})
     _write_file_rows(rows[:30])
     return {"file": rows[0]}
@@ -1186,7 +1395,7 @@ def read_file(file_id: str) -> tuple[str, bytes]:
     row = _file_row(file_id)
     if row is None:
         raise ControlError("ese archivo ya no está")
-    return row["name"], (_files_dir / row["id"]).read_bytes()
+    return row["name"], _open_seal((_files_dir / row["id"]).read_bytes())
 
 
 def delete_file(file_id: str) -> dict[str, Any]:
@@ -1237,5 +1446,52 @@ def _file_rows() -> list[dict[str, Any]]:
 def _write_file_rows(rows: list[dict[str, Any]]) -> None:
     _files_dir.mkdir(parents=True, exist_ok=True)
     (_files_dir / "index.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+
+
+def _seal(data: bytes) -> bytes:
+    if SYSTEM != "Windows" or not data:
+        return data
+    sealed = _dpapi(data, True)
+    if not sealed:
+        return data
+    return b"LZ1" + sealed
+
+
+def _open_seal(data: bytes) -> bytes:
+    if data.startswith(b"LZ1"):
+        opened = _dpapi(data[3:], False)
+        return opened or data
+    return data
+
+
+def _dpapi(data: bytes, protect: bool) -> bytes:
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", ctypes.c_ulong), ("pbData", ctypes.c_void_p)]
+
+    crypt32 = ctypes.windll.crypt32
+    kernel32 = ctypes.windll.kernel32
+    buf = ctypes.create_string_buffer(data)
+    incoming = DATA_BLOB(len(data), ctypes.cast(buf, ctypes.c_void_p))
+    outgoing = DATA_BLOB()
+    crypt32.CryptProtectData.argtypes = [
+        ctypes.POINTER(DATA_BLOB),
+        ctypes.c_wchar_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_ulong,
+        ctypes.POINTER(DATA_BLOB),
+    ]
+    crypt32.CryptUnprotectData.argtypes = crypt32.CryptProtectData.argtypes
+    crypt32.CryptProtectData.restype = ctypes.c_bool
+    crypt32.CryptUnprotectData.restype = ctypes.c_bool
+    fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
+    if not fn(ctypes.byref(incoming), None, None, None, None, 0, ctypes.byref(outgoing)):
+        return b""
+    try:
+        return ctypes.string_at(outgoing.pbData, outgoing.cbData)
+    finally:
+        kernel32.LocalFree(outgoing.pbData)
+
 
 

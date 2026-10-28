@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.11</title>
+    <title>LaZoo 0.12</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
     <main class="phone">
       <header class="top">
         <div>
-          <p class="mark">LaZoo 0.11</p>
+          <p class="mark">LaZoo 0.12</p>
           <p id="sub" class="sub">Mando de este PC</p>
         </div>
         <p id="visor" class="visor">Conecta con el PIN</p>
@@ -31,14 +31,18 @@
           </div>
           <div id="pad" class="pad" role="application" aria-label="Trackpad"><span id="finger" hidden></span></div>
           <p class="hint">Un dedo mueve · dos dedos desplazan · toque corto hace clic</p>
-          <div class="split">
+          <div class="split three">
             <button id="btn-left" type="button">Clic</button>
+            <button id="btn-type" type="button">Teclado</button>
             <button id="btn-right" type="button">Clic derecho</button>
           </div>
+          <input id="native-type" class="native-type" hidden inputmode="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" placeholder="Escribe con el teclado del móvil" />
         </div>
 
         <div id="view-keys" class="view" hidden>
-          <div id="keys"></div>
+          <p class="hint">Para escribir, en Ratón pulsa Teclado, entre los dos clics. Sale el teclado de tu móvil.</p>
+          <button id="show-keys" type="button">Teclas en pantalla</button>
+          <div id="keys" hidden></div>
           <form id="phrase" class="phrase">
             <input id="phrase-input" maxlength="400" placeholder="Escribe una frase y envíala" />
             <button type="submit">Enviar</button>
@@ -46,6 +50,7 @@
         </div>
 
         <div id="view-windows" class="view" hidden>
+          <p class="hint">Toca una ventana. Los botones actúan sobre esa: traerla, minimizar, maximizar, mitad izquierda o derecha, y cerrar.</p>
           <div class="row-actions">
             <button id="win-refresh" type="button">Actualizar</button>
           </div>
@@ -61,31 +66,54 @@
         </div>
 
         <div id="view-youtube" class="view" hidden>
-          <p id="yt-title" class="now">Busca una pestaña de YouTube en el PC</p>
-          <div class="transport">
-            <button type="button" data-yt="prev">Anterior</button>
-            <button type="button" data-yt="play" class="primary">Play</button>
-            <button type="button" data-yt="next">Siguiente</button>
-            <button type="button" data-yt="back">−10 s</button>
-            <button type="button" data-yt="forward">+10 s</button>
-            <button type="button" data-yt="full">Pantalla</button>
-            <button type="button" data-yt="voldown">Vol −</button>
-            <button type="button" data-yt="volup">Vol +</button>
-            <button type="button" data-yt="mute">Silencio</button>
-            <button type="button" data-yt="captions">Subtítulos</button>
-            <button type="button" data-yt="theater">Cine</button>
-          </div>
+          <article class="deck">
+            <p id="yt-title" class="now">YouTube en el navegador del PC</p>
+            <div class="transport">
+              <button type="button" data-yt="prev">Anterior</button>
+              <button id="yt-play" type="button" data-yt="play" class="primary">Play</button>
+              <button type="button" data-yt="next">Siguiente</button>
+            </div>
+            <div class="vol-line">
+              <input id="yt-vol" type="range" min="0" max="100" value="50" aria-label="Volumen de YouTube" />
+              <span id="yt-level">50</span>
+              <button id="yt-mute" type="button" data-yt="mute" class="icon" aria-label="Silencio">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="wave" d="M16 9a5 5 0 0 1 0 6M18.5 7a8 8 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+              </button>
+            </div>
+            <div class="tools">
+              <button type="button" data-yt="full">Pantalla</button>
+              <button type="button" data-yt="theater">Cine</button>
+              <button type="button" data-yt="captions">Subtítulos</button>
+            </div>
+            <form id="yt-search" class="phrase">
+              <input id="yt-q" maxlength="120" placeholder="Buscar en YouTube" />
+              <button type="submit">Buscar</button>
+            </form>
+            <ul id="yt-results" class="list"></ul>
+          </article>
         </div>
 
         <div id="view-spotify" class="view" hidden>
-          <p id="sp-title" class="now">App de Spotify en el PC, no la web</p>
-          <div class="transport">
-            <button type="button" data-sp="prev">Anterior</button>
-            <button type="button" data-sp="play" class="primary">Play</button>
-            <button type="button" data-sp="next">Siguiente</button>
-            <button type="button" data-sp="voldown">Vol −</button>
-            <button type="button" data-sp="volup">Vol +</button>
-          </div>
+          <article class="deck">
+            <p id="sp-title" class="now">App de Spotify en el PC</p>
+            <div class="transport">
+              <button type="button" data-sp="prev">Anterior</button>
+              <button id="sp-play" type="button" data-sp="play" class="primary">Play</button>
+              <button type="button" data-sp="next">Siguiente</button>
+            </div>
+            <div class="vol-line">
+              <input id="sp-vol" type="range" min="0" max="100" value="50" aria-label="Volumen de Spotify" />
+              <span id="sp-level">50</span>
+              <button id="sp-mute" type="button" data-sp="mute" class="icon" aria-label="Silencio">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="wave" d="M16 9a5 5 0 0 1 0 6M18.5 7a8 8 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+              </button>
+            </div>
+            <form id="sp-search" class="phrase">
+              <input id="sp-q" maxlength="120" placeholder="Buscar en Spotify" />
+              <button type="submit">Buscar</button>
+            </form>
+            <p class="hint">La búsqueda se abre en la app de Spotify del PC, sin cambiar su tamaño.</p>
+          </article>
         </div>
 
         <div id="view-clips" class="view" hidden>

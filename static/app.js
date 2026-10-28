@@ -276,14 +276,17 @@ let pointerSocket = null;
 let raw = { x: 0, y: 0 };
 let aimFrame = 0;
 
+let smoothSpeed = 0;
+
 function gainFor(dx, dy) {
   const now = performance.now();
-  const dt = Math.min(40, Math.max(8, lastSample ? now - lastSample : 16));
+  const dt = Math.min(32, Math.max(8, lastSample ? now - lastSample : 16));
   lastSample = now;
   const speed = Math.hypot(dx, dy) / dt;
-  const t = Math.min(1, Math.max(0, (speed - 0.05) / 1.15));
+  smoothSpeed = smoothSpeed * 0.72 + speed * 0.28;
+  const t = Math.min(1, Math.max(0, (smoothSpeed - 0.02) / 0.8));
   const curve = t * t * (3 - 2 * t);
-  return 1.2 + 2.8 * curve;
+  return 2.2 + 3.5 * curve;
 }
 
 function queueMove(dx, dy) {
@@ -349,6 +352,28 @@ function flushPointer() {
     });
 }
 
+let scrollAcc = 0;
+let scrollFlight = false;
+let scrollLive = false;
+
+function flushScroll() {
+  if (scrollFlight || !scrollLive) return;
+  const dy = scrollAcc;
+  scrollAcc = 0;
+  if (!dy) return;
+  scrollFlight = true;
+  fetch("/api/scroll", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dy }),
+  })
+    .catch(() => {})
+    .finally(() => {
+      scrollFlight = false;
+      if (scrollLive && scrollAcc) flushScroll();
+    });
+}
+
 function onPadMove(event) {
   event.preventDefault();
   const prev = pointers.get(event.pointerId);
@@ -376,8 +401,12 @@ function onPadMove(event) {
   }
   if (pointers.size >= 2 || gesture === "scroll") {
     gesture = "scroll";
+    scrollLive = true;
     const dy = event.clientY - prev.y;
-    if (dy) api("/api/scroll", { dy }).catch((err) => say(err.message));
+    if (dy) {
+      scrollAcc += dy;
+      flushScroll();
+    }
   }
 }
 
@@ -393,6 +422,7 @@ pad.addEventListener("pointerdown", (event) => {
     window.clearInterval(poll);
   } else {
     gesture = "scroll";
+    scrollLive = true;
   }
 });
 
@@ -405,6 +435,8 @@ if ("onpointerrawupdate" in window) {
 function endPointer(event) {
   pointers.delete(event.pointerId);
   if (pointers.size > 0) return;
+  scrollLive = false;
+  scrollAcc = 0;
   if (gesture === "tap") api("/api/click", { button: "left" }).catch((err) => say(err.message));
   gesture = "tap";
   travel = 0;
@@ -426,6 +458,34 @@ left.addEventListener("pointerup", () => {
 });
 document.querySelector("#btn-right").addEventListener("click", () => {
   api("/api/click", { button: "right" }).catch((err) => say(err.message));
+});
+
+const nativeType = document.querySelector("#native-type");
+let lastTyped = "";
+document.querySelector("#btn-type").addEventListener("click", () => {
+  if (nativeType.hidden) {
+    nativeType.hidden = false;
+    lastTyped = "";
+    nativeType.value = "";
+    nativeType.focus();
+    say("Teclado del móvil");
+  } else {
+    nativeType.blur();
+    nativeType.hidden = true;
+  }
+});
+nativeType.addEventListener("input", () => {
+  const value = nativeType.value;
+  if (value.startsWith(lastTyped)) {
+    const extra = value.slice(lastTyped.length);
+    if (extra) api("/api/text", { text: extra }).catch((err) => say(err.message));
+  } else if (lastTyped.startsWith(value)) {
+    const removed = lastTyped.length - value.length;
+    for (let i = 0; i < removed; i += 1) api("/api/key", { key: "Backspace" }).catch(() => {});
+  } else if (value) {
+    api("/api/text", { text: value }).catch((err) => say(err.message));
+  }
+  lastTyped = value;
 });
 
 document.querySelector("#vol-down").addEventListener("click", () => {
@@ -505,7 +565,10 @@ function paintKeys() {
   keys.append(arrows);
 }
 
-paintKeys();
+document.querySelector("#show-keys").addEventListener("click", () => {
+  keys.hidden = !keys.hidden;
+  if (!keys.hidden && !keys.childElementCount) paintKeys();
+});
 
 document.querySelector("#phrase").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -554,7 +617,10 @@ document.querySelector("#win-refresh").addEventListener("click", loadWindows);
 
 document.querySelectorAll("[data-win]").forEach((button) => {
   button.addEventListener("click", () => {
-    if (!winId) return;
+    if (!winId) {
+      say("Primero toca una ventana de la lista");
+      return;
+    }
     const action = button.dataset.win;
     if (action === "close" && !closeArmed) {
       closeArmed = true;
@@ -573,7 +639,10 @@ document.querySelectorAll("[data-yt]").forEach((button) => {
   button.addEventListener("click", async () => {
     try {
       const data = await api("/api/youtube", { action: button.dataset.yt });
-      document.querySelector("#yt-title").textContent = data.title || "YouTube";
+      if (data.title) document.querySelector("#yt-title").textContent = data.title;
+      if (typeof data.level === "number") setLevel("yt", data.level);
+      if (button.dataset.yt === "play") flipPlay(button);
+      if (button.dataset.yt === "mute") button.classList.toggle("muted");
     } catch (err) {
       say(err.message);
     }
@@ -584,9 +653,79 @@ document.querySelectorAll("[data-sp]").forEach((button) => {
   button.addEventListener("click", async () => {
     try {
       const data = await api("/api/spotify", { action: button.dataset.sp });
-      document.querySelector("#sp-title").textContent = data.title || "Spotify";
+      if (data.title) document.querySelector("#sp-title").textContent = data.title;
+      if (typeof data.level === "number") setLevel("sp", data.level);
+      if (button.dataset.sp === "play") flipPlay(button);
+      if (button.dataset.sp === "mute") button.classList.toggle("muted");
     } catch (err) {
       say(err.message);
     }
   });
+});
+
+function flipPlay(button) {
+  const pausing = button.textContent === "Play";
+  button.textContent = pausing ? "Pausa" : "Play";
+}
+
+function setLevel(prefix, level) {
+  document.querySelector(`#${prefix}-vol`).value = String(level);
+  document.querySelector(`#${prefix}-level`).textContent = String(level);
+}
+
+document.querySelector("#yt-vol").addEventListener("change", async (event) => {
+  try {
+    const data = await api("/api/youtube", { action: "volume", level: Number(event.target.value) });
+    if (typeof data.level === "number") setLevel("yt", data.level);
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#sp-vol").addEventListener("change", async (event) => {
+  try {
+    const data = await api("/api/spotify", { action: "volume", level: Number(event.target.value) });
+    if (typeof data.level === "number") setLevel("sp", data.level);
+    if (data.title) document.querySelector("#sp-title").textContent = data.title;
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#yt-search").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = document.querySelector("#yt-q").value.trim();
+  if (!query) return;
+  try {
+    const data = await api("/api/youtube", { action: "search", query });
+    const list = document.querySelector("#yt-results");
+    list.replaceChildren();
+    for (const item of data.results || []) {
+      const row = document.createElement("li");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = item.title;
+      button.addEventListener("click", () => {
+        api("/api/youtube", { action: "open", video: item.id }).catch((err) => say(err.message));
+      });
+      row.append(button);
+      list.append(row);
+    }
+    if (!(data.results || []).length) say("Búsqueda abierta en YouTube del PC");
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#sp-search").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const query = document.querySelector("#sp-q").value.trim();
+  if (!query) return;
+  try {
+    const data = await api("/api/spotify", { action: "search", query });
+    if (data.title) document.querySelector("#sp-title").textContent = data.title;
+    say(data.detail || "Búsqueda en Spotify");
+  } catch (err) {
+    say(err.message);
+  }
 });

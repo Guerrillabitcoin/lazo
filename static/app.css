@@ -89,7 +89,7 @@ button:focus-visible, input:focus-visible {
 
 .view { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 
-.cursor-row, .split, .vol, .tabs, .win-actions, .transport, .row-actions {
+.cursor-row, .split, .vol, .tabs, .win-actions, .transport, .row-actions, .tools {
   display: grid;
   gap: 8px;
 }
@@ -121,7 +121,58 @@ button:focus-visible, input:focus-visible {
 
 .split { grid-template-columns: 1fr 1fr; margin-top: 8px; }
 
+.split.three { grid-template-columns: 1fr 1fr 1fr; }
+
 .split button { min-height: 56px; }
+
+.native-type {
+  width: 100%;
+  margin-top: 8px;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.deck {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: #241f1a;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vol-line {
+  display: grid;
+  grid-template-columns: 1fr auto 44px;
+  gap: 8px;
+  align-items: center;
+}
+
+.vol-line span { font-variant-numeric: tabular-nums; min-width: 2ch; }
+
+input[type="range"] { width: 100%; accent-color: var(--copper); }
+
+.icon {
+  min-height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  position: relative;
+}
+
+.icon.muted .wave { display: none; }
+
+.icon.muted::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 2px;
+  background: currentColor;
+  transform: rotate(-35deg);
+}
+
+.tools { grid-template-columns: repeat(3, 1fr); }
 
 #keys { display: flex; flex-direction: column; gap: 6px; }
 

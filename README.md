@@ -1,6 +1,6 @@
-# LaZoo 0.11
+# LaZoo 0.12
 
-Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. La **0.11** devuelve el cursor a pequeño al usar el ratón del PC, y abre una mesa para pegar texto y pasar archivos.
+Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada sale a internet. En Windows el portapapeles y los archivos de la mesa se guardan cifrados para tu usuario.
 
 - Ratón: trackpad, clic, clic derecho, arrastre y scroll
 - Teclado, incluida la ñ, y una frase entera

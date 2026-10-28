@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.11"
+VERSION = "0.12"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -48,8 +48,8 @@ ACTIONS = {
     "volume": lambda body: control.system_volume(body.get("delta", 0)),
     "cursor": lambda body: control.set_cursor_mode(body.get("mode", "normal")),
     "window": lambda body: control.window_action(str(body.get("id", "")), str(body.get("action", ""))),
-    "youtube": lambda body: control.youtube(str(body.get("action", ""))),
-    "spotify": lambda body: control.spotify(str(body.get("action", ""))),
+    "youtube": lambda body: control.youtube(str(body.get("action", "")), body),
+    "spotify": lambda body: control.spotify(str(body.get("action", "")), body),
 }
 
 
