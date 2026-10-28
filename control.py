@@ -879,6 +879,8 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         return _youtube_search(str(extra.get("query", "")))
     if action == "open":
         return _youtube_open(str(extra.get("video", "")))
+    if action == "home":
+        return _youtube_home()
     if action == "volume":
         return _youtube_volume(int(extra.get("level", _levels["youtube"])))
     actions = {
@@ -930,6 +932,13 @@ def _youtube_volume(level: int) -> dict[str, Any]:
     else:
         _levels["youtube"] = level
     return {"detail": "YouTube", "title": row["title"], "level": _levels["youtube"]}
+
+
+def _youtube_home() -> dict[str, Any]:
+    import webbrowser
+
+    webbrowser.open_new("https://www.youtube.com/")
+    return {"detail": "Inicio de YouTube", "title": "Inicio de YouTube", "level": _levels["youtube"]}
 
 
 def _youtube_search(query: str) -> dict[str, Any]:

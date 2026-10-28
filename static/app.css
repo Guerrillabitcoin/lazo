@@ -172,7 +172,7 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
   transform: rotate(-35deg);
 }
 
-.tools { grid-template-columns: repeat(3, 1fr); }
+.tools { grid-template-columns: repeat(2, 1fr); }
 
 #keys { display: flex; flex-direction: column; gap: 6px; }
 
