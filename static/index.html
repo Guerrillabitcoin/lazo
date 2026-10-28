@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Lazo</title>
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <main class="phone">
+      <header class="top">
+        <div>
+          <p class="mark">Lazo</p>
+          <p id="sub" class="sub">Mando de este PC</p>
+        </div>
+        <p id="visor" class="visor">Conecta con el PIN</p>
+      </header>
+
+      <section id="pin" class="panel pin">
+        <label for="pin-input">PIN que salió en el PC</label>
+        <input id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 dígitos" />
+        <button id="pin-go" type="button" class="primary">Entrar</button>
+      </section>
+
+      <section id="app" class="app" hidden>
+        <div id="view-mouse" class="view">
+          <div class="cursor-row" role="group" aria-label="Tamaño del cursor">
+            <button type="button" data-cursor="normal" class="on">Normal</button>
+            <button type="button" data-cursor="large">Grande</button>
+            <button type="button" data-cursor="huge">Enorme</button>
+          </div>
+          <div id="pad" class="pad" role="application" aria-label="Trackpad"></div>
+          <p class="hint">Un dedo mueve · dos dedos desplazan · toque corto hace clic</p>
+          <div class="split">
+            <button id="btn-left" type="button">Clic</button>
+            <button id="btn-right" type="button">Clic derecho</button>
+          </div>
+        </div>
+
+        <div id="view-keys" class="view" hidden>
+          <div id="keys"></div>
+          <form id="phrase" class="phrase">
+            <input id="phrase-input" maxlength="400" placeholder="Escribe una frase y envíala" />
+            <button type="submit">Enviar</button>
+          </form>
+        </div>
+
+        <div id="view-windows" class="view" hidden>
+          <div class="row-actions">
+            <button id="win-refresh" type="button">Actualizar</button>
+          </div>
+          <ul id="windows" class="list"></ul>
+          <div id="win-actions" class="win-actions" hidden>
+            <button type="button" data-win="focus">Al frente</button>
+            <button type="button" data-win="minimize">Minimizar</button>
+            <button type="button" data-win="maximize">Maximizar</button>
+            <button type="button" data-win="snap_left">Izquierda</button>
+            <button type="button" data-win="snap_right">Derecha</button>
+            <button type="button" data-win="close" class="danger">Cerrar</button>
+          </div>
+        </div>
+
+        <div id="view-youtube" class="view" hidden>
+          <p id="yt-title" class="now">Busca una pestaña de YouTube en el PC</p>
+          <div class="transport">
+            <button type="button" data-yt="prev">Anterior</button>
+            <button type="button" data-yt="play" class="primary">Play</button>
+            <button type="button" data-yt="next">Siguiente</button>
+            <button type="button" data-yt="back">−10 s</button>
+            <button type="button" data-yt="forward">+10 s</button>
+            <button type="button" data-yt="full">Pantalla</button>
+            <button type="button" data-yt="voldown">Vol −</button>
+            <button type="button" data-yt="volup">Vol +</button>
+            <button type="button" data-yt="mute">Silencio</button>
+            <button type="button" data-yt="captions">Subtítulos</button>
+            <button type="button" data-yt="theater">Cine</button>
+          </div>
+        </div>
+
+        <div id="view-spotify" class="view" hidden>
+          <p id="sp-title" class="now">Abre Spotify en el PC</p>
+          <div class="transport">
+            <button type="button" data-sp="prev">Anterior</button>
+            <button type="button" data-sp="play" class="primary">Play</button>
+            <button type="button" data-sp="next">Siguiente</button>
+            <button type="button" data-sp="voldown">Vol −</button>
+            <button type="button" data-sp="volup">Vol +</button>
+          </div>
+        </div>
+      </section>
+
+      <footer id="dock" class="dock" hidden>
+        <div class="vol" aria-label="Volumen del sistema">
+          <button id="vol-down" type="button">Vol −</button>
+          <button id="vol-mute" type="button">Mute</button>
+          <button id="vol-up" type="button">Vol +</button>
+        </div>
+        <nav class="tabs" aria-label="Secciones">
+          <button type="button" data-tab="mouse" class="on">Ratón</button>
+          <button type="button" data-tab="keys">Teclas</button>
+          <button type="button" data-tab="windows">Ventanas</button>
+          <button type="button" data-tab="youtube">YouTube</button>
+          <button type="button" data-tab="spotify">Spotify</button>
+        </nav>
+      </footer>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
