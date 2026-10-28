@@ -466,12 +466,13 @@ def _windows_base(size: int) -> int:
     return 32 + (size - 1) * 16
 
 
-def _windows_refresh_cursors() -> None:
+def _windows_refresh_cursors(base: int) -> None:
     user32 = ctypes.windll.user32
+    user32.SystemParametersInfoW.argtypes = [ctypes.c_uint, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+    user32.SystemParametersInfoW.restype = ctypes.c_bool
+    # 0x2029 aplica el tamaño al momento. El tercer valor es el tamaño, no un puntero.
+    user32.SystemParametersInfoW(0x2029, 0, ctypes.c_void_p(int(base)), 0x0001 | 0x0002)
     user32.SystemParametersInfoW(0x0057, 0, None, 0x0001 | 0x0002)
-    user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 500, None)
-    if _which("rundll32"):
-        _run(["rundll32.exe", "user32.dll,UpdatePerUserSystemParameters", "1,", "True"])
 
 
 def _apply_cursor_size(size: Any) -> str:
@@ -487,8 +488,8 @@ def _apply_cursor_size(size: Any) -> str:
             winreg.SetValueEx(key, "CursorSize", 0, winreg.REG_DWORD, cursor)
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Cursors") as key:
             winreg.SetValueEx(key, "CursorBaseSize", 0, winreg.REG_DWORD, base)
-        _windows_refresh_cursors()
-        return "Cursor de Windows cambiado"
+        _windows_refresh_cursors(base)
+        return "Cursor cambiado al momento"
     if SYSTEM == "Darwin":
         result = _run(
             [
@@ -571,7 +572,10 @@ def _windows_list() -> list[dict[str, str]]:
         title = buf.value.strip()
         if not title or title.lower() in _SKIP_TITLES:
             return True
-        rows.append({"id": str(int(hwnd)), "title": title[:180]})
+        pid = ctypes.c_ulong()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        process = _process_name(pid.value)
+        rows.append({"id": str(int(hwnd)), "title": title[:180], "process": process})
         return True
 
     user32.EnumWindows(callback, 0)
@@ -596,6 +600,54 @@ def _win_hotkey(*vks: int) -> None:
         user32.keybd_event(vk, 0, 0, 0)
     for vk in reversed(vks):
         user32.keybd_event(vk, 0, 2, 0)
+
+
+def _process_name(pid: int) -> str:
+    if not pid:
+        return ""
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(0x1000, False, pid)
+    if not handle:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(260)
+        size = ctypes.c_ulong(260)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return ""
+        return buf.value.rsplit("\\", 1)[-1]
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+_BROWSERS = ("chrome.exe", "msedge.exe", "firefox.exe", "opera.exe", "brave.exe")
+
+
+def pick_spotify_window(rows: list[dict[str, str]]) -> dict[str, str] | None:
+    for row in rows:
+        process = row.get("process", "").lower()
+        title = row.get("title", "")
+        title_l = title.lower()
+        if process in _BROWSERS or any(mark in title_l for mark in ("google chrome", "mozilla firefox", "microsoft edge")):
+            continue
+        if process == "spotify.exe" or title_l in {"spotify", "spotify premium", "spotify free"}:
+            return row
+        if not process and "spotify" in title_l:
+            return row
+    return None
+
+
+def _launch_spotify_app() -> None:
+    import os
+
+    candidates = [
+        os.path.expandvars(r"%APPDATA%\Spotify\Spotify.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WindowsApps\Spotify.exe"),
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            subprocess.Popen([path])
+            return
+    subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], close_fds=True)
 
 
 def _windows_action(hwnd: int, action: str) -> str:
@@ -885,10 +937,11 @@ def _linux_spotify(action: str) -> dict[str, str]:
 
 
 def _windows_spotify(action: str) -> dict[str, str]:
-    rows = _windows_list()
-    row = next((item for item in rows if "spotify" in item["title"].lower()), None)
+    row = pick_spotify_window(_windows_list())
     if row is None:
-        raise ControlError("Abre la app de Spotify en este PC")
+        if action != "status":
+            _launch_spotify_app()
+        raise ControlError("Abro la app de Spotify del PC, no la web. Espera un segundo y pulsa otra vez.")
     title = row["title"]
     if title.lower() in {"spotify", "spotify premium", "spotify free"}:
         title = "Spotify"

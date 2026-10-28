@@ -29,6 +29,19 @@ def test_backends() -> None:
             raise SystemExit(f"{system} {display} {wayland}: {got} != {expect}")
 
 
+def test_spotify_skips_web() -> None:
+    web = {"title": "Canción - Spotify - Google Chrome", "process": "chrome.exe"}
+    app = {"title": "Spotify Premium", "process": "Spotify.exe"}
+    got = control.pick_spotify_window([web, app])
+    if got is not app:
+        raise SystemExit(f"eligió la web: {got}")
+    if control.pick_spotify_window([web]) is not None:
+        raise SystemExit("no ignoró Chrome")
+    if control._windows_base(1) != 32 or control._windows_base(15) != 256:
+        raise SystemExit("tamaño de cursor mal calculado")
+    print("spotify nativo y cursor 32/256")
+
+
 def test_hook_speed() -> None:
     seen: list[tuple[int, int]] = []
     control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
@@ -119,6 +132,7 @@ def test_live_channel() -> None:
 if __name__ == "__main__":
     os.environ.setdefault("LAZO_TEST", "1")
     test_backends()
+    test_spotify_skips_web()
     test_hook_speed()
     test_live_channel()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")

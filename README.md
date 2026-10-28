@@ -1,6 +1,6 @@
-# LaZoo 0.8
+# LaZoo 0.9
 
-Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. La versión **0.8** manda el dedo por un canal continuo para que el cursor no se quede atrás.
+Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. La **0.9** afina el dedo, cambia el tamaño del cursor al momento y manda Spotify en su app, no en el navegador.
 
 - Ratón: trackpad, clic, clic derecho, arrastre y scroll
 - Teclado, incluida la ñ, y una frase entera

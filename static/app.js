@@ -138,14 +138,35 @@ let moveFlight = false;
 let lastSample = 0;
 let pointerSocket = null;
 
+let raw = { x: 0, y: 0 };
+let aimFrame = 0;
+
 function gainFor(dx, dy) {
   const now = performance.now();
-  const dt = Math.min(42, Math.max(8, lastSample ? now - lastSample : 16));
+  const dt = Math.min(40, Math.max(8, lastSample ? now - lastSample : 16));
   lastSample = now;
   const speed = Math.hypot(dx, dy) / dt;
-  const t = Math.min(1, speed / 1.05);
+  const t = Math.min(1, Math.max(0, (speed - 0.05) / 1.15));
   const curve = t * t * (3 - 2 * t);
-  return 3.4 + 5.2 * curve;
+  return 1.2 + 2.8 * curve;
+}
+
+function queueMove(dx, dy) {
+  raw.x += dx;
+  raw.y += dy;
+  if (!aimFrame) aimFrame = requestAnimationFrame(applyAim);
+}
+
+function applyAim() {
+  aimFrame = 0;
+  const dx = raw.x;
+  const dy = raw.y;
+  raw = { x: 0, y: 0 };
+  if (!dx && !dy) return;
+  const gain = gainFor(dx, dy);
+  acc.x += dx * gain;
+  acc.y += dy * gain;
+  flushPointer();
 }
 
 function connectPointer() {
@@ -191,13 +212,6 @@ function flushPointer() {
       moveFlight = false;
       flushPointer();
     });
-}
-
-function queueMove(dx, dy) {
-  const gain = gainFor(dx, dy);
-  acc.x += dx * gain;
-  acc.y += dy * gain;
-  flushPointer();
 }
 
 function onPadMove(event) {
