@@ -24,14 +24,13 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-netsh advfirewall firewall show rule name="Lazo" >nul 2>&1
+netsh advfirewall firewall delete rule name="Lazo" >nul 2>&1
+netsh advfirewall firewall add rule name="Lazo" dir=in action=allow protocol=TCP localport=8787 profile=any >nul 2>&1
 if errorlevel 1 (
-  netsh advfirewall firewall add rule name="Lazo" dir=in action=allow protocol=TCP localport=8787 profile=private >nul 2>&1
-  if errorlevel 1 (
-    echo.
-    echo El movil no podra entrar si Windows bloquea Lazo. Acepta el permiso.
-    powershell -NoProfile -Command "Start-Process -Verb RunAs -Wait -FilePath netsh -ArgumentList 'advfirewall','firewall','add','rule','name=Lazo','dir=in','action=allow','protocol=TCP','localport=8787','profile=private'"
-  )
+  echo.
+  echo El movil no entra si Windows bloquea Lazo. Acepta el permiso.
+  powershell -NoProfile -Command "Start-Process -Verb RunAs -Wait -FilePath netsh -ArgumentList 'advfirewall','firewall','delete','rule','name=Lazo'"
+  powershell -NoProfile -Command "Start-Process -Verb RunAs -Wait -FilePath netsh -ArgumentList 'advfirewall','firewall','add','rule','name=Lazo','dir=in','action=allow','protocol=TCP','localport=8787','profile=any'"
 )
 python lazo.py
 echo.

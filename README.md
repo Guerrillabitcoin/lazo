@@ -27,7 +27,9 @@ chmod +x iniciar.sh
 
 En el PC se abre una ventana con un **código QR** y el PIN. En el móvil, con la **misma Wi-Fi** y sin VPN, abre la cámara y apunta al QR. Entra solo, sin escribir la dirección.
 
-Si el móvil no carga la página, Windows está bloqueando Lazo: la primera vez puede pedir permiso. Acéptalo solo para redes privadas. No abras el puerto 8787 en el router.
+No hace falta VPN. El móvil y el PC tienen que estar en la misma Wi-Fi de casa, no en datos móviles. Si Windows pregunta, permite Lazo: la Wi-Fi a veces está marcada como red pública y, si no se permite, el móvil no carga nada.
+
+Si hay dos QR, usa el de **Wi-Fi**. Ignora los que empiezan por `172.`. En el móvil, la dirección empieza por `http://`, no por `https://`.
 
 Cuando Windows pregunte por el firewall, permite las redes privadas. No abras el puerto 8787 en el router: cualquiera de internet podría intentar entrar.
 

@@ -68,22 +68,71 @@ def _rank(ip: str) -> tuple[int, str]:
     return (2, ip)
 
 
-def _ips_from_system() -> set[str]:
-    commands = [["ipconfig"]] if sys.platform == "win32" else [["ip", "-4", "-o", "addr"], ["ifconfig"]]
-    found: set[str] = set()
+SKIP_ADAPTER = (
+    "virtual", "vmware", "vbox", "virtualbox", "hyper-v", "vethernet",
+    "wsl", "docker", "bluetooth", "loopback", "tap-windows", "tailscale",
+    "zerotier", "hamachi", "vpn", "wan miniport", "pseudo", "tun",
+    "npcap", "radmin", "virtual",
+)
+
+
+def _adapter_label(name: str) -> str:
+    low = name.lower()
+    if any(word in low for word in ("wi-fi", "wifi", "wlan", "wireless", "inalámbrica", "inalambrica")):
+        return "Wi-Fi"
+    if "ethernet" in low or "lan" in low:
+        return "Cable"
+    return name[:28] or "Red"
+
+
+def _adapters_from_ipconfig(text: str) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    blocks = re.split(r"\r?\n(?=\S)", text)
+    for block in blocks:
+        lines = [line for line in block.splitlines() if line.strip()]
+        if not lines:
+            continue
+        name = lines[0].strip().rstrip(":")
+        low = name.lower()
+        if any(word in low for word in SKIP_ADAPTER):
+            continue
+        ips: list[str] = []
+        for line in lines[1:]:
+            low_line = line.lower()
+            if "ipv4" not in low_line:
+                continue
+            ips.extend(ip for ip in IP_RE.findall(line) if _private(ip))
+        for ip in ips:
+            found.append((_adapter_label(name), ip))
+    return found
+
+
+def _ips_from_system() -> list[tuple[str, str]]:
+    if sys.platform == "win32":
+        commands = [["ipconfig"]]
+    else:
+        commands = [["ip", "-4", "-o", "addr"], ["ifconfig"]]
     for cmd in commands:
         try:
             out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=3, text=True, errors="replace")
         except (OSError, subprocess.SubprocessError):
             continue
-        found.update(IP_RE.findall(out))
-        if found:
-            break
-    return found
+        if sys.platform == "win32":
+            parsed = _adapters_from_ipconfig(out)
+            if parsed:
+                return parsed
+        else:
+            ips = [ip for ip in IP_RE.findall(out) if _private(ip)]
+            if ips:
+                return [("Red", ip) for ip in ips]
+    return []
 
 
 def lan_ips() -> list[str]:
-    found: set[str] = set()
+    ordered: list[str] = []
+    for _label, ip in _ips_from_system():
+        if ip not in ordered:
+            ordered.append(ip)
     primary = ""
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -92,20 +141,28 @@ def lan_ips() -> list[str]:
         sock.close()
     except OSError:
         pass
-    if primary:
-        found.add(primary)
+    if primary and _private(primary) and primary not in ordered:
+        ordered.append(primary)
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            found.add(info[4][0])
+            ip = info[4][0]
+            if _private(ip) and ip not in ordered:
+                ordered.append(ip)
     except OSError:
         pass
-    found.update(_ips_from_system())
-    private = [ip for ip in found if _private(ip)]
-    private.sort(key=_rank)
-    if primary in private and (_rank(primary)[0] == 0 or not any(_rank(ip)[0] == 0 for ip in private)):
-        private.remove(primary)
-        private.insert(0, primary)
-    return private or ["127.0.0.1"]
+    wifi = [ip for ip in ordered if any(label == "Wi-Fi" and other == ip for label, other in _ips_from_system())]
+    rest = [ip for ip in ordered if ip not in wifi]
+    rest.sort(key=_rank)
+    if primary in rest and _rank(primary)[0] <= 1:
+        rest.remove(primary)
+        rest.insert(0, primary)
+    ordered = wifi + rest
+    return ordered or ["127.0.0.1"]
+
+
+def lan_targets() -> list[tuple[str, str]]:
+    labels = {ip: label for label, ip in _ips_from_system()}
+    return [(labels.get(ip, "Red"), ip) for ip in lan_ips()]
 
 
 def phone_url(ip: str) -> str:
@@ -123,29 +180,24 @@ def qr_svg(url: str) -> str:
 
 
 def connect_page() -> bytes:
-    ips = lan_ips()
+    targets = lan_targets()[:3]
     blocks: list[str] = []
-    for index, ip in enumerate(ips[:3]):
+    for label, ip in targets:
         url = phone_url(ip)
         try:
             svg = qr_svg(url)
         except Exception:
             svg = ""
-        others = "".join(
-            f"<li><a href=\"{escape(phone_url(other))}\">{escape(plain_url(other))}</a></li>"
-            for other in ips
-            if other != ip
-        )
-        extra = f"<p>Si esa no entra, prueba:</p><ul>{others}</ul>" if others else ""
         blocks.append(
             f"""<section class="card">
+              <h2>{escape(label)}</h2>
               {svg or f'<p class="url">{escape(plain_url(ip))}</p>'}
               <p class="pin">{escape(PIN)}</p>
               <p class="url">{escape(plain_url(ip))}</p>
-              {extra}
             </section>"""
         )
-        break
+    if not blocks:
+        blocks.append("<p>No veo una Wi-Fi en este PC.</p>")
     page = f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -153,21 +205,23 @@ def connect_page() -> bytes:
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Conectar Lazo</title>
   <style>
-    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: #141210; color: #f3eee6; font-family: "Segoe UI", system-ui, sans-serif; }}
-    .card {{ width: min(420px, calc(100vw - 32px)); text-align: center; }}
-    svg {{ width: min(320px, 80vw); height: auto; background: #f3eee6; border-radius: 16px; }}
+    body {{ margin: 0; background: #141210; color: #f3eee6; font-family: "Segoe UI", system-ui, sans-serif; }}
+    main {{ max-width: 440px; margin: 0 auto; padding: 28px 16px 48px; text-align: center; }}
     h1 {{ font-weight: 500; font-size: 1.4rem; }}
-    .pin {{ font-size: 2.4rem; letter-spacing: 0.3em; margin: 12px 0 4px; }}
-    .url, li {{ color: #c4b8aa; word-break: break-all; }}
-    a {{ color: #e07a3d; }}
+    h2 {{ font-size: 1rem; font-weight: 500; color: #e07a3d; }}
+    .card {{ margin: 0 auto 28px; }}
+    svg {{ width: min(280px, 78vw); height: auto; background: #f3eee6; border-radius: 16px; }}
+    .pin {{ font-size: 2.2rem; letter-spacing: 0.28em; margin: 12px 0 4px; }}
+    .url {{ color: #c4b8aa; word-break: break-all; }}
+    .note {{ color: #c4b8aa; text-align: left; }}
   </style>
 </head>
 <body>
-  <div>
-    <h1>Escanea con la cámara del móvil</h1>
-    <p>Misma Wi-Fi. Desactiva la VPN en el PC y en el móvil.</p>
+  <main>
+    <h1>Escanea el QR de la Wi-Fi</h1>
+    <p class="note">No hace falta VPN ni internet. El móvil tiene que estar en la misma Wi-Fi de casa, no en datos. Si hay dos QR, usa el que dice Wi-Fi. En el móvil, si Chrome dice que el sitio no es seguro, escribe la dirección de debajo empezando por http://</p>
     {''.join(blocks)}
-  </div>
+  </main>
 </body>
 </html>"""
     return page.encode()
@@ -326,10 +380,10 @@ def main() -> None:
     print("  Lazo está en este PC")
     print(f"  PIN: {PIN}")
     print("  Se abre una ventana con el QR. Escanéalo con la cámara del móvil.")
-    print("  Misma Wi-Fi, sin VPN. Si no se abre, entra aquí en el PC:")
+    print("  Misma Wi-Fi de casa. No hace falta VPN. Si no se abre, entra aquí en el PC:")
     print(f"    http://127.0.0.1:{args.port}/conectar")
-    for url in urls:
-        print(f"  Móvil: {url.split('?')[0]}")
+    for label, ip in lan_targets():
+        print(f"  {label}: {plain_url(ip)}")
     print("  No abras este puerto en el router.")
     print()
     threading.Thread(target=server.serve_forever, daemon=True).start()
