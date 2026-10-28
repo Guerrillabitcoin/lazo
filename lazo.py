@@ -27,6 +27,8 @@ PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
 FAILS = {"n": 0, "until": 0.0}
 FAILS_LOCK = threading.Lock()
+VISITS: list[str] = []
+VISITS_LOCK = threading.Lock()
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 ACTIONS = {
@@ -176,14 +178,23 @@ def plain_url(ip: str) -> str:
 def qr_svg(url: str) -> str:
     import segno
 
-    return segno.make(url, error="m").svg_inline(scale=8, dark="#141210", light="#f3eee6")
+    return segno.make(url, error="l").svg_inline(scale=12, border=4, dark="#000000", light="#ffffff")
+
+
+def note_visit(ip: str) -> None:
+    if ip in ("127.0.0.1", "::1"):
+        return
+    with VISITS_LOCK:
+        if ip not in VISITS:
+            VISITS.append(ip)
+        del VISITS[:-6]
 
 
 def connect_page() -> bytes:
     targets = lan_targets()[:3]
     blocks: list[str] = []
     for label, ip in targets:
-        url = phone_url(ip)
+        url = plain_url(ip)
         try:
             svg = qr_svg(url)
         except Exception:
@@ -191,9 +202,9 @@ def connect_page() -> bytes:
         blocks.append(
             f"""<section class="card">
               <h2>{escape(label)}</h2>
-              {svg or f'<p class="url">{escape(plain_url(ip))}</p>'}
-              <p class="pin">{escape(PIN)}</p>
-              <p class="url">{escape(plain_url(ip))}</p>
+              <div class="qr">{svg or ""}</div>
+              <p class="url">{escape(url)}</p>
+              <p class="hint">PIN {escape(PIN)}</p>
             </section>"""
         )
     if not blocks:
@@ -206,22 +217,36 @@ def connect_page() -> bytes:
   <title>Conectar Lazo</title>
   <style>
     body {{ margin: 0; background: #141210; color: #f3eee6; font-family: "Segoe UI", system-ui, sans-serif; }}
-    main {{ max-width: 440px; margin: 0 auto; padding: 28px 16px 48px; text-align: center; }}
-    h1 {{ font-weight: 500; font-size: 1.4rem; }}
+    main {{ max-width: 480px; margin: 0 auto; padding: 28px 16px 48px; text-align: center; }}
+    h1 {{ font-weight: 500; font-size: 1.5rem; }}
     h2 {{ font-size: 1rem; font-weight: 500; color: #e07a3d; }}
-    .card {{ margin: 0 auto 28px; }}
-    svg {{ width: min(280px, 78vw); height: auto; background: #f3eee6; border-radius: 16px; }}
-    .pin {{ font-size: 2.2rem; letter-spacing: 0.28em; margin: 12px 0 4px; }}
-    .url {{ color: #c4b8aa; word-break: break-all; }}
-    .note {{ color: #c4b8aa; text-align: left; }}
+    .card {{ margin: 0 auto 32px; }}
+    .qr {{ display: inline-block; background: #fff; padding: 12px; border-radius: 16px; }}
+    svg {{ width: min(320px, 86vw); height: auto; }}
+    .url {{ font-size: 1.35rem; color: #fff; word-break: break-all; margin: 14px 0 4px; }}
+    .hint {{ letter-spacing: 0.18em; font-size: 1.2rem; }}
+    .note, #estado {{ color: #c4b8aa; text-align: left; }}
+    #estado {{ font-size: 1.05rem; color: #f3eee6; }}
   </style>
 </head>
 <body>
   <main>
-    <h1>Escanea el QR de la Wi-Fi</h1>
-    <p class="note">No hace falta VPN ni internet. El móvil tiene que estar en la misma Wi-Fi de casa, no en datos. Si hay dos QR, usa el que dice Wi-Fi. En el móvil, si Chrome dice que el sitio no es seguro, escribe la dirección de debajo empezando por http://</p>
+    <h1>Escribe esta dirección en el móvil</h1>
+    <p class="note">Misma Wi-Fi, sin VPN y sin datos. Si el QR no abre nada, abre Chrome y escribe la dirección de abajo. Tiene que empezar por http://</p>
+    <p id="estado">Todavía no llega el móvil.</p>
     {''.join(blocks)}
   </main>
+  <script>
+    async function tick() {{
+      try {{
+        const data = await fetch("/api/seen").then((res) => res.json());
+        if (data.visits && data.visits.length) {{
+          document.querySelector("#estado").textContent = "El móvil ya entró. Escribe el PIN en el móvil.";
+        }}
+      }} catch (_err) {{}}
+    }}
+    setInterval(tick, 2000);
+  </script>
 </body>
 </html>"""
     return page.encode()
@@ -272,6 +297,7 @@ class Handler(BaseHTTPRequestHandler):
         return data
 
     def do_GET(self) -> None:  # noqa: N802
+        note_visit(self.client_address[0])
         path = self.path.split("?", 1)[0]
         if path in ("/", "/index.html"):
             self._file(STATIC / "index.html", "text/html; charset=utf-8")
@@ -289,6 +315,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, body=connect_page(), content_type="text/html; charset=utf-8")
             return
+        if path == "/api/seen":
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._send(404, {"error": "no está"})
+                return
+            self._send(200, {"visits": list(VISITS)})
+            return
+        if path == "/api/windows":
             self._guard(lambda _body: {"windows": control.list_windows()})
             return
         if path == "/api/status":
@@ -297,6 +330,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "no está"})
 
     def do_POST(self) -> None:  # noqa: N802
+        note_visit(self.client_address[0])
         path = self.path.split("?", 1)[0]
         if path == "/api/login":
             self._login()

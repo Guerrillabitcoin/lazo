@@ -25,11 +25,11 @@ chmod +x iniciar.sh
 ./iniciar.sh
 ```
 
-En el PC se abre una ventana con un **código QR** y el PIN. En el móvil, con la **misma Wi-Fi** y sin VPN, abre la cámara y apunta al QR. Entra solo, sin escribir la dirección.
+En el PC se abre una ventana con la dirección, por ejemplo `http://192.168.1.20:8787`, un QR en blanco y negro y el PIN. En el móvil, misma Wi-Fi, abre Chrome y **escribe esa dirección**. Si el QR no abre nada, no importa: escribe la dirección a mano. Empieza por `http://`, no por `https://`. Luego mete el PIN.
 
 No hace falta VPN. El móvil y el PC tienen que estar en la misma Wi-Fi de casa, no en datos móviles. Si Windows pregunta, permite Lazo: la Wi-Fi a veces está marcada como red pública y, si no se permite, el móvil no carga nada.
 
-Si hay dos QR, usa el de **Wi-Fi**. Ignora los que empiezan por `172.`. En el móvil, la dirección empieza por `http://`, no por `https://`.
+Si hay dos direcciones, usa la que dice **Wi-Fi**. Ignora las que empiezan por `172.`. La primera vez Windows pide permiso: acéptalo. Si lo cancelas, el móvil no entra.
 
 Cuando Windows pregunte por el firewall, permite las redes privadas. No abras el puerto 8787 en el router: cualquiera de internet podría intentar entrar.
 
