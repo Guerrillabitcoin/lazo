@@ -14,31 +14,18 @@ No es una web suelta. El navegador del móvil no puede mover el ratón del orden
 
 ## Arranque
 
-Hace falta Python 3.10 o más nuevo.
+Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add python.exe to PATH**.
+
+**Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
+
+**macOS y Linux:** en la carpeta descomprimida:
 
 ```bash
-git clone https://github.com/Guerrillabitcoin/lazo.git
-cd lazo
-python -m venv .venv
+chmod +x iniciar.sh
+./iniciar.sh
 ```
 
-Windows:
-
-```bat
-.venv\Scripts\activate
-pip install -r requirements.txt
-python lazo.py
-```
-
-macOS y Linux:
-
-```bash
-source .venv/bin/activate
-pip install -r requirements.txt
-python lazo.py
-```
-
-En la terminal sale un PIN de 6 cifras y una dirección `http://192.168.x.x:8787`. En el móvil, con la **misma Wi-Fi**, abre esa dirección y mete el PIN.
+En la terminal sale un PIN de 6 cifras y una dirección `http://192.168.x.x:8787`. En el móvil, con la **misma Wi-Fi**, abre esa dirección en el navegador y mete el PIN. El ZIP no se abre en el celular.
 
 Cuando Windows pregunte por el firewall, permite las redes privadas. No abras el puerto 8787 en el router: cualquiera de internet podría intentar entrar.
 
