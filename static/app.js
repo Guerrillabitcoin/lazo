@@ -2,8 +2,6 @@ const visor = document.querySelector("#visor");
 const pinPanel = document.querySelector("#pin");
 const app = document.querySelector("#app");
 const dock = document.querySelector("#dock");
-const home = document.querySelector("#home");
-const sheet = document.querySelector("#sheet");
 const statusBar = document.querySelector("#status");
 const linkLabel = document.querySelector("#link-label");
 
@@ -20,16 +18,16 @@ const views = {
   volume: document.querySelector("#view-volume"),
 };
 
-const CUBES = [
-  { id: "mouse", name: "Ratón", note: "Trackpad" },
-  { id: "windows", name: "Ventanas", note: "Del PC" },
-  { id: "youtube", name: "YouTube", note: "En el navegador" },
-  { id: "spotify", name: "Spotify", note: "La app del PC" },
-  { id: "bridge", name: "Puente Wi-Fi", note: "Fotos y archivos" },
-  { id: "notes", name: "Notas", note: "Copiar y pegar" },
-  { id: "volume", name: "Volumen PC", note: "El del sistema" },
-  { id: "arrange", name: "Personalizar orden", note: "Mueve los cubos" },
+const TOOLS = [
+  { id: "mouse", name: "Ratón" },
+  { id: "bridge", name: "Puente Wi-Fi" },
+  { id: "windows", name: "Ventanas" },
+  { id: "youtube", name: "YouTube" },
+  { id: "spotify", name: "Spotify" },
+  { id: "notes", name: "Notas" },
+  { id: "volume", name: "Volumen" },
 ];
+const PINNED = ["mouse", "bridge"];
 
 let tab = "mouse";
 let winId = "";
@@ -101,23 +99,18 @@ function showPin() {
 }
 
 function showHome() {
-  sheet.hidden = true;
-  home.hidden = false;
-  Object.values(views).forEach((view) => {
-    view.hidden = true;
-  });
-  tab = "";
+  openCube("mouse");
 }
 
 function openCube(id) {
   tab = id;
-  home.hidden = true;
-  sheet.hidden = false;
   Object.entries(views).forEach(([name, view]) => {
     view.hidden = name !== id;
   });
+  dock.querySelectorAll("button").forEach((button) => {
+    button.classList.toggle("on", button.dataset.cube === id);
+  });
   if (id === "windows") loadWindows();
-  if (id === "youtube") say("YouTube en el navegador del PC");
   if (id === "spotify") refreshStatus();
   if (id === "notes" || id === "bridge") syncClipboard();
 }
@@ -125,9 +118,9 @@ function openCube(id) {
 function showApp() {
   pinPanel.hidden = true;
   app.hidden = false;
-  if (dock) dock.hidden = true;
+  dock.hidden = false;
   setLink("on");
-  showHome();
+  openCube(tab || "mouse");
   if (visor.textContent === "Conectando…") say("Listo");
   refreshStatus();
   poll = window.setInterval(refreshStatus, 4000);
@@ -191,7 +184,7 @@ function renderClips(items) {
   if (!items.length) {
     const empty = document.createElement("li");
     empty.className = "hint";
-    empty.textContent = "Todavía no hay notas. Pega un texto aquí o en el puente del PC.";
+    empty.textContent = "Sin notas";
     list.append(empty);
     return;
   }
@@ -442,8 +435,6 @@ async function login() {
 }
 
 let order = loadOrder();
-let arranging = false;
-let pickedCube = "";
 
 function loadOrder() {
   let saved = [];
@@ -452,64 +443,68 @@ function loadOrder() {
   } catch (_err) {
     saved = [];
   }
-  const known = CUBES.map((cube) => cube.id);
-  const next = saved.filter((id) => known.includes(id));
+  const known = TOOLS.map((tool) => tool.id);
+  const rest = saved.filter((id) => known.includes(id) && !PINNED.includes(id));
   known.forEach((id) => {
-    if (!next.includes(id)) next.push(id);
+    if (!PINNED.includes(id) && !rest.includes(id)) rest.push(id);
   });
-  return next;
+  return [...PINNED, ...rest];
 }
 
-function renderCubes() {
-  home.classList.toggle("arrange", arranging);
-  home.replaceChildren();
+function dragTool(event) {
+  const button = event.currentTarget;
+  const startY = event.clientY;
+  let lastY = startY;
+  let dragged = false;
+  button.setPointerCapture(event.pointerId);
+  function move(ev) {
+    const dy = ev.clientY - startY;
+    if (!dragged && Math.abs(dy) < 8) return;
+    dragged = true;
+    const down = ev.clientY >= lastY;
+    lastY = ev.clientY;
+    const sibling = down ? button.nextElementSibling : button.previousElementSibling;
+    if (!sibling || PINNED.includes(sibling.dataset.cube)) return;
+    const box = sibling.getBoundingClientRect();
+    if (down && ev.clientY > box.top + box.height * 0.45) dock.insertBefore(sibling, button);
+    else if (!down && ev.clientY < box.bottom - box.height * 0.45) dock.insertBefore(button, sibling);
+  }
+  function stop() {
+    button.removeEventListener("pointermove", move);
+    button.removeEventListener("pointerup", stop);
+    button.removeEventListener("pointercancel", stop);
+    if (!dragged) return;
+    order = [...dock.querySelectorAll("button")].map((item) => item.dataset.cube);
+    localStorage.setItem("lazo-order", JSON.stringify(order));
+    button.dataset.moved = "1";
+  }
+  button.addEventListener("pointermove", move);
+  button.addEventListener("pointerup", stop);
+  button.addEventListener("pointercancel", stop);
+}
+
+function renderDock() {
+  dock.replaceChildren();
   order.forEach((id) => {
-    const cube = CUBES.find((item) => item.id === id);
+    const tool = TOOLS.find((item) => item.id === id);
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "cube";
     button.dataset.cube = id;
-    const title = document.createElement("b");
-    title.textContent = arranging && id === "arrange" ? "Listo" : cube.name;
-    const note = document.createElement("small");
-    note.textContent = arranging && id !== "arrange" ? "Toca dos para cambiar" : cube.note;
-    button.classList.toggle("drag", arranging && id === pickedCube);
-    button.append(title, note);
+    button.textContent = tool.name;
+    button.classList.toggle("on", id === tab);
     button.addEventListener("click", () => {
-      if (id === "arrange") {
-        arranging = !arranging;
-        pickedCube = "";
-        renderCubes();
+      if (button.dataset.moved === "1") {
+        button.dataset.moved = "";
         return;
       }
-      if (!arranging) {
-        openCube(id);
-        return;
-      }
-      if (!pickedCube) {
-        pickedCube = id;
-        renderCubes();
-        return;
-      }
-      if (pickedCube === id) {
-        pickedCube = "";
-        renderCubes();
-        return;
-      }
-      const from = order.indexOf(pickedCube);
-      const to = order.indexOf(id);
-      order.splice(from, 1);
-      order.splice(to, 0, pickedCube);
-      localStorage.setItem("lazo-order", JSON.stringify(order));
-      pickedCube = "";
-      renderCubes();
+      openCube(id);
     });
-    home.append(button);
+    if (!PINNED.includes(id)) button.addEventListener("pointerdown", dragTool);
+    dock.append(button);
   });
 }
 
-renderCubes();
-document.querySelector("#back").addEventListener("click", showHome);
+renderDock();
 
 const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
 const keyFromLink = hash.get("k") || localStorage.getItem("lazo-key") || "";
