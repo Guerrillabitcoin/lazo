@@ -173,9 +173,28 @@ button:focus-visible, input:focus-visible {
 
 .vol { grid-template-columns: repeat(3, 1fr); }
 
-.tabs { grid-template-columns: repeat(5, 1fr); margin-top: 8px; }
+.tabs { grid-template-columns: repeat(6, 1fr); margin-top: 8px; }
 
-.tabs button { font-size: 12px; padding: 6px 2px; }
+.tabs button { font-size: 11px; padding: 6px 1px; }
+
+.clip {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  margin-bottom: 6px;
+  white-space: normal;
+}
+
+.clip b {
+  display: block;
+  font-weight: 500;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.clip small { color: var(--fog); }
 
 @media (prefers-reduced-motion: reduce) {
   button:active { transform: none; }

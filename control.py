@@ -3,20 +3,30 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import platform
+import secrets
 import shutil
 import subprocess
 import threading
+import time
+from pathlib import Path
 from typing import Any
 
 SYSTEM = platform.system()  # Windows, Darwin, Linux
 
 _lock = threading.Lock()
 _mouse_lock = threading.Lock()
+_clip_lock = threading.Lock()
 _mouse = None
 _keyboard = None
 _cursor_mode = "normal"
 _saved_cursor: Any = None
+_history_path = Path(__file__).with_name("clipboard-history.json")
+_history: list[dict[str, Any]] = []
+_history_loaded = False
+_CLIP_LIMIT = 40
+_CLIP_CHARS = 8000
 
 
 class ControlError(Exception):
@@ -973,3 +983,105 @@ def status() -> dict[str, Any]:
         "cursor": _cursor_mode,
         "spotify": now,
     }
+
+
+def set_history_path(path: Path) -> None:
+    global _history_path, _history, _history_loaded
+    _history_path = Path(path)
+    _history = []
+    _history_loaded = False
+
+
+def clipboard_history(text: str | None = None) -> dict[str, Any]:
+    current = _read_clipboard_text() if text is None else text
+    current = current.replace("\x00", "")
+    if len(current) > _CLIP_CHARS:
+        current = current[:_CLIP_CHARS]
+    with _clip_lock:
+        _load_history()
+        if current.strip() and (not _history or _history[0].get("text") != current):
+            _history.insert(
+                0,
+                {"id": secrets.token_hex(4), "text": current, "at": int(time.time())},
+            )
+            del _history[_CLIP_LIMIT:]
+            _save_history()
+        return {"items": [dict(item) for item in _history]}
+
+
+def _load_history() -> None:
+    global _history_loaded
+    if _history_loaded:
+        return
+    _history_loaded = True
+    try:
+        raw = json.loads(_history_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(raw, list):
+        return
+    for item in raw:
+        if isinstance(item, dict) and isinstance(item.get("text"), str) and item["text"].strip():
+            _history.append(
+                {
+                    "id": str(item.get("id") or secrets.token_hex(4)),
+                    "text": str(item["text"])[:_CLIP_CHARS],
+                    "at": int(item.get("at") or 0),
+                }
+            )
+        if len(_history) >= _CLIP_LIMIT:
+            break
+
+
+def _save_history() -> None:
+    try:
+        _history_path.write_text(json.dumps(_history, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        return
+
+
+def _read_clipboard_text() -> str:
+    try:
+        if SYSTEM == "Windows":
+            return _windows_clipboard()
+        if SYSTEM == "Darwin":
+            result = _run(["pbpaste"])
+            return result.stdout if result.returncode == 0 else ""
+        import os
+
+        if os.environ.get("WAYLAND_DISPLAY") and _which("wl-paste"):
+            result = _run(["wl-paste", "-n"])
+            if result.returncode == 0:
+                return result.stdout
+        if _which("xclip"):
+            result = _run(["xclip", "-selection", "clipboard", "-o"])
+            if result.returncode == 0:
+                return result.stdout
+        if _which("xsel"):
+            result = _run(["xsel", "--clipboard", "--output"])
+            if result.returncode == 0:
+                return result.stdout
+    except Exception:
+        return ""
+    return ""
+
+
+def _windows_clipboard() -> str:
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    if not user32.OpenClipboard(None):
+        return ""
+    try:
+        handle = user32.GetClipboardData(13)
+        if not handle:
+            return ""
+        ptr = kernel32.GlobalLock(handle)
+        if not ptr:
+            return ""
+        try:
+            return ctypes.wstring_at(ptr)
+        finally:
+            kernel32.GlobalUnlock(handle)
+    finally:
+        user32.CloseClipboard()
+

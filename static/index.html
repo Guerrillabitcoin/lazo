@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.9</title>
+    <title>LaZoo 0.10</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
     <main class="phone">
       <header class="top">
         <div>
-          <p class="mark">LaZoo 0.9</p>
+          <p class="mark">LaZoo 0.10</p>
           <p id="sub" class="sub">Mando de este PC</p>
         </div>
         <p id="visor" class="visor">Conecta con el PIN</p>
@@ -87,6 +87,11 @@
             <button type="button" data-sp="volup">Vol +</button>
           </div>
         </div>
+
+        <div id="view-clips" class="view" hidden>
+          <p class="hint">Lo que copies en el PC se queda aquí. Toca uno para llevarlo al móvil.</p>
+          <ul id="clips" class="list"></ul>
+        </div>
       </section>
 
       <footer id="dock" class="dock" hidden>
@@ -101,6 +106,7 @@
           <button type="button" data-tab="windows">Ventanas</button>
           <button type="button" data-tab="youtube">YouTube</button>
           <button type="button" data-tab="spotify">Spotify</button>
+          <button type="button" data-tab="clips">Copias</button>
         </nav>
       </footer>
     </main>

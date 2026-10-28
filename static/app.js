@@ -10,12 +10,14 @@ const views = {
   windows: document.querySelector("#view-windows"),
   youtube: document.querySelector("#view-youtube"),
   spotify: document.querySelector("#view-spotify"),
+  clips: document.querySelector("#view-clips"),
 };
 
 let tab = "mouse";
 let winId = "";
 let closeArmed = false;
 let poll = 0;
+let clipsTimer = 0;
 
 function say(text) {
   visor.textContent = text || "Listo";
@@ -44,6 +46,7 @@ function showPin() {
   app.hidden = true;
   dock.hidden = true;
   window.clearInterval(poll);
+  window.clearInterval(clipsTimer);
 }
 
 function showApp() {
@@ -52,6 +55,8 @@ function showApp() {
   dock.hidden = false;
   refreshStatus();
   poll = window.setInterval(refreshStatus, 4000);
+  syncClipboard();
+  clipsTimer = window.setInterval(syncClipboard, 2500);
   connectPointer();
 }
 
@@ -69,6 +74,70 @@ async function refreshStatus() {
   } catch (_err) {
     /* el visor ya muestra el fallo si hace falta */
   }
+}
+
+function clipTime(at) {
+  if (!at) return "";
+  return new Date(at * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+}
+
+async function copyToPhone(text) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      say("Copiado al móvil");
+      return;
+    }
+  } catch (_err) {
+    /* la Wi-Fi es http y el móvil no deja el portapapeles seguro */
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.focus();
+  area.select();
+  const ok = document.execCommand("copy");
+  area.remove();
+  say(ok ? "Copiado al móvil" : "Mantén pulsado el texto para copiarlo");
+}
+
+function renderClips(items) {
+  const list = document.querySelector("#clips");
+  if (!list) return;
+  list.replaceChildren();
+  if (!items.length) {
+    const empty = document.createElement("li");
+    empty.className = "hint";
+    empty.textContent = "Todavía no hay nada. Copia un texto en el PC.";
+    list.append(empty);
+    return;
+  }
+  for (const item of items) {
+    const row = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "clip";
+    const title = document.createElement("b");
+    title.textContent = item.text;
+    const when = document.createElement("small");
+    when.textContent = clipTime(item.at);
+    button.append(title, when);
+    button.addEventListener("click", () => copyToPhone(item.text));
+    row.append(button);
+    list.append(row);
+  }
+}
+
+async function syncClipboard() {
+  try {
+    const res = await fetch("/api/clipboard");
+    if (res.status === 401) return;
+    const data = await res.json().catch(() => ({}));
+    renderClips(data.items || []);
+  } catch (_err) {}
 }
 
 document.querySelector("#pin-go").addEventListener("click", login);
@@ -112,6 +181,7 @@ document.querySelectorAll("[data-tab]").forEach((button) => {
     if (tab === "windows") loadWindows();
     if (tab === "youtube") say("YouTube en el navegador del PC");
     if (tab === "spotify") refreshStatus();
+    if (tab === "clips") syncClipboard();
   });
 });
 

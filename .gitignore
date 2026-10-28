@@ -2,3 +2,4 @@
 __pycache__/
 *.pyc
 .lazo-pin
+clipboard-history.json

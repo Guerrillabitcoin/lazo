@@ -42,6 +42,28 @@ def test_spotify_skips_web() -> None:
     print("spotify nativo y cursor 32/256")
 
 
+def test_clipboard_memory() -> None:
+    import tempfile
+    from pathlib import Path
+
+    folder = Path(tempfile.mkdtemp())
+    control.set_history_path(folder / "clips.json")
+    control.clipboard_history("uno")
+    again = control.clipboard_history("uno")
+    if len(again["items"]) != 1:
+        raise SystemExit("duplicó el mismo texto")
+    saved = control.clipboard_history("dos\nlineas")
+    texts = [item["text"] for item in saved["items"]]
+    if texts != ["dos\nlineas", "uno"]:
+        raise SystemExit(texts)
+    control.set_history_path(folder / "clips.json")
+    loaded = control.clipboard_history("   ")
+    if [item["text"] for item in loaded["items"]] != ["dos\nlineas", "uno"]:
+        raise SystemExit("no recordó el archivo")
+    control.set_history_path(Path(__file__).with_name("clipboard-history.json"))
+    print("portapapeles con historial")
+
+
 def test_hook_speed() -> None:
     seen: list[tuple[int, int]] = []
     control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
@@ -133,6 +155,7 @@ if __name__ == "__main__":
     os.environ.setdefault("LAZO_TEST", "1")
     test_backends()
     test_spotify_skips_web()
+    test_clipboard_memory()
     test_hook_speed()
     test_live_channel()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")

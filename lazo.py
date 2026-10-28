@@ -25,7 +25,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.9"
+VERSION = "0.10"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -376,6 +376,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/windows":
             self._guard(lambda _body: {"windows": control.list_windows()})
+            return
+        if path == "/api/clipboard":
+            self._guard(lambda _body: control.clipboard_history())
             return
         if path == "/api/status":
             self._guard(lambda _body: control.status())
