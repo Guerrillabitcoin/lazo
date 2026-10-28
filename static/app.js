@@ -132,20 +132,49 @@ const pad = document.querySelector("#pad");
 const pointers = new Map();
 let gesture = "tap";
 let travel = 0;
-let pending = { dx: 0, dy: 0 };
-let frame = 0;
+let acc = { x: 0, y: 0 };
+let moveFlight = false;
+let lastSample = 0;
 
-function flushMove() {
-  frame = 0;
-  const next = pending;
-  pending = { dx: 0, dy: 0 };
-  if (next.dx || next.dy) api("/api/move", next).catch((err) => say(err.message));
+function gainFor(dx, dy) {
+  const now = performance.now();
+  const dt = Math.min(42, Math.max(8, lastSample ? now - lastSample : 16));
+  lastSample = now;
+  const speed = Math.hypot(dx, dy) / dt;
+  const t = Math.min(1, speed / 1.05);
+  const curve = t * t * (3 - 2 * t);
+  return 3.4 + 5.2 * curve;
+}
+
+function pumpMove() {
+  if (moveFlight) return;
+  const dx = Math.trunc(acc.x);
+  const dy = Math.trunc(acc.y);
+  if (!dx && !dy) return;
+  acc.x -= dx;
+  acc.y -= dy;
+  moveFlight = true;
+  fetch("/api/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dx, dy }),
+  })
+    .then((res) => {
+      if (res.status === 401) showPin();
+      return res.text();
+    })
+    .catch(() => {})
+    .finally(() => {
+      moveFlight = false;
+      pumpMove();
+    });
 }
 
 function queueMove(dx, dy) {
-  pending.dx += dx;
-  pending.dy += dy;
-  if (!frame) frame = requestAnimationFrame(flushMove);
+  const gain = gainFor(dx, dy);
+  acc.x += dx * gain;
+  acc.y += dy * gain;
+  pumpMove();
 }
 
 pad.addEventListener("pointerdown", (event) => {
@@ -154,6 +183,8 @@ pad.addEventListener("pointerdown", (event) => {
   if (pointers.size === 1) {
     gesture = "tap";
     travel = 0;
+    lastSample = 0;
+    window.clearInterval(poll);
   } else {
     gesture = "scroll";
   }
@@ -162,17 +193,25 @@ pad.addEventListener("pointerdown", (event) => {
 pad.addEventListener("pointermove", (event) => {
   const prev = pointers.get(event.pointerId);
   if (!prev) return;
-  const dx = event.clientX - prev.x;
-  const dy = event.clientY - prev.y;
+  const samples = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
+  let x = prev.x;
+  let y = prev.y;
+  for (const sample of samples) {
+    const dx = sample.clientX - x;
+    const dy = sample.clientY - y;
+    x = sample.clientX;
+    y = sample.clientY;
+    if (pointers.size >= 2 || gesture === "scroll") continue;
+    travel += Math.hypot(dx, dy);
+    if (travel > 6) gesture = "move";
+    if (dx || dy) queueMove(dx, dy);
+  }
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
   if (pointers.size >= 2 || gesture === "scroll") {
     gesture = "scroll";
-    api("/api/scroll", { dy }).catch((err) => say(err.message));
-    return;
+    const dy = event.clientY - prev.y;
+    if (dy) api("/api/scroll", { dy }).catch((err) => say(err.message));
   }
-  travel += Math.hypot(dx, dy);
-  if (travel > 7) gesture = "move";
-  if (dx || dy) queueMove(dx, dy);
 });
 
 function endPointer(event) {
@@ -181,6 +220,7 @@ function endPointer(event) {
   if (gesture === "tap") api("/api/click", { button: "left" }).catch((err) => say(err.message));
   gesture = "tap";
   travel = 0;
+  poll = window.setInterval(refreshStatus, 4000);
 }
 
 pad.addEventListener("pointerup", endPointer);

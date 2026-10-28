@@ -22,6 +22,8 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
+VERSION = "1.5"
+VERSION_NAME = "Fluido"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -423,7 +425,7 @@ def main() -> None:
     PORT = args.port
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print()
-    print("  Lazo está en este PC")
+    print(f"  Lazo {VERSION_NAME}")
     print(f"  PIN: {PIN}")
     print("  En el PC se abre la dirección. Escríbela en el móvil, no hace falta el QR.")
     print("  Misma Wi-Fi de casa. No hace falta VPN. Si no se abre, entra aquí en el PC:")

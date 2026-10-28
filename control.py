@@ -12,6 +12,7 @@ from typing import Any
 SYSTEM = platform.system()  # Windows, Darwin, Linux
 
 _lock = threading.Lock()
+_mouse_lock = threading.Lock()
 _mouse = None
 _keyboard = None
 _cursor_mode = "normal"
@@ -86,9 +87,9 @@ def _special(name: str):
 
 
 def move_mouse(dx: int, dy: int) -> None:
-    dx = max(-500, min(500, int(dx)))
-    dy = max(-500, min(500, int(dy)))
-    with _lock:
+    dx = max(-4000, min(4000, int(dx)))
+    dy = max(-4000, min(4000, int(dy)))
+    with _mouse_lock:
         if SYSTEM == "Linux" and not _display_ok():
             _ydotool(["mousemove", "-x", str(dx), "-y", str(dy)])
             return
@@ -98,19 +99,19 @@ def move_mouse(dx: int, dy: int) -> None:
 
 def mouse_click(button: str, count: int = 1) -> None:
     count = max(1, min(3, int(count)))
-    with _lock:
+    with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.click(_button(button), count)
 
 
 def mouse_down(button: str) -> None:
-    with _lock:
+    with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.press(_button(button))
 
 
 def mouse_up(button: str) -> None:
-    with _lock:
+    with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.release(_button(button))
 
@@ -124,7 +125,7 @@ def scroll_mouse(dy: int) -> None:
     if steps == 0:
         steps = -1 if dy > 0 else 1
     steps = max(-8, min(8, steps))
-    with _lock:
+    with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.scroll(0, steps)
 

@@ -1,6 +1,15 @@
-# Lazo
+# Lazo Fluido
 
-Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi.
+Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Esta versión se llama **Fluido**: el dedo mueve más y el cursor no se queda atrás.
+
+| Versión | Nombre | Qué cambió |
+| --- | --- | --- |
+| 1.0 | Mando | Ratón, teclado y volumen |
+| 1.1 | QR | Código para entrar |
+| 1.2 | Casa | La Wi-Fi de casa, sin redes virtuales |
+| 1.3 | Dirección | La dirección se escribe si el QR no abre |
+| 1.4 | Entero | El QR ya no se corta |
+| 1.5 | Fluido | Menos retraso y más recorrido |
 
 - Ratón: trackpad, clic, clic derecho, arrastre y scroll
 - Teclado, incluida la ñ, y una frase entera
