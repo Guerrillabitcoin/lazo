@@ -3,27 +3,34 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.18</title>
+    <title>LaZoo 0.19</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
     <main class="phone">
       <header id="status" class="top" data-link="off">
-        <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
+        <div class="brand-col">
+          <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
+          <p class="ver">0.19</p>
+        </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
-          <p id="visor" class="visor">Conecta con el PIN</p>
+          <p id="visor" class="visor"></p>
         </div>
       </header>
 
-      <section id="pin" class="panel pin">
+      <section id="pin" class="panel pin" hidden>
         <label for="pin-input">PIN que salió en el PC</label>
         <input id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="4" placeholder="4 dígitos" />
         <button id="pin-go" type="button" class="primary">Entrar</button>
       </section>
 
       <section id="app" class="app" hidden>
-        <div id="view-mouse" class="view">
+        <div id="home" class="cubes"></div>
+        <div id="sheet" hidden>
+          <button id="back" type="button" class="back">Inicio</button>
+        <div id="view-mouse" class="view" hidden>
+          <p class="hint cursor-label">Tamaño del cursor</p>
           <div class="cursor-row" role="group" aria-label="Tamaño del cursor">
             <button type="button" data-cursor="normal" class="on">Normal</button>
             <button type="button" data-cursor="large">Grande</button>
@@ -39,14 +46,6 @@
           <input id="native-type" class="native-type" inputmode="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Teclado del móvil" />
           <button id="caret-write" type="button" hidden>Escribir en el PC</button>
           <div id="keys" hidden></div>
-        </div>
-
-        <div id="view-keys" class="view" hidden>
-          <p class="hint">Escribe una frase y se manda al PC. El teclado de tu móvil sale al tocar este campo, o al pinchar un campo en el ordenador.</p>
-          <form id="phrase" class="phrase">
-            <input id="phrase-input" maxlength="400" placeholder="Escribe una frase y envíala" />
-            <button type="submit">Enviar</button>
-          </form>
         </div>
 
         <div id="view-windows" class="view" hidden>
@@ -122,45 +121,40 @@
           </article>
         </div>
 
-        <div id="view-clips" class="view" hidden>
-          <p class="hint">Elige fotos o vídeos. Caen en la carpeta Fotos del PC. Si ya estaban, no se copian otra vez.</p>
+        <div id="view-bridge" class="view" hidden>
+          <p class="hint">Fotos y vídeos del móvil, o un archivo. Caen en el PC. Si la foto ya estaba, no se copia otra vez.</p>
           <div class="photo-actions">
             <label class="file-label">Fotos y vídeos<input id="photo-input" type="file" accept="image/*,video/*" multiple hidden /></label>
             <label class="file-label">Carpeta del móvil<input id="photo-dir" type="file" accept="image/*,video/*" webkitdirectory multiple hidden /></label>
+            <label class="file-label">Enviar archivo<input id="file-input" type="file" hidden /></label>
           </div>
           <div id="xfer" class="xfer" hidden>
             <div class="xfer-track"><div id="xfer-bar"></div></div>
             <p id="xfer-stat" class="hint"></p>
           </div>
           <p id="photo-progress" class="hint"></p>
-          <p class="hint">Puente Wi-Fi: pega aquí o en el PC. Toca Copiar en una nota para llevarla al móvil. No entra sola lo que ya estaba copiado antes de abrir.</p>
+          <ul id="files" class="list"></ul>
+        </div>
+
+        <div id="view-notes" class="view" hidden>
+          <p class="hint">Pega aquí o en el PC. Copiar lleva la nota al móvil. Lo que ya estaba copiado al abrir no entra solo.</p>
           <form id="clip-form" class="phrase">
             <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Pega un texto"></textarea>
             <button type="submit">Guardar</button>
           </form>
           <ul id="clips" class="list"></ul>
-          <div class="row-actions">
-            <label class="file-label">Enviar archivo<input id="file-input" type="file" hidden /></label>
+        </div>
+
+        <div id="view-volume" class="view" hidden>
+          <p class="hint">Volumen del PC, no el de YouTube ni el de Spotify.</p>
+          <div class="vol" aria-label="Volumen del sistema">
+            <button id="vol-down" type="button">Vol −</button>
+            <button id="vol-mute" type="button">Mute</button>
+            <button id="vol-up" type="button">Vol +</button>
           </div>
-          <ul id="files" class="list"></ul>
+        </div>
         </div>
       </section>
-
-      <footer id="dock" class="dock" hidden>
-        <div class="vol" aria-label="Volumen del sistema">
-          <button id="vol-down" type="button">Vol −</button>
-          <button id="vol-mute" type="button">Mute</button>
-          <button id="vol-up" type="button">Vol +</button>
-        </div>
-        <nav class="tabs" aria-label="Secciones">
-          <button type="button" data-tab="mouse" class="on">Ratón</button>
-          <button type="button" data-tab="keys">Teclas</button>
-          <button type="button" data-tab="windows">Ventanas</button>
-          <button type="button" data-tab="youtube">YouTube</button>
-          <button type="button" data-tab="spotify">Spotify</button>
-          <button type="button" data-tab="clips">Copias</button>
-        </nav>
-      </footer>
     </main>
     <script src="/seal.js"></script>
     <script src="/app.js"></script>

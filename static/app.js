@@ -2,6 +2,8 @@ const visor = document.querySelector("#visor");
 const pinPanel = document.querySelector("#pin");
 const app = document.querySelector("#app");
 const dock = document.querySelector("#dock");
+const home = document.querySelector("#home");
+const sheet = document.querySelector("#sheet");
 const statusBar = document.querySelector("#status");
 const linkLabel = document.querySelector("#link-label");
 
@@ -10,12 +12,24 @@ let sessionToken = localStorage.getItem("lazo-token") || "";
 
 const views = {
   mouse: document.querySelector("#view-mouse"),
-  keys: document.querySelector("#view-keys"),
   windows: document.querySelector("#view-windows"),
   youtube: document.querySelector("#view-youtube"),
   spotify: document.querySelector("#view-spotify"),
-  clips: document.querySelector("#view-clips"),
+  bridge: document.querySelector("#view-bridge"),
+  notes: document.querySelector("#view-notes"),
+  volume: document.querySelector("#view-volume"),
 };
+
+const CUBES = [
+  { id: "mouse", name: "Ratón", note: "Trackpad" },
+  { id: "windows", name: "Ventanas", note: "Del PC" },
+  { id: "youtube", name: "YouTube", note: "En el navegador" },
+  { id: "spotify", name: "Spotify", note: "La app del PC" },
+  { id: "bridge", name: "Puente Wi-Fi", note: "Fotos y archivos" },
+  { id: "notes", name: "Notas", note: "Copiar y pegar" },
+  { id: "volume", name: "Volumen PC", note: "El del sistema" },
+  { id: "arrange", name: "Personalizar orden", note: "Mueve los cubos" },
+];
 
 let tab = "mouse";
 let winId = "";
@@ -79,24 +93,49 @@ function setLink(mode) {
 function showPin() {
   pinPanel.hidden = false;
   app.hidden = true;
-  dock.hidden = true;
+  if (dock) dock.hidden = true;
   setLink("off");
   window.clearInterval(poll);
   window.clearInterval(clipsTimer);
   window.clearInterval(caretTimer);
 }
 
+function showHome() {
+  sheet.hidden = true;
+  home.hidden = false;
+  Object.values(views).forEach((view) => {
+    view.hidden = true;
+  });
+  tab = "";
+}
+
+function openCube(id) {
+  tab = id;
+  home.hidden = true;
+  sheet.hidden = false;
+  Object.entries(views).forEach(([name, view]) => {
+    view.hidden = name !== id;
+  });
+  if (id === "windows") loadWindows();
+  if (id === "youtube") say("YouTube en el navegador del PC");
+  if (id === "spotify") refreshStatus();
+  if (id === "notes" || id === "bridge") syncClipboard();
+}
+
 function showApp() {
   pinPanel.hidden = true;
   app.hidden = false;
-  dock.hidden = false;
+  if (dock) dock.hidden = true;
   setLink("on");
+  showHome();
+  if (visor.textContent === "Conectando…") say("Listo");
   refreshStatus();
   poll = window.setInterval(refreshStatus, 4000);
   syncClipboard();
   clipsTimer = window.setInterval(syncClipboard, 2500);
   caretTimer = window.setInterval(watchCaret, 700);
   connectPointer();
+  loadWindows();
 }
 
 async function refreshStatus() {
@@ -402,12 +441,82 @@ async function login() {
   }
 }
 
+let order = loadOrder();
+let arranging = false;
+let pickedCube = "";
+
+function loadOrder() {
+  let saved = [];
+  try {
+    saved = JSON.parse(localStorage.getItem("lazo-order") || "[]");
+  } catch (_err) {
+    saved = [];
+  }
+  const known = CUBES.map((cube) => cube.id);
+  const next = saved.filter((id) => known.includes(id));
+  known.forEach((id) => {
+    if (!next.includes(id)) next.push(id);
+  });
+  return next;
+}
+
+function renderCubes() {
+  home.classList.toggle("arrange", arranging);
+  home.replaceChildren();
+  order.forEach((id) => {
+    const cube = CUBES.find((item) => item.id === id);
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "cube";
+    button.dataset.cube = id;
+    const title = document.createElement("b");
+    title.textContent = arranging && id === "arrange" ? "Listo" : cube.name;
+    const note = document.createElement("small");
+    note.textContent = arranging && id !== "arrange" ? "Toca dos para cambiar" : cube.note;
+    button.classList.toggle("drag", arranging && id === pickedCube);
+    button.append(title, note);
+    button.addEventListener("click", () => {
+      if (id === "arrange") {
+        arranging = !arranging;
+        pickedCube = "";
+        renderCubes();
+        return;
+      }
+      if (!arranging) {
+        openCube(id);
+        return;
+      }
+      if (!pickedCube) {
+        pickedCube = id;
+        renderCubes();
+        return;
+      }
+      if (pickedCube === id) {
+        pickedCube = "";
+        renderCubes();
+        return;
+      }
+      const from = order.indexOf(pickedCube);
+      const to = order.indexOf(id);
+      order.splice(from, 1);
+      order.splice(to, 0, pickedCube);
+      localStorage.setItem("lazo-order", JSON.stringify(order));
+      pickedCube = "";
+      renderCubes();
+    });
+    home.append(button);
+  });
+}
+
+renderCubes();
+document.querySelector("#back").addEventListener("click", showHome);
+
 const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
-const keyFromLink = hash.get("k") || sessionStorage.getItem("lazo-key") || "";
+const keyFromLink = hash.get("k") || localStorage.getItem("lazo-key") || "";
 if (keyFromLink) {
   try {
     wireKey = b64urlToBytes(keyFromLink);
-    sessionStorage.setItem("lazo-key", keyFromLink);
+    localStorage.setItem("lazo-key", keyFromLink);
   } catch (_err) {
     wireKey = null;
   }
@@ -418,28 +527,37 @@ if (/^\d{4}$/.test(fromLink)) {
   history.replaceState(null, "", location.pathname);
   login();
 } else if (sessionToken) {
+  pinPanel.hidden = true;
+  say("Conectando…");
   fetch("/api/status", { headers: authHeaders() }).then(async (res) => {
-    if (res.ok) showApp();
-  }).catch(() => {});
+    const data = await readBody(res);
+    const sealed = res.headers.get("content-type") !== "application/json";
+    if (res.status === 401 || (wireKey && sealed && !data.platform)) {
+      sessionToken = "";
+      wireKey = null;
+      localStorage.removeItem("lazo-token");
+      localStorage.removeItem("lazo-key");
+      say("La sesión caducó. Escanea el QR.");
+      showPin();
+      return;
+    }
+    if (!res.ok) {
+      say("Sin respuesta del PC");
+      showPin();
+      return;
+    }
+    showApp();
+    say("Listo");
+  }).catch(() => {
+    say("Sin respuesta del PC");
+    showPin();
+  });
+} else {
+  say("Escanea el QR");
+  showPin();
 }
 
 document.querySelector("#pin-go").addEventListener("click", login);
-
-document.querySelectorAll("[data-tab]").forEach((button) => {
-  button.addEventListener("click", () => {
-    tab = button.dataset.tab;
-    document.querySelectorAll("[data-tab]").forEach((item) => {
-      item.classList.toggle("on", item === button);
-    });
-    Object.entries(views).forEach(([name, view]) => {
-      view.hidden = name !== tab;
-    });
-    if (tab === "windows") loadWindows();
-    if (tab === "youtube") say("YouTube en el navegador del PC");
-    if (tab === "spotify") refreshStatus();
-    if (tab === "clips") syncClipboard();
-  });
-});
 
 document.querySelectorAll("[data-cursor]").forEach((button) => {
   button.addEventListener("click", async () => {
@@ -654,9 +772,12 @@ document.querySelector("#btn-right").addEventListener("click", () => {
 
 const nativeType = document.querySelector("#native-type");
 let lastTyped = "";
-document.querySelector("#btn-type").addEventListener("click", () => {
-  keys.hidden = !keys.hidden;
-  if (!keys.hidden && !keys.childElementCount) paintKeys();
+const typeButton = document.querySelector("#btn-type");
+typeButton.addEventListener("click", () => {
+  const show = keys.hidden;
+  keys.hidden = !show;
+  typeButton.classList.toggle("on", show);
+  if (show && !keys.childElementCount) paintKeys();
 });
 nativeType.addEventListener("blur", () => {
   caretWas = false;
@@ -781,7 +902,7 @@ function paintKeys() {
   keys.append(arrows);
 }
 
-document.querySelector("#phrase").addEventListener("submit", (event) => {
+document.querySelector("#phrase") && document.querySelector("#phrase").addEventListener("submit", (event) => {
   event.preventDefault();
   const input = document.querySelector("#phrase-input");
   const text = input.value;

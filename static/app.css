@@ -56,6 +56,8 @@ button:focus-visible, input:focus-visible {
   background: var(--chassis);
 }
 
+.brand-col { display: flex; flex-direction: column; align-items: flex-start; }
+
 .brand {
   display: flex;
   align-items: baseline;
@@ -65,6 +67,13 @@ button:focus-visible, input:focus-visible {
   font-size: 30px;
   line-height: 1;
   letter-spacing: -0.03em;
+}
+
+.ver {
+  margin: 1px 0 0;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--fog);
 }
 
 .oo { display: inline-flex; align-items: center; }
@@ -144,7 +153,11 @@ button:focus-visible, input:focus-visible {
 
 .cursor-row { grid-template-columns: repeat(3, 1fr); }
 
-.cursor-row .on, .tabs .on { background: var(--copper); color: var(--ink); }
+.cursor-label { margin: 0 0 4px; }
+
+.cursor-row button { min-height: 34px; font-size: 13px; border-radius: 10px; }
+
+.cursor-row .on, .tabs .on, #btn-type.on { background: var(--copper); color: var(--ink); }
 
 .pad {
   position: relative;
@@ -152,9 +165,50 @@ button:focus-visible, input:focus-visible {
   flex: 1;
   min-height: 220px;
   border-radius: 22px;
-  background: var(--pad);
+  background: #efe6da;
   touch-action: none;
-  box-shadow: inset 0 2px 12px rgb(0 0 0 / 0.45);
+  box-shadow: inset 0 0 0 1px #d5c8b8;
+}
+
+.cubes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.cube {
+  min-height: 96px;
+  border-radius: 18px;
+  background: var(--chassis);
+  border: 1px solid var(--line);
+  padding: 14px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cube b {
+  font-family: Georgia, "Times New Roman", serif;
+  font-style: italic;
+  font-size: 22px;
+  font-weight: 500;
+}
+
+.cube small { color: var(--fog); font-size: 12px; }
+
+.cubes.arrange .cube { outline: 1px dashed var(--copper); }
+
+.cube.drag { outline: 2px solid var(--copper); }
+
+.back {
+  align-self: flex-start;
+  min-height: 36px;
+  margin: 12px 0 4px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--copper);
 }
 
 #finger {

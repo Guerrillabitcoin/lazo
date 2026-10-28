@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.18"
+VERSION = "0.19"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -36,6 +36,7 @@ FAILS_LOCK = threading.Lock()
 VISITS: list[str] = []
 VISITS_LOCK = threading.Lock()
 MESA_OPENED = False
+PAIRED = False
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
@@ -331,8 +332,11 @@ def connect_page() -> bytes:
     async function tick() {{
       try {{
         const data = await fetch("/api/seen").then((res) => res.json());
-        if (data.visits && data.visits.length) {{
-          document.querySelector("#estado").textContent = "El móvil ya entró. Escribe el PIN en el móvil.";
+        if (data.paired) {{
+          document.querySelector("#estado").textContent = "Móvil conectado. El PIN ya no hace falta.";
+          document.querySelectorAll(".hint").forEach((el) => {{ el.hidden = true; }});
+        }} else if (data.visits && data.visits.length) {{
+          document.querySelector("#estado").textContent = "El móvil ya entró.";
         }}
       }} catch (_err) {{}}
     }}
@@ -462,7 +466,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.client_address[0] not in ("127.0.0.1", "::1"):
                 self._send(404, {"error": "no está"})
                 return
-            self._send(200, {"visits": list(VISITS)})
+            self._send(200, {"visits": list(VISITS), "paired": PAIRED})
             return
         if path == "/api/windows":
             self._guard(lambda _body: {"windows": control.list_windows()})
@@ -584,6 +588,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(401, {"error": "PIN incorrecto"})
                 return
             FAILS["n"] = 0
+        global PAIRED
+        PAIRED = True
         if self.client_address[0] not in ("127.0.0.1", "::1"):
             maybe_open_mesa()
         payload = json.dumps({"ok": True, "token": TOKEN}).encode()

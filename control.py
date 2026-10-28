@@ -670,6 +670,55 @@ def _user32():
     return user32
 
 
+def _is_foreground(hwnd: int) -> bool:
+    user32 = ctypes.windll.user32
+    user32.GetForegroundWindow.restype = ctypes.c_void_p
+    fg = user32.GetForegroundWindow()
+    return bool(fg) and int(fg) == int(hwnd)
+
+
+def _activate_window(hwnd: int) -> bool:
+    """Pone esa ventana delante de verdad, para que la tecla no caiga en otra app."""
+    user32 = _user32()
+    _force_foreground(hwnd)
+    if not _is_foreground(hwnd):
+        class RECT(ctypes.Structure):
+            _fields_ = [
+                ("left", ctypes.c_long),
+                ("top", ctypes.c_long),
+                ("right", ctypes.c_long),
+                ("bottom", ctypes.c_long),
+            ]
+
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+        rect = RECT()
+        user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.POINTER(RECT)]
+        user32.GetWindowRect.restype = ctypes.c_bool
+        user32.GetCursorPos.argtypes = [ctypes.POINTER(POINT)]
+        user32.GetCursorPos.restype = ctypes.c_bool
+        user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
+        user32.SetCursorPos.restype = ctypes.c_bool
+        if user32.GetWindowRect(_hwnd(hwnd), ctypes.byref(rect)):
+            point = POINT()
+            user32.GetCursorPos(ctypes.byref(point))
+            user32.SetCursorPos(int((rect.left + rect.right) / 2), int(rect.top) + 12)
+            user32.mouse_event(0x0002, 0, 0, 0, 0)
+            user32.mouse_event(0x0004, 0, 0, 0, 0)
+            user32.SetCursorPos(int(point.x), int(point.y))
+            time.sleep(0.05)
+            _force_foreground(hwnd)
+    return _is_foreground(hwnd)
+
+
+def _focus_for_keys(window_id: str) -> bool:
+    if SYSTEM == "Windows":
+        return _activate_window(int(window_id))
+    _focus_unlocked(window_id)
+    return True
+
+
 def _force_foreground(hwnd: int) -> None:
     user32 = _user32()
     handle = _hwnd(hwnd)
@@ -979,8 +1028,9 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         row = _find_youtube_unlocked()
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
-        _focus_unlocked(row["id"])
-    time.sleep(0.12)
+    if not _focus_for_keys(row["id"]):
+        raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
+    time.sleep(0.18)
     with _lock:
         _chord(actions[action])
     if action == "volup":
@@ -996,8 +1046,9 @@ def _youtube_speed(raw: object) -> dict[str, Any]:
         row = _find_youtube_unlocked()
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
-        _focus_unlocked(row["id"])
-    time.sleep(0.12)
+    if not _focus_for_keys(row["id"]):
+        raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
+    time.sleep(0.16)
     # YouTube solo salta 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75 y 2.
     # Bajar del todo y luego subir deja la velocidad exacta, sin abrir ventanas.
     for _ in range(8):
@@ -1073,7 +1124,8 @@ def _youtube_volume(level: int) -> dict[str, Any]:
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
         if steps:
-            _focus_unlocked(row["id"])
+            if not _focus_for_keys(row["id"]):
+                raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
     if steps:
         time.sleep(0.12)
         with _lock:
@@ -1279,16 +1331,21 @@ def _windows_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     if action == "mute":
         target = 0 if _levels["spotify"] else 40
         return _windows_spotify_volume(int(row["id"]), target, title)
-    # Play, anterior y siguiente son teclas globales. No se toca el tamaño de la ventana.
-    keys = {"play": 0xB3, "next": 0xB0, "prev": 0xB1, "volup": None, "voldown": None}
-    if action in ("volup", "voldown"):
-        return _windows_spotify_volume(
-            int(row["id"]),
-            _levels["spotify"] + (10 if action == "volup" else -10),
-            title,
-        )
-    _win_media_key(keys[action])
-    time.sleep(0.32)
+    if not _focus_for_keys(row["id"]):
+        raise ControlError("No pude poner Spotify delante. Toca su ventana en el PC una vez.")
+    time.sleep(0.12)
+    # Teclas de la propia app. La tecla global de reproducción también mueve YouTube.
+    if action == "play":
+        _win_hotkey(0x20)
+    elif action == "next":
+        _win_hotkey(0x11, 0x27)
+    elif action == "prev":
+        _win_hotkey(0x11, 0x25)
+    elif action == "volup":
+        return _windows_spotify_volume(int(row["id"]), _levels["spotify"] + 10, title)
+    elif action == "voldown":
+        return _windows_spotify_volume(int(row["id"]), _levels["spotify"] - 10, title)
+    time.sleep(0.2)
     fresh = pick_spotify_window(_windows_list())
     if fresh is not None:
         title = _spotify_title(fresh)
@@ -1307,7 +1364,8 @@ def _windows_spotify_volume(hwnd: int, level: int, title: str) -> dict[str, Any]
     steps = int(round((level - _levels["spotify"]) / 10))
     steps = max(-10, min(10, steps))
     if steps:
-        _force_foreground(hwnd)
+        if not _focus_for_keys(str(hwnd)):
+            raise ControlError("No pude poner Spotify delante.")
         for _ in range(abs(steps)):
             _win_hotkey(0x11, 0x26 if steps > 0 else 0x28)
             time.sleep(0.03)
