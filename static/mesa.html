@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mesa LaZoo</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #141210;
+        color: #f3eee6;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      main { max-width: 980px; margin: 0 auto; padding: 28px 20px 48px; }
+      h1 {
+        margin: 0;
+        font-family: Georgia, serif;
+        font-style: italic;
+        font-weight: 500;
+        font-size: 2.4rem;
+      }
+      h2 { margin: 0 0 10px; font-size: 1rem; color: #e07a3d; }
+      p { color: #c4b8aa; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+      section { background: #241f1a; border-radius: 18px; padding: 16px; min-height: 420px; }
+      textarea, button, input { font: inherit; color: inherit; }
+      textarea {
+        width: 100%;
+        min-height: 110px;
+        border: 1px solid #4a4036;
+        border-radius: 12px;
+        background: #16130f;
+        padding: 10px 12px;
+        resize: vertical;
+      }
+      button, .drop {
+        border: 0;
+        border-radius: 12px;
+        background: #3a332b;
+        min-height: 44px;
+      }
+      button.primary { background: #e07a3d; color: #141210; font-weight: 650; }
+      .row { display: flex; gap: 8px; margin-top: 8px; }
+      .drop {
+        display: grid;
+        place-items: center;
+        border: 1px dashed #4a4036;
+        color: #c4b8aa;
+        margin-bottom: 10px;
+      }
+      ul { list-style: none; margin: 12px 0 0; padding: 0; }
+      li { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+      li button, li a { flex: 1; }
+      a {
+        color: #f3eee6;
+        text-decoration: none;
+        background: #16130f;
+        border-radius: 12px;
+        padding: 10px 12px;
+      }
+      small { color: #c4b8aa; }
+      @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Mesa</h1>
+      <p>Nube temporal de este PC. El texto y los archivos se quedan en la Wi-Fi. No salen a internet.</p>
+      <div class="grid">
+        <section>
+          <h2>Portapapeles</h2>
+          <textarea id="paste" placeholder="Pega aquí un texto del PC"></textarea>
+          <div class="row"><button id="save" class="primary" type="button">Guardar en el móvil</button></div>
+          <ul id="clips"></ul>
+        </section>
+        <section>
+          <h2>Archivos</h2>
+          <div id="drop" class="drop">Suelta archivos aquí</div>
+          <input id="file" type="file" multiple />
+          <ul id="files"></ul>
+        </section>
+      </div>
+    </main>
+    <script>
+      const paste = document.querySelector("#paste");
+      const clips = document.querySelector("#clips");
+      const files = document.querySelector("#files");
+      let seen = "";
+
+      async function pushText(text) {
+        const clean = text || "";
+        if (!clean.trim() || clean === seen) return;
+        seen = clean;
+        await fetch("/api/clipboard", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: clean }),
+        });
+        load();
+      }
+
+      document.querySelector("#save").addEventListener("click", () => pushText(paste.value));
+      document.addEventListener("paste", (event) => {
+        const text = event.clipboardData && event.clipboardData.getData("text");
+        if (text) pushText(text);
+      });
+
+      async function watchClipboard() {
+        try {
+          const text = await navigator.clipboard.readText();
+          await pushText(text);
+        } catch (_err) {}
+      }
+
+      function stamp(at) {
+        if (!at) return "";
+        return new Date(at * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
+      }
+
+      function size(bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+      }
+
+      async function load() {
+        const data = await fetch("/api/clipboard").then((res) => res.json());
+        clips.replaceChildren();
+        for (const item of data.items || []) {
+          const row = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = item.text.slice(0, 180);
+          button.addEventListener("click", async () => {
+            paste.value = item.text;
+            try { await navigator.clipboard.writeText(item.text); } catch (_err) {}
+          });
+          const when = document.createElement("small");
+          when.textContent = stamp(item.at);
+          row.append(button, when);
+          clips.append(row);
+        }
+        const listed = await fetch("/api/files").then((res) => res.json());
+        files.replaceChildren();
+        for (const item of listed.files || []) {
+          const row = document.createElement("li");
+          const link = document.createElement("a");
+          link.href = "/api/files/" + item.id;
+          link.download = item.name;
+          link.textContent = item.name + " · " + size(item.size);
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.textContent = "Quitar";
+          remove.addEventListener("click", async () => {
+            await fetch("/api/files/" + item.id, { method: "DELETE" });
+            load();
+          });
+          row.append(link, remove);
+          files.append(row);
+        }
+      }
+
+      async function upload(file) {
+        await fetch("/api/files", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "X-Filename": encodeURIComponent(file.name),
+          },
+          body: file,
+        });
+        load();
+      }
+
+      const drop = document.querySelector("#drop");
+      drop.addEventListener("dragover", (event) => event.preventDefault());
+      drop.addEventListener("drop", (event) => {
+        event.preventDefault();
+        for (const file of event.dataTransfer.files) upload(file);
+      });
+      document.querySelector("#file").addEventListener("change", (event) => {
+        for (const file of event.target.files) upload(file);
+        event.target.value = "";
+      });
+      load();
+      setInterval(load, 2000);
+      setInterval(watchClipboard, 2000);
+    </script>
+  </body>
+</html>

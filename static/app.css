@@ -186,12 +186,43 @@ button:focus-visible, input:focus-visible {
 }
 
 .clip b {
-  display: block;
   font-weight: 500;
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+#clip-input {
+  width: 100%;
+  min-height: 72px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--pad);
+  padding: 10px 12px;
+  font-size: 16px;
+  resize: vertical;
+}
+
+.file-label {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  border-radius: 12px;
+  background: var(--key);
+}
+
+.file-row { display: flex; gap: 8px; }
+.file-row a, .file-row button { flex: 1; }
+.file-row a {
+  display: grid;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  background: var(--pad);
+  color: var(--cream);
+  text-decoration: none;
 }
 
 .clip small { color: var(--fog); }

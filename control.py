@@ -123,6 +123,7 @@ def move_mouse(dx: int, dy: int) -> None:
     dy = max(-4000, min(4000, int(dy)))
     if dx == 0 and dy == 0:
         return
+    _mark_injected()
     if _move_hook is not None:
         _move_hook(dx, dy)
         return
@@ -410,14 +411,11 @@ def _ydotool(args: list[str]) -> None:
 
 
 def set_cursor_mode(mode: str) -> dict[str, Any]:
-    global _cursor_mode, _saved_cursor
+    global _cursor_mode
     if mode not in ("normal", "large", "huge"):
         raise ControlError("modo de cursor no válido")
     with _lock:
-        if _saved_cursor is None:
-            _saved_cursor = _read_cursor_size()
-        target = _saved_cursor if mode == "normal" else _cursor_target(mode)
-        detail = _apply_cursor_size(target)
+        detail = _apply_cursor_size(_cursor_target(mode))
         _cursor_mode = mode
     labels = {"normal": "Cursor normal", "large": "Cursor grande", "huge": "Cursor enorme"}
     return {"mode": mode, "label": labels[mode], "detail": detail}
@@ -1069,8 +1067,20 @@ def _read_clipboard_text() -> str:
 def _windows_clipboard() -> str:
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
+    user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+    user32.OpenClipboard.restype = ctypes.c_bool
+    user32.CloseClipboard.argtypes = []
+    user32.CloseClipboard.restype = ctypes.c_bool
+    user32.GetClipboardData.argtypes = [ctypes.c_uint]
+    user32.GetClipboardData.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalUnlock.restype = ctypes.c_bool
     if not user32.OpenClipboard(None):
-        return ""
+        time.sleep(0.02)
+        if not user32.OpenClipboard(None):
+            return ""
     try:
         handle = user32.GetClipboardData(13)
         if not handle:
@@ -1084,4 +1094,148 @@ def _windows_clipboard() -> str:
             kernel32.GlobalUnlock(handle)
     finally:
         user32.CloseClipboard()
+
+
+_injected_until = 0.0
+_hook_proc = None
+
+
+def _mark_injected() -> None:
+    global _injected_until
+    _injected_until = time.time() + 0.2
+
+
+def watch_physical_mouse() -> None:
+    if SYSTEM != "Windows":
+        return
+    threading.Thread(target=_physical_mouse_loop, name="lazo-mouse", daemon=True).start()
+
+
+def _physical_mouse_loop() -> None:
+    global _hook_proc
+    user32 = ctypes.windll.user32
+    user32.CallNextHookEx.restype = ctypes.c_long
+    user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t, ctypes.c_void_p]
+
+    class POINT(ctypes.Structure):
+        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+    class MSLLHOOKSTRUCT(ctypes.Structure):
+        _fields_ = [
+            ("pt", POINT),
+            ("mouseData", ctypes.c_ulong),
+            ("flags", ctypes.c_ulong),
+            ("time", ctypes.c_ulong),
+            ("dwExtraInfo", ctypes.c_size_t),
+        ]
+
+    def _proc(code, wparam, lparam):
+        if code >= 0 and lparam:
+            flags = ctypes.cast(lparam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents.flags
+            real = not (flags & 0x01 or flags & 0x02)
+            if real and time.time() > _injected_until and _cursor_mode != "normal":
+                try:
+                    set_cursor_mode("normal")
+                except ControlError:
+                    pass
+        return user32.CallNextHookEx(None, code, wparam, lparam)
+
+    hook_type = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, ctypes.c_size_t, ctypes.c_void_p)
+    _hook_proc = hook_type(_proc)
+    user32.SetWindowsHookExW.restype = ctypes.c_void_p
+    user32.SetWindowsHookExW(14, _hook_proc, None, 0)
+    msg = ctypes.wintypes.MSG()
+    while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+        user32.TranslateMessage(ctypes.byref(msg))
+        user32.DispatchMessageW(ctypes.byref(msg))
+
+
+_files_dir = Path(__file__).with_name("nube")
+_FILE_CAP = 80 * 1024 * 1024
+_FILE_TOTAL = 400 * 1024 * 1024
+
+
+def set_files_dir(path: Path) -> None:
+    global _files_dir
+    _files_dir = Path(path)
+
+
+def list_files() -> dict[str, Any]:
+    return {"files": _file_rows()}
+
+
+def save_file(name: str, data: bytes) -> dict[str, Any]:
+    if not isinstance(data, bytes) or not data:
+        raise ControlError("archivo vacío")
+    if len(data) > _FILE_CAP:
+        raise ControlError("El archivo pasa de 80 MB")
+    clean = "".join(ch for ch in name if ch.isalnum() or ch in "._- ").strip()[:80] or "archivo"
+    _files_dir.mkdir(parents=True, exist_ok=True)
+    rows = _file_rows()
+    total = sum(int(row["size"]) for row in rows) + len(data)
+    if total > _FILE_TOTAL:
+        raise ControlError("La mesa está llena. Quita algún archivo.")
+    file_id = secrets.token_hex(4)
+    (_files_dir / file_id).write_bytes(data)
+    rows.insert(0, {"id": file_id, "name": clean, "size": len(data), "at": int(time.time())})
+    _write_file_rows(rows[:30])
+    return {"file": rows[0]}
+
+
+def read_file(file_id: str) -> tuple[str, bytes]:
+    row = _file_row(file_id)
+    if row is None:
+        raise ControlError("ese archivo ya no está")
+    return row["name"], (_files_dir / row["id"]).read_bytes()
+
+
+def delete_file(file_id: str) -> dict[str, Any]:
+    row = _file_row(file_id)
+    rows = [item for item in _file_rows() if item["id"] != file_id]
+    if row is not None:
+        path = _files_dir / row["id"]
+        if path.is_file():
+            path.unlink()
+    _write_file_rows(rows)
+    return {"ok": True}
+
+
+def _file_row(file_id: str) -> dict[str, Any] | None:
+    if not isinstance(file_id, str) or len(file_id) != 8 or any(ch not in "0123456789abcdef" for ch in file_id):
+        return None
+    for row in _file_rows():
+        if row["id"] == file_id:
+            return row
+    return None
+
+
+def _file_rows() -> list[dict[str, Any]]:
+    try:
+        raw = json.loads((_files_dir / "index.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    rows = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        file_id = str(item.get("id", ""))
+        if len(file_id) != 8 or not (_files_dir / file_id).is_file():
+            continue
+        rows.append(
+            {
+                "id": file_id,
+                "name": str(item.get("name") or "archivo")[:80],
+                "size": int(item.get("size") or 0),
+                "at": int(item.get("at") or 0),
+            }
+        )
+    return rows
+
+
+def _write_file_rows(rows: list[dict[str, Any]]) -> None:
+    _files_dir.mkdir(parents=True, exist_ok=True)
+    (_files_dir / "index.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+
 

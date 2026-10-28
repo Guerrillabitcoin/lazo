@@ -20,12 +20,13 @@ import webbrowser
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.10"
+VERSION = "0.11"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -33,6 +34,7 @@ FAILS = {"n": 0, "until": 0.0}
 FAILS_LOCK = threading.Lock()
 VISITS: list[str] = []
 VISITS_LOCK = threading.Lock()
+MESA_OPENED = False
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 ACTIONS = {
@@ -243,6 +245,7 @@ def connect_page() -> bytes:
     .url {{ font-size: 1.35rem; color: #fff; word-break: break-all; margin: 14px 0 4px; }}
     .hint {{ letter-spacing: 0.18em; font-size: 1.2rem; }}
     .note, #estado {{ color: #c4b8aa; text-align: left; }}
+    a {{ color: #e07a3d; }}
     #estado {{ font-size: 1.05rem; color: #f3eee6; }}
   </style>
 </head>
@@ -251,6 +254,7 @@ def connect_page() -> bytes:
     <h1>Escribe esta dirección en el móvil</h1>
     <p class="note">Misma Wi-Fi, sin VPN y sin datos. Si el QR no abre nada, abre Chrome y escribe la dirección de abajo. Tiene que empezar por http://</p>
     <p id="estado">Todavía no llega el móvil.</p>
+    <p class="note"><a href="/mesa">Abrir la mesa</a> para pegar texto y soltar archivos.</p>
     {''.join(blocks)}
   </main>
   <script>
@@ -321,6 +325,8 @@ class Handler(BaseHTTPRequestHandler):
         return
 
     def _authed(self) -> bool:
+        if self.client_address[0] in ("127.0.0.1", "::1"):
+            return True
         got = cookies(self.headers.get("Cookie")).get("lazo", "")
         return bool(got) and hmac.compare_digest(got, TOKEN)
 
@@ -361,6 +367,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/app.js":
             self._file(STATIC / "app.js", "text/javascript; charset=utf-8")
             return
+        if path == "/mesa":
+            self._file(STATIC / "mesa.html", "text/html; charset=utf-8")
+            return
         if path == "/conectar":
             host = self.client_address[0]
             if host not in ("127.0.0.1", "::1"):
@@ -379,6 +388,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/clipboard":
             self._guard(lambda _body: control.clipboard_history())
+            return
+        if path == "/api/files":
+            self._guard(lambda _body: control.list_files())
+            return
+        if path.startswith("/api/files/"):
+            self._download(path.rsplit("/", 1)[-1])
             return
         if path == "/api/status":
             self._guard(lambda _body: control.status())
@@ -433,6 +448,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/login":
             self._login()
             return
+        if path == "/api/clipboard":
+            self._push_clip()
+            return
+        if path == "/api/files":
+            self._upload()
+            return
         action = path.removeprefix("/api/")
         if action not in ACTIONS:
             self._send(404, {"error": "no está"})
@@ -465,6 +486,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(401, {"error": "PIN incorrecto"})
                 return
             FAILS["n"] = 0
+        if self.client_address[0] not in ("127.0.0.1", "::1"):
+            maybe_open_mesa()
         self.send_response(200)
         data = json.dumps({"ok": True}).encode()
         self.send_header("Content-Type", "application/json")
@@ -495,6 +518,71 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._send(200, {"ok": True, "detail": result or ""})
 
+    def _push_clip(self) -> None:
+        if not self._authed():
+            self._send(401, {"error": "Entra con el PIN"})
+            return
+        try:
+            body = self._read_json()
+            result = control.clipboard_history(str(body.get("text", "")))
+        except control.ControlError as exc:
+            self._send(400, {"error": str(exc)})
+            return
+        self._send(200, result)
+
+    def _upload(self) -> None:
+        if not self._authed():
+            self._send(401, {"error": "Entra con el PIN"})
+            return
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length <= 0 or length > 80 * 1024 * 1024:
+            self._send(400, {"error": "El archivo pasa de 80 MB o está vacío"})
+            return
+        data = self.rfile.read(length)
+        name = unquote(self.headers.get("X-Filename", "archivo"))
+        try:
+            self._send(200, control.save_file(name, data))
+        except control.ControlError as exc:
+            self._send(400, {"error": str(exc)})
+
+    def _download(self, file_id: str) -> None:
+        if not self._authed():
+            self._send(401, {"error": "Entra con el PIN"})
+            return
+        try:
+            name, data = control.read_file(file_id)
+        except control.ControlError as exc:
+            self._send(404, {"error": str(exc)})
+            return
+        except OSError:
+            self._send(404, {"error": "ese archivo ya no está"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(name)}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        path = self.path.split("?", 1)[0]
+        if not path.startswith("/api/files/"):
+            self._send(404, {"error": "no está"})
+            return
+        if not self._authed():
+            self._send(401, {"error": "Entra con el PIN"})
+            return
+        self._send(200, control.delete_file(path.rsplit("/", 1)[-1]))
+
+
+def maybe_open_mesa() -> None:
+    global MESA_OPENED
+    if MESA_OPENED:
+        return
+    MESA_OPENED = True
+    webbrowser.open(f"http://127.0.0.1:{PORT}/mesa")
+
 
 def main() -> None:
     global PIN, PORT
@@ -515,9 +603,15 @@ def main() -> None:
     print(f"    http://127.0.0.1:{args.port}/conectar")
     for label, ip in lan_targets():
         print(f"  {label}: {plain_url(ip)}")
+    print("  Al entrar el móvil se abre la mesa para pegar texto y soltar archivos.")
     print("  No abras este puerto en el router.")
     print()
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        control.set_cursor_mode("normal")
+    except Exception:
+        pass
+    control.watch_physical_mouse()
     if not args.no_browser:
         threading.Timer(0.3, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/conectar")).start()
     try:

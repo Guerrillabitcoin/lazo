@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.10</title>
+    <title>LaZoo 0.11</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
     <main class="phone">
       <header class="top">
         <div>
-          <p class="mark">LaZoo 0.10</p>
+          <p class="mark">LaZoo 0.11</p>
           <p id="sub" class="sub">Mando de este PC</p>
         </div>
         <p id="visor" class="visor">Conecta con el PIN</p>
@@ -89,8 +89,16 @@
         </div>
 
         <div id="view-clips" class="view" hidden>
-          <p class="hint">Lo que copies en el PC se queda aquí. Toca uno para llevarlo al móvil.</p>
+          <p class="hint">En el PC se abre la mesa. Pega ahí, o pega aquí, y toca un texto para llevarlo al móvil.</p>
+          <form id="clip-form" class="phrase">
+            <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Pega un texto"></textarea>
+            <button type="submit">Guardar</button>
+          </form>
           <ul id="clips" class="list"></ul>
+          <div class="row-actions">
+            <label class="file-label">Enviar archivo<input id="file-input" type="file" hidden /></label>
+          </div>
+          <ul id="files" class="list"></ul>
         </div>
       </section>
 

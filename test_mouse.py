@@ -64,6 +64,26 @@ def test_clipboard_memory() -> None:
     print("portapapeles con historial")
 
 
+def test_mesa_and_small_cursor() -> None:
+    import tempfile
+    from pathlib import Path
+
+    folder = Path(tempfile.mkdtemp())
+    control.set_files_dir(folder)
+    saved = control.save_file("../nota.txt", b"hola")
+    file_id = saved["file"]["id"]
+    name, data = control.read_file(file_id)
+    if data != b"hola" or "/" in name or "\\" in name:
+        raise SystemExit(f"archivo inseguro: {name}")
+    control.delete_file(file_id)
+    control.delete_file("../secret")
+    if control.list_files()["files"]:
+        raise SystemExit("no borró el archivo")
+    if control._windows_base(1) != 32 or control._windows_base(15) != 256:
+        raise SystemExit("el cursor normal no es el pequeño")
+    print("mesa y cursor pequeño")
+
+
 def test_hook_speed() -> None:
     seen: list[tuple[int, int]] = []
     control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
@@ -156,6 +176,7 @@ if __name__ == "__main__":
     test_backends()
     test_spotify_skips_web()
     test_clipboard_memory()
+    test_mesa_and_small_cursor()
     test_hook_speed()
     test_live_channel()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")

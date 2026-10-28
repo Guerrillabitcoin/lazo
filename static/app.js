@@ -131,14 +131,79 @@ function renderClips(items) {
   }
 }
 
+function renderFiles(items) {
+  const list = document.querySelector("#files");
+  if (!list) return;
+  list.replaceChildren();
+  for (const item of items) {
+    const row = document.createElement("li");
+    row.className = "file-row";
+    const link = document.createElement("a");
+    link.href = "/api/files/" + item.id;
+    link.download = item.name;
+    const kb = item.size < 1024 ? item.size + " B" : Math.max(1, Math.round(item.size / 1024)) + " KB";
+    link.textContent = item.name + " · " + kb;
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.textContent = "Quitar";
+    remove.addEventListener("click", async () => {
+      await fetch("/api/files/" + item.id, { method: "DELETE" });
+      syncClipboard();
+    });
+    row.append(link, remove);
+    list.append(row);
+  }
+}
+
 async function syncClipboard() {
   try {
     const res = await fetch("/api/clipboard");
     if (res.status === 401) return;
     const data = await res.json().catch(() => ({}));
     renderClips(data.items || []);
+    const files = await fetch("/api/files");
+    if (files.status === 401) return;
+    const listed = await files.json().catch(() => ({}));
+    renderFiles(listed.files || []);
   } catch (_err) {}
 }
+
+document.querySelector("#clip-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.querySelector("#clip-input");
+  const text = input.value;
+  if (!text.trim()) return;
+  try {
+    await api("/api/clipboard", { text });
+    input.value = "";
+    syncClipboard();
+    say("Guardado en la mesa del PC");
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#file-input").addEventListener("change", async (event) => {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  try {
+    const res = await fetch("/api/files", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "X-Filename": encodeURIComponent(file.name),
+      },
+      body: file,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "No se pudo enviar");
+    say("Archivo en la mesa del PC");
+    syncClipboard();
+  } catch (err) {
+    say(err.message);
+  }
+});
 
 document.querySelector("#pin-go").addEventListener("click", login);
 
