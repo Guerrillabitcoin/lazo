@@ -539,6 +539,52 @@ _SKIP_TITLES = {
 }
 
 
+def typing_focus() -> bool:
+    if SYSTEM != "Windows":
+        return False
+    user32 = ctypes.windll.user32
+
+    class RECT(ctypes.Structure):
+        _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+    class GUITHREADINFO(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", ctypes.c_ulong),
+            ("flags", ctypes.c_ulong),
+            ("hwndActive", ctypes.c_void_p),
+            ("hwndFocus", ctypes.c_void_p),
+            ("hwndCapture", ctypes.c_void_p),
+            ("hwndMenuOwner", ctypes.c_void_p),
+            ("hwndMoveSize", ctypes.c_void_p),
+            ("hwndCaret", ctypes.c_void_p),
+            ("rcCaret", RECT),
+        ]
+
+    user32.GetForegroundWindow.restype = ctypes.c_void_p
+    user32.GetWindowThreadProcessId.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+    user32.GetGUIThreadInfo.argtypes = [ctypes.c_ulong, ctypes.POINTER(GUITHREADINFO)]
+    user32.GetGUIThreadInfo.restype = ctypes.c_bool
+    user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
+    foreground = user32.GetForegroundWindow()
+    if not foreground:
+        return False
+    thread = user32.GetWindowThreadProcessId(foreground, None)
+    info = GUITHREADINFO()
+    info.cbSize = ctypes.sizeof(GUITHREADINFO)
+    if not user32.GetGUIThreadInfo(thread, ctypes.byref(info)):
+        return False
+    caret = info.rcCaret.right - info.rcCaret.left or info.rcCaret.bottom - info.rcCaret.top
+    if info.flags & 0x1 or info.hwndCaret or caret:
+        return True
+    if not info.hwndFocus:
+        return False
+    name = ctypes.create_unicode_buffer(64)
+    user32.GetClassNameW(info.hwndFocus, name, 64)
+    kind = name.value.lower()
+    return "edit" in kind
+
+
 def list_windows() -> list[dict[str, str]]:
     with _lock:
         if SYSTEM == "Windows":
@@ -713,8 +759,22 @@ def _windows_action(hwnd: int, action: str) -> str:
         user32.ShowWindow(handle, 3)
         return "Maximizada"
     if action == "close":
-        user32.PostMessageW(handle, 0x0010, 0, 0)
-        return "Cerrar enviado"
+        user32.SendMessageTimeoutW.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint,
+            ctypes.c_size_t,
+            ctypes.c_ssize_t,
+            ctypes.c_uint,
+            ctypes.c_uint,
+            ctypes.POINTER(ctypes.c_size_t),
+        ]
+        user32.SendMessageTimeoutW.restype = ctypes.c_void_p
+        answered = ctypes.c_size_t()
+        user32.SendMessageTimeoutW(handle, 0x0010, 0, 0, 0x0002, 400, ctypes.byref(answered))
+        if user32.IsWindow(handle):
+            _force_foreground(hwnd)
+            _win_hotkey(0x12, 0x73)
+        return "Cerrada"
     if action == "snap_left":
         _force_foreground(hwnd)
         _win_hotkey(0x5B, 0x25)

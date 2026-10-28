@@ -26,16 +26,85 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.17"
+VERSION = "0.18"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
+WIRE_KEY = secrets.token_bytes(32)
 FAILS = {"n": 0, "until": 0.0}
 FAILS_LOCK = threading.Lock()
 VISITS: list[str] = []
 VISITS_LOCK = threading.Lock()
 MESA_OPENED = False
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
+
+
+def wire_seal(data: bytes, key: bytes = WIRE_KEY) -> bytes:
+    nonce = secrets.token_bytes(12)
+    stream = bytearray()
+    counter = 0
+    while len(stream) < len(data):
+        stream += hmac.new(key, nonce + struct.pack(">I", counter), hashlib.sha256).digest()
+        counter += 1
+    cipher = bytes(left ^ right for left, right in zip(data, stream))
+    tag = hmac.new(key, b"LZ2" + nonce + cipher, hashlib.sha256).digest()[:16]
+    return b"LZ2" + nonce + cipher + tag
+
+
+def wire_open(blob: bytes, key: bytes = WIRE_KEY) -> bytes:
+    if len(blob) < 31 or not blob.startswith(b"LZ2"):
+        raise control.ControlError("cifrado no válido")
+    nonce, tag, cipher = blob[3:15], blob[-16:], blob[15:-16]
+    expect = hmac.new(key, b"LZ2" + nonce + cipher, hashlib.sha256).digest()[:16]
+    if not hmac.compare_digest(tag, expect):
+        raise control.ControlError("cifrado no válido")
+    stream = bytearray()
+    counter = 0
+    while len(stream) < len(cipher):
+        stream += hmac.new(key, nonce + struct.pack(">I", counter), hashlib.sha256).digest()
+        counter += 1
+    return bytes(left ^ right for left, right in zip(cipher, stream))
+
+
+def _wire_xor(key: bytes, nonce: bytes, data: bytes, offset: int) -> bytes:
+    out = bytearray(len(data))
+    pos = 0
+    while pos < len(data):
+        block_index = (offset + pos) // 32
+        skip = (offset + pos) % 32
+        block = hmac.new(key, nonce + struct.pack(">I", block_index), hashlib.sha256).digest()
+        take = min(32 - skip, len(data) - pos)
+        for index in range(take):
+            out[pos + index] = data[pos + index] ^ block[skip + index]
+        pos += take
+    return bytes(out)
+
+
+def wire_open_to(source, length: int, dest: Path, key: bytes = WIRE_KEY) -> None:
+    head = source.read(15)
+    if len(head) < 15 or not head.startswith(b"LZ2"):
+        raise control.ControlError("cifrado no válido")
+    nonce = head[3:15]
+    cipher_len = length - 31
+    if cipher_len < 0:
+        raise control.ControlError("cifrado no válido")
+    mac = hmac.new(key, b"LZ2" + nonce, hashlib.sha256)
+    offset = 0
+    remaining = cipher_len
+    with dest.open("wb") as out:
+        while remaining:
+            chunk = source.read(min(256 * 1024, remaining))
+            if not chunk:
+                break
+            mac.update(chunk)
+            out.write(_wire_xor(key, nonce, chunk, offset))
+            offset += len(chunk)
+            remaining -= len(chunk)
+    tag = source.read(16)
+    if remaining or not hmac.compare_digest(mac.digest()[:16], tag):
+        dest.unlink(missing_ok=True)
+        raise control.ControlError("cifrado no válido")
+
 
 ACTIONS = {
     "move": lambda body: control.move_mouse(body.get("dx", 0), body.get("dy", 0)),
@@ -174,7 +243,8 @@ def lan_targets() -> list[tuple[str, str]]:
 
 
 def phone_url(ip: str) -> str:
-    return f"http://{ip}:{PORT}/?pin={PIN}"
+    key = base64.urlsafe_b64encode(WIRE_KEY).decode().rstrip("=")
+    return f"http://{ip}:{PORT}/#p={PIN}&k={key}"
 
 
 def plain_url(ip: str) -> str:
@@ -207,7 +277,7 @@ def connect_page() -> bytes:
     for index, (label, ip) in enumerate(targets):
         url = plain_url(ip)
         try:
-            svg = qr_svg(url)
+            svg = qr_svg(phone_url(ip))
         except Exception:
             svg = ""
         blocks.append(
@@ -251,10 +321,10 @@ def connect_page() -> bytes:
 </head>
 <body>
   <main>
-    <h1>Escribe esta dirección en el móvil</h1>
-    <p class="note">Misma Wi-Fi, sin VPN y sin datos. Si el QR no abre nada, abre Chrome y escribe la dirección de abajo. Tiene que empezar por http://</p>
+    <h1>Escanea el QR</h1>
+    <p class="note">El QR ya lleva el PIN y cifra el puente. Misma Wi-Fi, sin VPN y sin internet. Quien escuche la red ve ruido, no lo que copias ni los archivos. Si el QR no abre, escribe la dirección y el PIN a mano.</p>
     <p id="estado">Todavía no llega el móvil.</p>
-    <p class="note"><a href="/mesa">Abrir la mesa</a> para pegar texto y soltar archivos.</p>
+    <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a> para pegar texto y soltar archivos.</p>
     {''.join(blocks)}
   </main>
   <script>
@@ -327,11 +397,17 @@ class Handler(BaseHTTPRequestHandler):
     def _authed(self) -> bool:
         if self.client_address[0] in ("127.0.0.1", "::1"):
             return True
+        header = self.headers.get("X-Lazo", "")
+        if header and len(header) == len(TOKEN) and hmac.compare_digest(header, TOKEN):
+            return True
         got = cookies(self.headers.get("Cookie")).get("lazo", "")
-        return bool(got) and hmac.compare_digest(got, TOKEN)
+        return bool(got) and len(got) == len(TOKEN) and hmac.compare_digest(got, TOKEN)
 
     def _send(self, code: int, payload: dict | None = None, body: bytes | None = None, content_type: str = "application/json") -> None:
         data = body if body is not None else json.dumps(payload or {}, ensure_ascii=False).encode()
+        if body is None and self.headers.get("X-Seal") == "1":
+            data = wire_seal(data)
+            content_type = "application/octet-stream"
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
@@ -341,9 +417,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0") or 0)
-        if length > 8000:
+        if length > 120000:
             raise control.ControlError("petición demasiado grande")
         raw = self.rfile.read(length) if length else b"{}"
+        if raw.startswith(b"LZ2"):
+            raw = wire_open(raw)
         try:
             data = json.loads(raw.decode() or "{}")
         except json.JSONDecodeError as exc:
@@ -366,6 +444,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/app.js":
             self._file(STATIC / "app.js", "text/javascript; charset=utf-8")
+            return
+        if path == "/seal.js":
+            self._file(STATIC / "seal.js", "text/javascript; charset=utf-8")
             return
         if path == "/mesa":
             self._file(STATIC / "mesa.html", "text/html; charset=utf-8")
@@ -401,6 +482,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             self._guard(lambda _body: control.status())
             return
+        if path == "/api/caret":
+            self._guard(lambda _body: {"typing": control.typing_focus()})
+            return
         self._send(404, {"error": "no está"})
 
     def _pointer_socket(self) -> None:
@@ -429,6 +513,8 @@ class Handler(BaseHTTPRequestHandler):
                 if opcode == 0x9:
                     _ws_send(sock, 0xA, payload)
                     continue
+                if opcode == 0x2 and payload.startswith(b"LZ2"):
+                    payload = wire_open(payload)
                 if opcode == 0x2 and len(payload) >= 8:
                     dx, dy = struct.unpack_from("<ii", payload)
                     control.move_mouse(dx, dy)
@@ -490,7 +576,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(429, {"error": "Demasiados intentos. Espera un momento."})
                 return
             pin = str(body.get("pin", ""))
-            if not hmac.compare_digest(pin, PIN):
+            if len(pin) != len(PIN) or not hmac.compare_digest(pin, PIN):
                 FAILS["n"] += 1
                 if FAILS["n"] >= 8:
                     FAILS["until"] = now + 30
@@ -500,14 +586,18 @@ class Handler(BaseHTTPRequestHandler):
             FAILS["n"] = 0
         if self.client_address[0] not in ("127.0.0.1", "::1"):
             maybe_open_mesa()
+        payload = json.dumps({"ok": True, "token": TOKEN}).encode()
+        content_type = "application/json"
+        if self.headers.get("X-Seal") == "1":
+            payload = wire_seal(payload)
+            content_type = "application/octet-stream"
         self.send_response(200)
-        data = json.dumps({"ok": True}).encode()
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Set-Cookie", f"lazo={TOKEN}; HttpOnly; SameSite=Lax; Path=/")
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Set-Cookie", f"lazo={TOKEN}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(payload)
 
     def _guard(self, fn) -> None:
         if not self._authed():
@@ -551,6 +641,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "El archivo pasa de 80 MB o está vacío"})
             return
         data = self.rfile.read(length)
+        if data.startswith(b"LZ2"):
+            try:
+                data = wire_open(data)
+            except control.ControlError as exc:
+                self._send(400, {"error": str(exc)})
+                return
         name = unquote(self.headers.get("X-Filename", "archivo"))
         try:
             self._send(200, control.save_file(name, data))
@@ -582,8 +678,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
         name = unquote(self.headers.get("X-Filename", "foto"))
+        sealed = self.headers.get("X-Seal") == "1"
+        plain_size = int(self.headers.get("X-Plain-Size", "0") or 0) if sealed else length
         try:
-            started = control.start_photo(name, length)
+            started = control.start_photo(name, plain_size)
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)})
             return
@@ -593,16 +691,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, {"skipped": True})
             return
         part, final = started
-        remaining = length
         try:
-            with part.open("wb") as out:
-                while remaining > 0:
-                    chunk = self.rfile.read(min(256 * 1024, remaining))
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    remaining -= len(chunk)
-            self._send(200, control.finish_photo(part, final, length))
+            if sealed:
+                wire_open_to(self.rfile, length, part)
+            else:
+                remaining = length
+                with part.open("wb") as out:
+                    while remaining > 0:
+                        chunk = self.rfile.read(min(256 * 1024, remaining))
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        remaining -= len(chunk)
+            self._send(200, control.finish_photo(part, final, plain_size))
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)})
         except OSError:
@@ -656,7 +757,7 @@ def main() -> None:
     parser.add_argument("--pin", default="")
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
-    PIN = args.pin if args.pin.isdigit() and len(args.pin) == 6 else f"{secrets.randbelow(900000) + 100000}"
+    PIN = args.pin if args.pin.isdigit() and len(args.pin) == 4 else f"{secrets.randbelow(9000) + 1000}"
     PORT = args.port
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print()
@@ -667,7 +768,7 @@ def main() -> None:
     print(f"    http://127.0.0.1:{args.port}/conectar")
     for label, ip in lan_targets():
         print(f"  {label}: {plain_url(ip)}")
-    print("  Al entrar el móvil se abre la mesa para pegar texto y soltar archivos.")
+    print("  Al entrar el móvil se abre el puente Wi-Fi. No pasa por internet.")
     print("  No abras este puerto en el router.")
     print()
     threading.Thread(target=server.serve_forever, daemon=True).start()

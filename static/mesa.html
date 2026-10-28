@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mesa LaZoo</title>
+    <title>Puente Wi-Fi</title>
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; }
@@ -67,8 +67,8 @@
   </head>
   <body>
     <main>
-      <h1>Mesa</h1>
-      <p>Nube temporal de este PC. Las fotos del móvil caen en la carpeta Fotos, al lado de este programa, y se pueden abrir con Windows.</p>
+      <h1>Puente Wi-Fi</h1>
+      <p>Solo la Wi-Fi de esta casa. Nada de esto sale a internet. Si el móvil entró con el QR, quien escuche la red ve el tráfico cifrado, no el texto ni los archivos. Lo que ya estaba copiado al abrir no se guarda: pégalo si lo quieres en las notas.</p>
       <div class="grid">
         <section>
           <h2>Portapapeles</h2>
@@ -95,6 +95,7 @@
       const clips = document.querySelector("#clips");
       const files = document.querySelector("#files");
       let seen = "";
+      let primed = false;
 
       async function pushText(text, auto) {
         const clean = text || "";
@@ -117,6 +118,11 @@
       async function watchClipboard() {
         try {
           const text = await navigator.clipboard.readText();
+          if (!primed) {
+            primed = true;
+            seen = text || "";
+            return;
+          }
           await pushText(text, true);
         } catch (_err) {}
       }

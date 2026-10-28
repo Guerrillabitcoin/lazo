@@ -2,7 +2,11 @@ const visor = document.querySelector("#visor");
 const pinPanel = document.querySelector("#pin");
 const app = document.querySelector("#app");
 const dock = document.querySelector("#dock");
-const sub = document.querySelector("#sub");
+const statusBar = document.querySelector("#status");
+const linkLabel = document.querySelector("#link-label");
+
+let wireKey = null;
+let sessionToken = localStorage.getItem("lazo-token") || "";
 
 const views = {
   mouse: document.querySelector("#view-mouse"),
@@ -15,22 +19,48 @@ const views = {
 
 let tab = "mouse";
 let winId = "";
-let closeArmed = false;
 let poll = 0;
 let clipsTimer = 0;
+let caretTimer = 0;
+let caretWas = false;
 
 function say(text) {
   visor.textContent = text || "Listo";
 }
 
+function authHeaders(extra) {
+  const headers = extra ? { ...extra } : {};
+  if (sessionToken) headers["X-Lazo"] = sessionToken;
+  if (wireKey) headers["X-Seal"] = "1";
+  return headers;
+}
+
+async function readBody(res) {
+  if (!wireKey || res.headers.get("content-type") === "application/json") {
+    return res.json().catch(() => ({}));
+  }
+  const blob = new Uint8Array(await res.arrayBuffer());
+  if (!blob.length) return {};
+  try {
+    return JSON.parse(openText(blob, wireKey) || "{}");
+  } catch (_err) {
+    return {};
+  }
+}
+
 async function api(path, body, method = "POST") {
-  const res = await fetch(path, {
-    method,
-    headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
-    body: method === "POST" ? JSON.stringify(body || {}) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
+  const headers = authHeaders(method === "POST" ? { "Content-Type": "application/octet-stream" } : {});
+  let payload;
+  if (method === "POST") {
+    const raw = JSON.stringify(body || {});
+    payload = wireKey ? sealText(raw, wireKey) : raw;
+    if (!wireKey) headers["Content-Type"] = "application/json";
+  }
+  const res = await fetch(path, { method, headers, body: payload });
+  const data = await readBody(res);
   if (res.status === 401) {
+    sessionToken = "";
+    localStorage.removeItem("lazo-token");
     showPin();
     throw new Error(data.error || "PIN");
   }
@@ -41,30 +71,37 @@ async function api(path, body, method = "POST") {
   return data;
 }
 
+function setLink(mode) {
+  statusBar.dataset.link = mode;
+  linkLabel.textContent = mode === "on" ? (wireKey ? "Conectado · cifrado" : "Conectado") : "Sin conexión";
+}
+
 function showPin() {
   pinPanel.hidden = false;
   app.hidden = true;
   dock.hidden = true;
+  setLink("off");
   window.clearInterval(poll);
   window.clearInterval(clipsTimer);
+  window.clearInterval(caretTimer);
 }
 
 function showApp() {
   pinPanel.hidden = true;
   app.hidden = false;
   dock.hidden = false;
+  setLink("on");
   refreshStatus();
   poll = window.setInterval(refreshStatus, 4000);
   syncClipboard();
   clipsTimer = window.setInterval(syncClipboard, 2500);
+  caretTimer = window.setInterval(watchCaret, 700);
   connectPointer();
 }
 
 async function refreshStatus() {
   try {
     const data = await api("/api/status", null, "GET");
-    const names = { Windows: "Windows", Darwin: "Mac", Linux: "Linux" };
-    sub.textContent = names[data.platform] || "Este PC";
     document.querySelectorAll("[data-cursor]").forEach((button) => {
       button.classList.toggle("on", button.dataset.cursor === data.cursor);
     });
@@ -115,7 +152,7 @@ function renderClips(items) {
   if (!items.length) {
     const empty = document.createElement("li");
     empty.className = "hint";
-    empty.textContent = "Todavía no hay nada. Copia un texto en el PC.";
+    empty.textContent = "Todavía no hay notas. Pega un texto aquí o en el puente del PC.";
     list.append(empty);
     return;
   }
@@ -128,9 +165,12 @@ function renderClips(items) {
     title.textContent = item.text;
     const when = document.createElement("small");
     when.textContent = clipTime(item.at);
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.textContent = "Copiar";
+    copy.addEventListener("click", () => copyToPhone(item.text));
     button.append(title, when);
-    button.addEventListener("click", () => copyToPhone(item.text));
-    row.append(button);
+    row.append(button, copy);
     list.append(row);
   }
 }
@@ -151,7 +191,7 @@ function renderFiles(items) {
     remove.type = "button";
     remove.textContent = "Quitar";
     remove.addEventListener("click", async () => {
-      await fetch("/api/files/" + item.id, { method: "DELETE" });
+      await fetch("/api/files/" + item.id, { method: "DELETE", headers: authHeaders() });
       syncClipboard();
     });
     row.append(link, remove);
@@ -161,13 +201,13 @@ function renderFiles(items) {
 
 async function syncClipboard() {
   try {
-    const res = await fetch("/api/clipboard");
+    const res = await fetch("/api/clipboard", { headers: authHeaders() });
     if (res.status === 401) return;
-    const data = await res.json().catch(() => ({}));
+    const data = await readBody(res);
     renderClips(data.items || []);
-    const files = await fetch("/api/files");
+    const files = await fetch("/api/files", { headers: authHeaders() });
     if (files.status === 401) return;
-    const listed = await files.json().catch(() => ({}));
+    const listed = await readBody(files);
     renderFiles(listed.files || []);
   } catch (_err) {}
 }
@@ -187,6 +227,57 @@ document.querySelector("#clip-form").addEventListener("submit", async (event) =>
   }
 });
 
+function formatSpeed(bytesPerSecond) {
+  if (bytesPerSecond < 1024) return Math.max(0, Math.round(bytesPerSecond)) + " B/s";
+  if (bytesPerSecond < 1024 * 1024) return (bytesPerSecond / 1024).toFixed(1) + " KB/s";
+  return (bytesPerSecond / (1024 * 1024)).toFixed(1) + " MB/s";
+}
+
+function showXfer(loaded, total, pending) {
+  const box = document.querySelector("#xfer");
+  const bar = document.querySelector("#xfer-bar");
+  const stat = document.querySelector("#xfer-stat");
+  box.hidden = false;
+  const ratio = total ? Math.min(1, loaded / total) : 0;
+  bar.style.width = Math.round(ratio * 100) + "%";
+  const seconds = (performance.now() - xferStarted) / 1000;
+  const speed = seconds > 0.2 ? xferBytes / seconds : 0;
+  stat.textContent = `${formatSpeed(speed)} · pendientes ${pending} · ${Math.round(ratio * 100)}%`;
+}
+
+function uploadTracked(url, body, headers, pending) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.responseType = "arraybuffer";
+    Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      xferBytes += Math.max(0, event.loaded - xferFileLoaded);
+      xferFileLoaded = event.loaded;
+      showXfer(event.loaded, event.total, pending);
+    };
+    xhr.onload = () => resolve(xhr);
+    xhr.onerror = () => reject(new Error("Se cortó el envío"));
+    xferFileLoaded = 0;
+    xhr.send(body);
+  });
+}
+
+async function sendBody(file) {
+  const raw = new Uint8Array(await file.arrayBuffer());
+  if (!wireKey) return { body: file, size: file.size, headers: {} };
+  const sealed = sealBytes(raw, wireKey);
+  return {
+    body: sealed,
+    size: raw.length,
+    headers: { "X-Seal": "1", "X-Plain-Size": String(raw.length) },
+  };
+}
+let xferStarted = 0;
+let xferBytes = 0;
+let xferFileLoaded = 0;
+
 document.querySelector("#photo-input").addEventListener("change", (event) => sendPhotos(event.target));
 document.querySelector("#photo-dir").addEventListener("change", (event) => sendPhotos(event.target));
 
@@ -205,37 +296,39 @@ async function sendPhotos(input) {
     progress.textContent = "No hay fotos ni vídeos";
     return;
   }
+  xferStarted = performance.now();
+  xferBytes = 0;
   let sent = 0;
   let skipped = 0;
   for (let index = 0; index < files.length; index += 1) {
     const file = files[index];
+    const pending = files.length - index;
     progress.textContent = `${index + 1} de ${files.length} · ${file.name}`;
     try {
-      const check = await fetch("/api/photos/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: file.name, size: file.size }),
-      });
-      const known = await check.json().catch(() => ({}));
-      if (check.status === 401) {
-        showPin();
-        return;
-      }
-      if (!check.ok) throw new Error(known.error || "No se pudo");
+      const known = await api("/api/photos/check", { name: file.name, size: file.size });
       if (known.skip) {
         skipped += 1;
         continue;
       }
-      const res = await fetch("/api/photos", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/octet-stream",
-          "X-Filename": encodeURIComponent(file.name),
-        },
-        body: file,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "No se pudo enviar");
+      const packed = await sendBody(file);
+      const xhr = await uploadTracked("/api/photos", packed.body, authHeaders({
+        "Content-Type": "application/octet-stream",
+        "X-Filename": encodeURIComponent(file.name),
+        ...packed.headers,
+      }), pending - 1);
+      const blob = new Uint8Array(xhr.response || []);
+      let data = {};
+      try {
+        const text = blob[0] === 76 ? openText(blob, wireKey) : new TextDecoder().decode(blob);
+        data = JSON.parse(text || "{}");
+      } catch (_err) {
+        data = {};
+      }
+      if (xhr.status === 401) {
+        showPin();
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) throw new Error(data.error || "No se pudo enviar");
       if (data.skipped) skipped += 1;
       else sent += 1;
     } catch (err) {
@@ -243,7 +336,8 @@ async function sendPhotos(input) {
       return;
     }
   }
-  progress.textContent = `En el PC: ${sent} nuevas, ${skipped} ya estaban`;
+  document.querySelector("#xfer").hidden = true;
+  progress.textContent = `En el PC: ${sent} nuevas, ${skipped} ya estaban · pendientes 0`;
   say(progress.textContent);
 }
 
@@ -251,52 +345,85 @@ document.querySelector("#file-input").addEventListener("change", async (event) =
   const file = event.target.files && event.target.files[0];
   event.target.value = "";
   if (!file) return;
+  xferStarted = performance.now();
+  xferBytes = 0;
   try {
-    const res = await fetch("/api/files", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/octet-stream",
-        "X-Filename": encodeURIComponent(file.name),
-      },
-      body: file,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || "No se pudo enviar");
-    say("Archivo en la mesa del PC");
+    const packed = await sendBody(file);
+    const xhr = await uploadTracked("/api/files", packed.body, authHeaders({
+      "Content-Type": "application/octet-stream",
+      "X-Filename": encodeURIComponent(file.name),
+      ...packed.headers,
+    }), 0);
+    const blob = new Uint8Array(xhr.response || []);
+    let data = {};
+    try {
+      const text = blob[0] === 76 ? openText(blob, wireKey) : new TextDecoder().decode(blob);
+      data = JSON.parse(text || "{}");
+    } catch (_err) {
+      data = {};
+    }
+    if (xhr.status === 401) {
+      showPin();
+      return;
+    }
+    if (xhr.status < 200 || xhr.status >= 300) throw new Error(data.error || "No se pudo enviar");
+    document.querySelector("#xfer").hidden = true;
+    say("Archivo en el puente del PC");
     syncClipboard();
   } catch (err) {
     say(err.message);
   }
 });
 
-document.querySelector("#pin-go").addEventListener("click", login);
-
 async function login() {
   const pin = document.querySelector("#pin-input").value.trim();
   try {
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin }),
-    });
-    const data = await res.json().catch(() => ({}));
+    const headers = { "Content-Type": "application/octet-stream" };
+    const raw = JSON.stringify({ pin });
+    const body = wireKey ? sealText(raw, wireKey) : raw;
+    if (wireKey) headers["X-Seal"] = "1";
+    else headers["Content-Type"] = "application/json";
+    const res = await fetch("/api/login", { method: "POST", headers, body });
+    const data = await readBody(res);
     if (!res.ok) {
       say(data.error || "PIN incorrecto");
+      setLink("off");
       return;
     }
-    say("Conectado a este PC");
+    if (data.token) {
+      sessionToken = data.token;
+      localStorage.setItem("lazo-token", data.token);
+    }
+    say(wireKey ? "Conectado y cifrado" : "Conectado a este PC");
     showApp();
   } catch (_err) {
     say("Sin respuesta del PC");
+    setLink("off");
   }
 }
 
-const fromLink = new URLSearchParams(location.search).get("pin") || new URLSearchParams(location.hash.replace(/^#/, "")).get("pin") || "";
-if (/^\d{6}$/.test(fromLink)) {
+const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+const keyFromLink = hash.get("k") || sessionStorage.getItem("lazo-key") || "";
+if (keyFromLink) {
+  try {
+    wireKey = b64urlToBytes(keyFromLink);
+    sessionStorage.setItem("lazo-key", keyFromLink);
+  } catch (_err) {
+    wireKey = null;
+  }
+}
+const fromLink = hash.get("p") || "";
+if (/^\d{4}$/.test(fromLink)) {
   document.querySelector("#pin-input").value = fromLink;
   history.replaceState(null, "", location.pathname);
   login();
+} else if (sessionToken) {
+  fetch("/api/status", { headers: authHeaders() }).then(async (res) => {
+    if (res.ok) showApp();
+  }).catch(() => {});
 }
+
+document.querySelector("#pin-go").addEventListener("click", login);
 
 document.querySelectorAll("[data-tab]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -393,7 +520,8 @@ function flushPointer() {
     const view = new DataView(new ArrayBuffer(8));
     view.setInt32(0, dx, true);
     view.setInt32(4, dy, true);
-    pointerSocket.send(view.buffer);
+    const frame = new Uint8Array(view.buffer);
+    pointerSocket.send(wireKey ? sealBytes(frame, wireKey) : frame);
     return;
   }
   if (moveFlight) return;
@@ -527,16 +655,40 @@ document.querySelector("#btn-right").addEventListener("click", () => {
 const nativeType = document.querySelector("#native-type");
 let lastTyped = "";
 document.querySelector("#btn-type").addEventListener("click", () => {
-  if (nativeType.hidden) {
-    nativeType.hidden = false;
-    lastTyped = "";
-    nativeType.value = "";
-    nativeType.focus();
-    say("Teclado del móvil");
-  } else {
-    nativeType.blur();
-    nativeType.hidden = true;
-  }
+  keys.hidden = !keys.hidden;
+  if (!keys.hidden && !keys.childElementCount) paintKeys();
+});
+nativeType.addEventListener("blur", () => {
+  caretWas = false;
+});
+
+async function watchCaret() {
+  try {
+    const res = await fetch("/api/caret", { headers: authHeaders() });
+    if (res.status === 401) return;
+    const data = await readBody(res);
+    const typing = !!data.typing;
+    const write = document.querySelector("#caret-write");
+    if (typing && !caretWas) {
+      caretWas = true;
+      lastTyped = "";
+      nativeType.value = "";
+      nativeType.focus();
+      write.hidden = document.activeElement === nativeType;
+    }
+    if (!typing && caretWas) {
+      caretWas = false;
+      nativeType.blur();
+      write.hidden = true;
+    }
+  } catch (_err) {}
+}
+
+document.querySelector("#caret-write").addEventListener("click", () => {
+  lastTyped = "";
+  nativeType.value = "";
+  nativeType.focus();
+  document.querySelector("#caret-write").hidden = true;
 });
 nativeType.addEventListener("input", () => {
   const value = nativeType.value;
@@ -629,11 +781,6 @@ function paintKeys() {
   keys.append(arrows);
 }
 
-document.querySelector("#show-keys").addEventListener("click", () => {
-  keys.hidden = !keys.hidden;
-  if (!keys.hidden && !keys.childElementCount) paintKeys();
-});
-
 document.querySelector("#phrase").addEventListener("submit", (event) => {
   event.preventDefault();
   const input = document.querySelector("#phrase-input");
@@ -665,7 +812,6 @@ async function loadWindows() {
         list.querySelectorAll("button").forEach((el) => el.classList.remove("picked"));
         button.classList.add("picked");
         actions.hidden = false;
-        closeArmed = false;
         api("/api/window", { id: win.id, action: "focus" }).catch((err) => say(err.message));
       });
       item.append(button);
@@ -686,15 +832,6 @@ document.querySelectorAll("[data-win]").forEach((button) => {
       return;
     }
     const action = button.dataset.win;
-    if (action === "close" && !closeArmed) {
-      closeArmed = true;
-      say("Toca Cerrar otra vez");
-      window.setTimeout(() => {
-        closeArmed = false;
-      }, 2000);
-      return;
-    }
-    closeArmed = false;
     api("/api/window", { id: winId, action }).catch((err) => say(err.message));
   });
 });

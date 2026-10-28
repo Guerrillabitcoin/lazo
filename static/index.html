@@ -3,22 +3,22 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.17</title>
+    <title>LaZoo 0.18</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
     <main class="phone">
-      <header class="top">
-        <div>
-          <p class="mark">LaZoo 0.17</p>
-          <p id="sub" class="sub">Mando de este PC</p>
+      <header id="status" class="top" data-link="off">
+        <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
+        <div class="status-copy">
+          <p id="link-label">Sin conexión</p>
+          <p id="visor" class="visor">Conecta con el PIN</p>
         </div>
-        <p id="visor" class="visor">Conecta con el PIN</p>
       </header>
 
       <section id="pin" class="panel pin">
         <label for="pin-input">PIN que salió en el PC</label>
-        <input id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 dígitos" />
+        <input id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="4" placeholder="4 dígitos" />
         <button id="pin-go" type="button" class="primary">Entrar</button>
       </section>
 
@@ -36,13 +36,13 @@
             <button id="btn-type" type="button">Teclado</button>
             <button id="btn-right" type="button">Clic derecho</button>
           </div>
-          <input id="native-type" class="native-type" hidden inputmode="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" placeholder="Escribe con el teclado del móvil" />
+          <input id="native-type" class="native-type" inputmode="text" autocomplete="off" autocapitalize="sentences" enterkeyhint="done" aria-label="Teclado del móvil" />
+          <button id="caret-write" type="button" hidden>Escribir en el PC</button>
+          <div id="keys" hidden></div>
         </div>
 
         <div id="view-keys" class="view" hidden>
-          <p class="hint">Para escribir, en Ratón pulsa Teclado, entre los dos clics. Sale el teclado de tu móvil.</p>
-          <button id="show-keys" type="button">Teclas en pantalla</button>
-          <div id="keys" hidden></div>
+          <p class="hint">Escribe una frase y se manda al PC. El teclado de tu móvil sale al tocar este campo, o al pinchar un campo en el ordenador.</p>
           <form id="phrase" class="phrase">
             <input id="phrase-input" maxlength="400" placeholder="Escribe una frase y envíala" />
             <button type="submit">Enviar</button>
@@ -50,7 +50,7 @@
         </div>
 
         <div id="view-windows" class="view" hidden>
-          <p class="hint">Toca una ventana. Los botones actúan sobre esa: traerla, minimizar, maximizar, mitad izquierda o derecha, y cerrar.</p>
+          <p class="hint">Desliza las ventanas. Toca una y usa los botones. Cerrar la cierra de verdad.</p>
           <div class="row-actions">
             <button id="win-refresh" type="button">Actualizar</button>
           </div>
@@ -123,13 +123,17 @@
         </div>
 
         <div id="view-clips" class="view" hidden>
-          <p class="hint">Elige fotos o vídeos de la galería. Caen en la carpeta Fotos del PC y, si ya estaban, no se copian otra vez. El navegador no puede vigilar la galería solo.</p>
+          <p class="hint">Elige fotos o vídeos. Caen en la carpeta Fotos del PC. Si ya estaban, no se copian otra vez.</p>
           <div class="photo-actions">
             <label class="file-label">Fotos y vídeos<input id="photo-input" type="file" accept="image/*,video/*" multiple hidden /></label>
             <label class="file-label">Carpeta del móvil<input id="photo-dir" type="file" accept="image/*,video/*" webkitdirectory multiple hidden /></label>
           </div>
+          <div id="xfer" class="xfer" hidden>
+            <div class="xfer-track"><div id="xfer-bar"></div></div>
+            <p id="xfer-stat" class="hint"></p>
+          </div>
           <p id="photo-progress" class="hint"></p>
-          <p class="hint">En el PC se abre la mesa. Pega ahí, o pega aquí, y toca un texto para llevarlo al móvil.</p>
+          <p class="hint">Puente Wi-Fi: pega aquí o en el PC. Toca Copiar en una nota para llevarla al móvil. No entra sola lo que ya estaba copiado antes de abrir.</p>
           <form id="clip-form" class="phrase">
             <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Pega un texto"></textarea>
             <button type="submit">Guardar</button>
@@ -158,6 +162,7 @@
         </nav>
       </footer>
     </main>
+    <script src="/seal.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>
