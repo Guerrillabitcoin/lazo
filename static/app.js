@@ -70,7 +70,9 @@ async function refreshStatus() {
   }
 }
 
-document.querySelector("#pin-go").addEventListener("click", async () => {
+document.querySelector("#pin-go").addEventListener("click", login);
+
+async function login() {
   const pin = document.querySelector("#pin-input").value.trim();
   try {
     const res = await fetch("/api/login", {
@@ -88,7 +90,14 @@ document.querySelector("#pin-go").addEventListener("click", async () => {
   } catch (_err) {
     say("Sin respuesta del PC");
   }
-});
+}
+
+const fromLink = new URLSearchParams(location.search).get("pin") || new URLSearchParams(location.hash.replace(/^#/, "")).get("pin") || "";
+if (/^\d{6}$/.test(fromLink)) {
+  document.querySelector("#pin-input").value = fromLink;
+  history.replaceState(null, "", location.pathname);
+  login();
+}
 
 document.querySelectorAll("[data-tab]").forEach((button) => {
   button.addEventListener("click", () => {

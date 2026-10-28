@@ -25,7 +25,9 @@ chmod +x iniciar.sh
 ./iniciar.sh
 ```
 
-En la terminal sale un PIN de 6 cifras y una dirección `http://192.168.x.x:8787`. En el móvil, con la **misma Wi-Fi**, abre esa dirección en el navegador y mete el PIN. El ZIP no se abre en el celular.
+En el PC se abre una ventana con un **código QR** y el PIN. En el móvil, con la **misma Wi-Fi** y sin VPN, abre la cámara y apunta al QR. Entra solo, sin escribir la dirección.
+
+Si el móvil no carga la página, Windows está bloqueando Lazo: la primera vez puede pedir permiso. Acéptalo solo para redes privadas. No abras el puerto 8787 en el router.
 
 Cuando Windows pregunte por el firewall, permite las redes privadas. No abras el puerto 8787 en el router: cualquiera de internet podría intentar entrar.
 
