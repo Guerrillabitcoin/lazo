@@ -152,17 +152,39 @@ button:focus-visible, input:focus-visible {
 
 .dock {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 8px;
+  flex: none;
 }
+
+.dock-fixed,
+.dock-scroll {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dock-fixed { flex: none; }
+
+.dock-scroll {
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dock-scroll::-webkit-scrollbar { display: none; }
 
 .dock button {
   min-height: 40px;
-  text-align: left;
   padding: 0 14px;
-  touch-action: none;
+  white-space: nowrap;
+  flex: none;
+  border-radius: 999px;
 }
+
+.dock-scroll button { touch-action: pan-x; }
 
 .dock button.on { background: var(--copper); color: var(--ink); }
 
@@ -182,7 +204,7 @@ button:focus-visible, input:focus-visible {
 .pad {
   position: relative;
   flex: 1;
-  min-height: 160px;
+  min-height: 48dvh;
   border-radius: 16px;
   background: #efe6da;
   touch-action: none;
@@ -373,8 +395,6 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 }
 
 .transport { grid-template-columns: repeat(3, 1fr); }
-
-.dock { margin-top: 10px; }
 
 .vol { grid-template-columns: repeat(3, 1fr); }
 

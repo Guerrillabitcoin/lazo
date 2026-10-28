@@ -451,30 +451,36 @@ function loadOrder() {
   return [...PINNED, ...rest];
 }
 
-function dragTool(event) {
-  const button = event.currentTarget;
-  const startY = event.clientY;
-  let lastY = startY;
+function dragTool(button, pointerId, startX) {
+  const scroller = button.parentElement;
+  let lastX = startX;
   let dragged = false;
-  button.setPointerCapture(event.pointerId);
-  function move(ev) {
-    const dy = ev.clientY - startY;
-    if (!dragged && Math.abs(dy) < 8) return;
-    dragged = true;
-    const down = ev.clientY >= lastY;
-    lastY = ev.clientY;
-    const sibling = down ? button.nextElementSibling : button.previousElementSibling;
-    if (!sibling || PINNED.includes(sibling.dataset.cube)) return;
-    const box = sibling.getBoundingClientRect();
-    if (down && ev.clientY > box.top + box.height * 0.45) dock.insertBefore(sibling, button);
-    else if (!down && ev.clientY < box.bottom - box.height * 0.45) dock.insertBefore(button, sibling);
+  try {
+    button.setPointerCapture(pointerId);
+  } catch (_err) {
+    return;
   }
-  function stop() {
+  function move(ev) {
+    if (ev.pointerId !== pointerId) return;
+    const dx = ev.clientX - startX;
+    if (!dragged && Math.abs(dx) < 8) return;
+    dragged = true;
+    const right = ev.clientX >= lastX;
+    lastX = ev.clientX;
+    const sibling = right ? button.nextElementSibling : button.previousElementSibling;
+    if (!sibling) return;
+    const box = sibling.getBoundingClientRect();
+    if (right && ev.clientX > box.left + box.width * 0.45) scroller.insertBefore(sibling, button);
+    else if (!right && ev.clientX < box.right - box.width * 0.45) scroller.insertBefore(button, sibling);
+  }
+  function stop(ev) {
+    if (ev.pointerId !== pointerId) return;
     button.removeEventListener("pointermove", move);
     button.removeEventListener("pointerup", stop);
     button.removeEventListener("pointercancel", stop);
     if (!dragged) return;
-    order = [...dock.querySelectorAll("button")].map((item) => item.dataset.cube);
+    const fixed = dock.querySelector(".dock-fixed");
+    order = [...fixed.querySelectorAll("button"), ...scroller.querySelectorAll("button")].map((item) => item.dataset.cube);
     localStorage.setItem("lazo-order", JSON.stringify(order));
     button.dataset.moved = "1";
   }
@@ -483,8 +489,41 @@ function dragTool(event) {
   button.addEventListener("pointercancel", stop);
 }
 
+function watchTool(event) {
+  const button = event.currentTarget;
+  const pointerId = event.pointerId;
+  const startX = event.clientX;
+  const startY = event.clientY;
+  let hold = window.setTimeout(() => {
+    hold = 0;
+    dragTool(button, pointerId, startX);
+  }, 320);
+  function move(ev) {
+    if (!hold || ev.pointerId !== pointerId) return;
+    if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10) {
+      window.clearTimeout(hold);
+      hold = 0;
+      end();
+    }
+  }
+  function end(ev) {
+    if (ev && ev.pointerId !== pointerId) return;
+    if (hold) window.clearTimeout(hold);
+    hold = 0;
+    button.removeEventListener("pointermove", move);
+    button.removeEventListener("pointerup", end);
+    button.removeEventListener("pointercancel", end);
+  }
+  button.addEventListener("pointermove", move);
+  button.addEventListener("pointerup", end);
+  button.addEventListener("pointercancel", end);
+}
+
 function renderDock() {
-  dock.replaceChildren();
+  const fixed = document.createElement("div");
+  const scroller = document.createElement("div");
+  fixed.className = "dock-fixed";
+  scroller.className = "dock-scroll";
   order.forEach((id) => {
     const tool = TOOLS.find((item) => item.id === id);
     const button = document.createElement("button");
@@ -499,9 +538,10 @@ function renderDock() {
       }
       openCube(id);
     });
-    if (!PINNED.includes(id)) button.addEventListener("pointerdown", dragTool);
-    dock.append(button);
+    if (!PINNED.includes(id)) button.addEventListener("pointerdown", watchTool);
+    (PINNED.includes(id) ? fixed : scroller).append(button);
   });
+  dock.replaceChildren(fixed, scroller);
 }
 
 renderDock();
