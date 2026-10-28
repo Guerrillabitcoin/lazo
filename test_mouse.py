@@ -128,6 +128,18 @@ def test_photos_folder() -> None:
     print("fotos sin repetir")
 
 
+def test_youtube_speeds() -> None:
+    for raw, expected in ((1, 1.0), ("1.1", 1.1), (1.25, 1.25), (1.50, 1.5), (2, 2.0)):
+        if control.match_youtube_speed(raw) != expected:
+            raise SystemExit(raw)
+    try:
+        control.match_youtube_speed(3)
+    except control.ControlError:
+        print("velocidades de YouTube")
+        return
+    raise SystemExit("aceptó una velocidad que no está")
+
+
 def test_hook_speed() -> None:
     seen: list[tuple[int, int]] = []
     control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
@@ -223,6 +235,7 @@ if __name__ == "__main__":
     test_notes_order()
     test_mesa_and_small_cursor()
     test_photos_folder()
+    test_youtube_speeds()
     test_hook_speed()
     test_live_channel()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")

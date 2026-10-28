@@ -870,7 +870,17 @@ def _find_title(needle: str, exclude: str | None = None) -> dict[str, str] | Non
     return None
 
 
-_levels = {"youtube": 50, "spotify": 50}
+_levels = {"youtube": 50, "spotify": 50, "youtube_speed": 1.0}
+_YOUTUBE_SPEEDS = (1.0, 1.1, 1.25, 1.5, 2.0)
+_YOUTUBE_SPEED_TEXT = {1.0: "1", 1.1: "1.1", 1.25: "1.25", 1.5: "1.5", 2.0: "2"}
+
+
+def match_youtube_speed(raw: object) -> float:
+    rate = round(float(raw), 2)
+    for item in _YOUTUBE_SPEEDS:
+        if abs(rate - item) < 0.001:
+            return item
+    raise ControlError("velocidad no válida")
 
 
 def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
@@ -883,6 +893,8 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         return _youtube_home()
     if action == "volume":
         return _youtube_volume(int(extra.get("level", _levels["youtube"])))
+    if action == "speed":
+        return _youtube_speed(extra.get("rate", _levels["youtube_speed"]))
     actions = {
         "play": ["k"],
         "mute": ["m"],
@@ -911,6 +923,120 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
     elif action == "voldown":
         _levels["youtube"] = max(0, _levels["youtube"] - 5)
     return {"detail": "YouTube", "title": row["title"], "level": _levels["youtube"]}
+
+
+def _youtube_speed(raw: object) -> dict[str, Any]:
+    rate = match_youtube_speed(raw)
+    with _lock:
+        row = _find_youtube_unlocked()
+        if row is None:
+            raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
+        _focus_unlocked(row["id"])
+    time.sleep(0.16)
+    script = (
+        "document.querySelectorAll('video').forEach(function(v){v.playbackRate="
+        + _YOUTUBE_SPEED_TEXT[rate]
+        + "})"
+    )
+    _run_page_js(script, row["title"])
+    _levels["youtube_speed"] = rate
+    label = "1.50" if rate == 1.5 else "1.0" if rate == 1 else _YOUTUBE_SPEED_TEXT[rate]
+    return {
+        "detail": f"Velocidad {label}",
+        "title": row["title"],
+        "level": _levels["youtube"],
+        "rate": rate,
+    }
+
+
+def _run_page_js(script: str, title: str) -> None:
+    if SYSTEM == "Darwin" and _mac_page_js(script, title):
+        return
+    chord = ["ctrl", "shift", "k" if "firefox" in title.lower() else "j"]
+    _chord(chord)
+    time.sleep(0.45)
+    try:
+        if SYSTEM == "Windows":
+            _win_type_line(script)
+        else:
+            _type_line(script)
+    finally:
+        time.sleep(0.12)
+        _chord(chord)
+
+
+def _mac_page_js(script: str, title: str) -> bool:
+    low = title.lower()
+    if "firefox" in low:
+        return False
+    if "edge" in low:
+        app = "Microsoft Edge"
+    elif "brave" in low:
+        app = "Brave Browser"
+    else:
+        app = "Google Chrome"
+    js = script.replace("\\", "\\\\").replace('"', '\\"')
+    source = f'tell application "{app}" to execute javascript "{js}" in active tab of front window'
+    result = _run(["osascript", "-e", source], timeout=4)
+    return result.returncode == 0
+
+
+def _type_line(script: str) -> None:
+    from pynput.keyboard import Key
+
+    _mouse, keyboard = _input()
+    keyboard.type(script)
+    keyboard.press(Key.enter)
+    keyboard.release(Key.enter)
+
+
+def _win_type_line(script: str) -> None:
+    extra = ctypes.c_size_t
+
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_ = [
+            ("wVk", ctypes.c_ushort),
+            ("wScan", ctypes.c_ushort),
+            ("dwFlags", ctypes.c_ulong),
+            ("time", ctypes.c_ulong),
+            ("dwExtraInfo", extra),
+        ]
+
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", ctypes.c_long),
+            ("dy", ctypes.c_long),
+            ("mouseData", ctypes.c_ulong),
+            ("dwFlags", ctypes.c_ulong),
+            ("time", ctypes.c_ulong),
+            ("dwExtraInfo", extra),
+        ]
+
+    class INPUT(ctypes.Structure):
+        class _U(ctypes.Union):
+            _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT)]
+
+        _anonymous_ = ("u",)
+        _fields_ = [("type", ctypes.c_ulong), ("u", _U)]
+
+    if ctypes.sizeof(INPUT) != 40:
+        _type_line(script)
+        return
+    pieces: list[tuple[int, int, int]] = []
+    for char in script:
+        pieces.append((0, ord(char), 0x0004))
+        pieces.append((0, ord(char), 0x0004 | 0x0002))
+    pieces.append((0x0D, 0, 0))
+    pieces.append((0x0D, 0, 0x0002))
+    batch = (INPUT * len(pieces))()
+    for index, (vk, scan, flags) in enumerate(pieces):
+        batch[index].type = 1
+        batch[index].ki.wVk = vk
+        batch[index].ki.wScan = scan
+        batch[index].ki.dwFlags = flags
+    sent = ctypes.windll.user32.SendInput(len(pieces), batch, ctypes.sizeof(INPUT))
+    if sent != len(pieces):
+        raise ControlError("Windows no dejó fijar la velocidad")
 
 
 def _youtube_volume(level: int) -> dict[str, Any]:

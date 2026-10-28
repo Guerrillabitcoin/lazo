@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.15"
+VERSION = "0.16"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)

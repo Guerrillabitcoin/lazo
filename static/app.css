@@ -151,6 +151,8 @@ button:focus-visible, input:focus-visible {
 
 .vol-line span { font-variant-numeric: tabular-nums; min-width: 2ch; }
 
+#yt-speed-label { min-width: 4.6ch; text-align: right; }
+
 input[type="range"] { width: 100%; accent-color: var(--copper); }
 
 .icon {

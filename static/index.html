@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.15</title>
+    <title>LaZoo 0.16</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
     <main class="phone">
       <header class="top">
         <div>
-          <p class="mark">LaZoo 0.15</p>
+          <p class="mark">LaZoo 0.16</p>
           <p id="sub" class="sub">Mando de este PC</p>
         </div>
         <p id="visor" class="visor">Conecta con el PIN</p>
@@ -79,6 +79,11 @@
               <button id="yt-mute" type="button" data-yt="mute" class="icon" aria-label="Silencio">
                 <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="wave" d="M16 9a5 5 0 0 1 0 6M18.5 7a8 8 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
               </button>
+            </div>
+            <p class="hint">Velocidad</p>
+            <div class="vol-line">
+              <input id="yt-speed" type="range" min="0" max="4" step="1" value="0" aria-label="Velocidad de YouTube" />
+              <span id="yt-speed-label">1.0</span>
             </div>
             <div class="tools">
               <button type="button" data-yt="home">Inicio</button>

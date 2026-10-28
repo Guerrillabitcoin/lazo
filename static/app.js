@@ -746,6 +746,30 @@ document.querySelector("#yt-vol").addEventListener("change", async (event) => {
   }
 });
 
+const YT_SPEEDS = [1, 1.1, 1.25, 1.5, 2];
+const YT_SPEED_LABELS = ["1.0", "1.1", "1.25", "1.50", "2"];
+
+function showSpeed(rate) {
+  const index = YT_SPEEDS.findIndex((item) => Math.abs(item - Number(rate)) < 0.001);
+  const picked = index < 0 ? 0 : index;
+  document.querySelector("#yt-speed").value = String(picked);
+  document.querySelector("#yt-speed-label").textContent = YT_SPEED_LABELS[picked];
+}
+
+document.querySelector("#yt-speed").addEventListener("input", (event) => {
+  document.querySelector("#yt-speed-label").textContent = YT_SPEED_LABELS[Number(event.target.value)] || "1.0";
+});
+
+document.querySelector("#yt-speed").addEventListener("change", async (event) => {
+  const rate = YT_SPEEDS[Number(event.target.value)];
+  try {
+    const data = await api("/api/youtube", { action: "speed", rate });
+    if (typeof data.rate === "number") showSpeed(data.rate);
+  } catch (err) {
+    say(err.message);
+  }
+});
+
 document.querySelector("#sp-vol").addEventListener("change", async (event) => {
   try {
     const data = await api("/api/spotify", { action: "volume", level: Number(event.target.value) });
