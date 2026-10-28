@@ -52,6 +52,7 @@ function showApp() {
   dock.hidden = false;
   refreshStatus();
   poll = window.setInterval(refreshStatus, 4000);
+  connectPointer();
 }
 
 async function refreshStatus() {
@@ -135,6 +136,7 @@ let travel = 0;
 let acc = { x: 0, y: 0 };
 let moveFlight = false;
 let lastSample = 0;
+let pointerSocket = null;
 
 function gainFor(dx, dy) {
   const now = performance.now();
@@ -146,11 +148,32 @@ function gainFor(dx, dy) {
   return 3.4 + 5.2 * curve;
 }
 
-function pumpMove() {
-  if (moveFlight) return;
+function connectPointer() {
+  if (pointerSocket && (pointerSocket.readyState === 0 || pointerSocket.readyState === 1)) return;
+  const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
+  const sock = new WebSocket(url);
+  pointerSocket = sock;
+  sock.binaryType = "arraybuffer";
+  sock.onopen = () => flushPointer();
+  sock.onclose = () => {
+    if (pointerSocket === sock) pointerSocket = null;
+  };
+}
+
+function flushPointer() {
   const dx = Math.trunc(acc.x);
   const dy = Math.trunc(acc.y);
   if (!dx && !dy) return;
+  if (pointerSocket && pointerSocket.readyState === 1) {
+    acc.x -= dx;
+    acc.y -= dy;
+    const view = new DataView(new ArrayBuffer(8));
+    view.setInt32(0, dx, true);
+    view.setInt32(4, dy, true);
+    pointerSocket.send(view.buffer);
+    return;
+  }
+  if (moveFlight) return;
   acc.x -= dx;
   acc.y -= dy;
   moveFlight = true;
@@ -166,7 +189,7 @@ function pumpMove() {
     .catch(() => {})
     .finally(() => {
       moveFlight = false;
-      pumpMove();
+      flushPointer();
     });
 }
 
@@ -174,23 +197,11 @@ function queueMove(dx, dy) {
   const gain = gainFor(dx, dy);
   acc.x += dx * gain;
   acc.y += dy * gain;
-  pumpMove();
+  flushPointer();
 }
 
-pad.addEventListener("pointerdown", (event) => {
-  pad.setPointerCapture(event.pointerId);
-  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-  if (pointers.size === 1) {
-    gesture = "tap";
-    travel = 0;
-    lastSample = 0;
-    window.clearInterval(poll);
-  } else {
-    gesture = "scroll";
-  }
-});
-
-pad.addEventListener("pointermove", (event) => {
+function onPadMove(event) {
+  event.preventDefault();
   const prev = pointers.get(event.pointerId);
   if (!prev) return;
   const samples = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [event];
@@ -207,12 +218,40 @@ pad.addEventListener("pointermove", (event) => {
     if (dx || dy) queueMove(dx, dy);
   }
   pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  const finger = document.querySelector("#finger");
+  if (finger && pointers.size === 1) {
+    const box = pad.getBoundingClientRect();
+    finger.hidden = false;
+    finger.style.left = `${event.clientX - box.left}px`;
+    finger.style.top = `${event.clientY - box.top}px`;
+  }
   if (pointers.size >= 2 || gesture === "scroll") {
     gesture = "scroll";
     const dy = event.clientY - prev.y;
     if (dy) api("/api/scroll", { dy }).catch((err) => say(err.message));
   }
+}
+
+pad.addEventListener("pointerdown", (event) => {
+  event.preventDefault();
+  connectPointer();
+  pad.setPointerCapture(event.pointerId);
+  pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+  if (pointers.size === 1) {
+    gesture = "tap";
+    travel = 0;
+    lastSample = 0;
+    window.clearInterval(poll);
+  } else {
+    gesture = "scroll";
+  }
 });
+
+if ("onpointerrawupdate" in window) {
+  pad.addEventListener("pointerrawupdate", onPadMove);
+} else {
+  pad.addEventListener("pointermove", onPadMove);
+}
 
 function endPointer(event) {
   pointers.delete(event.pointerId);
@@ -220,6 +259,8 @@ function endPointer(event) {
   if (gesture === "tap") api("/api/click", { button: "left" }).catch((err) => say(err.message));
   gesture = "tap";
   travel = 0;
+  const finger = document.querySelector("#finger");
+  if (finger) finger.hidden = true;
   poll = window.setInterval(refreshStatus, 4000);
 }
 

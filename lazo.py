@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import hmac
 import json
 import re
 import secrets
 import socket
+import struct
 import subprocess
 import sys
 import threading
@@ -22,8 +25,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "1.5"
-VERSION_NAME = "Fluido"
+VERSION = "0.8"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -279,6 +281,39 @@ def cookies(header: str | None) -> dict[str, str]:
     return found
 
 
+def _ws_read(sock: socket.socket) -> tuple[int, bytes]:
+    head = _ws_exact(sock, 2)
+    opcode = head[0] & 0x0F
+    masked = head[1] & 0x80
+    length = head[1] & 0x7F
+    if length == 126:
+        length = int.from_bytes(_ws_exact(sock, 2), "big")
+    elif length == 127:
+        length = int.from_bytes(_ws_exact(sock, 8), "big")
+    if length > 64:
+        raise ValueError("trama larga")
+    mask = _ws_exact(sock, 4) if masked else b""
+    data = _ws_exact(sock, length) if length else b""
+    if mask:
+        data = bytes(byte ^ mask[i % 4] for i, byte in enumerate(data))
+    return opcode, data
+
+
+def _ws_exact(sock: socket.socket, size: int) -> bytes:
+    buf = b""
+    while len(buf) < size:
+        chunk = sock.recv(size - len(buf))
+        if not chunk:
+            raise EOFError
+        buf += chunk
+    return buf
+
+
+def _ws_send(sock: socket.socket, opcode: int, payload: bytes) -> None:
+    frame = bytes([0x80 | opcode, len(payload)]) + payload
+    sock.sendall(frame)
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -314,6 +349,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         note_visit(self.client_address[0])
         path = self.path.split("?", 1)[0]
+        if path == "/ws":
+            self._pointer_socket()
+            return
         if path in ("/", "/index.html"):
             self._file(STATIC / "index.html", "text/html; charset=utf-8")
             return
@@ -343,6 +381,48 @@ class Handler(BaseHTTPRequestHandler):
             self._guard(lambda _body: control.status())
             return
         self._send(404, {"error": "no está"})
+
+    def _pointer_socket(self) -> None:
+        if self.headers.get("Upgrade", "").lower() != "websocket":
+            self._send(426, {"error": "hace falta websocket"})
+            return
+        if not self._authed():
+            self._send(401, {"error": "Entra con el PIN"})
+            return
+        key = self.headers.get("Sec-WebSocket-Key", "")
+        accept = base64.b64encode(
+            hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
+        ).decode()
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        sock = self.connection
+        sock.settimeout(None)
+        try:
+            while True:
+                opcode, payload = _ws_read(sock)
+                if opcode == 0x8:
+                    break
+                if opcode == 0x9:
+                    _ws_send(sock, 0xA, payload)
+                    continue
+                if opcode == 0x2 and len(payload) >= 8:
+                    dx, dy = struct.unpack_from("<ii", payload)
+                    control.move_mouse(dx, dy)
+                elif opcode == 0x1:
+                    parts = payload.decode("ascii", "ignore").split()
+                    if len(parts) == 2:
+                        control.move_mouse(int(parts[0]), int(parts[1]))
+        except (OSError, ValueError, EOFError, control.ControlError):
+            pass
+        finally:
+            self.close_connection = True
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
 
     def do_POST(self) -> None:  # noqa: N802
         note_visit(self.client_address[0])
@@ -425,7 +505,7 @@ def main() -> None:
     PORT = args.port
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print()
-    print(f"  Lazo {VERSION_NAME}")
+    print(f"  LaZoo {VERSION}")
     print(f"  PIN: {PIN}")
     print("  En el PC se abre la dirección. Escríbela en el móvil, no hace falta el QR.")
     print("  Misma Wi-Fi de casa. No hace falta VPN. Si no se abre, entra aquí en el PC:")

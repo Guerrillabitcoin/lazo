@@ -86,15 +86,127 @@ def _special(name: str):
     return table.get(name)
 
 
+_move_hook = None
+
+
+def set_move_hook(fn) -> None:
+    global _move_hook
+    _move_hook = fn
+
+
+def backend_for(system: str, display: str | None, wayland: str | None) -> str:
+    if system == "Windows":
+        return "sendinput"
+    if system == "Darwin":
+        return "cgevent"
+    if system == "Linux":
+        if display:
+            return "xtest"
+        if wayland:
+            return "ydotool"
+        return "none"
+    return "pynput"
+
+
 def move_mouse(dx: int, dy: int) -> None:
     dx = max(-4000, min(4000, int(dx)))
     dy = max(-4000, min(4000, int(dy)))
+    if dx == 0 and dy == 0:
+        return
+    if _move_hook is not None:
+        _move_hook(dx, dy)
+        return
     with _mouse_lock:
-        if SYSTEM == "Linux" and not _display_ok():
-            _ydotool(["mousemove", "-x", str(dx), "-y", str(dy)])
-            return
-        mouse, _keyboard = _input()
-        mouse.move(dx, dy)
+        _dispatch_move(dx, dy)
+
+
+def _dispatch_move(dx: int, dy: int) -> None:
+    import os
+
+    kind = backend_for(SYSTEM, os.environ.get("DISPLAY"), os.environ.get("WAYLAND_DISPLAY"))
+    if kind == "sendinput" and _win_move(dx, dy):
+        return
+    if kind == "cgevent" and _mac_move(dx, dy):
+        return
+    if kind == "xtest" and _linux_xtest(dx, dy):
+        return
+    if kind == "ydotool":
+        _ydotool(["mousemove", "-x", str(dx), "-y", str(dy)])
+        return
+    if kind == "none":
+        raise ControlError("No hay sesión gráfica para mover el ratón")
+    mouse, _keyboard = _input()
+    mouse.move(dx, dy)
+
+
+def _win_move(dx: int, dy: int) -> bool:
+    extra = ctypes.c_size_t
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_ = [
+            ("dx", ctypes.c_long),
+            ("dy", ctypes.c_long),
+            ("mouseData", ctypes.c_ulong),
+            ("dwFlags", ctypes.c_ulong),
+            ("time", ctypes.c_ulong),
+            ("dwExtraInfo", extra),
+        ]
+
+    class INPUT(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_ulong), ("mi", MOUSEINPUT)]
+
+    event = INPUT()
+    event.type = 0
+    event.mi.dx = dx
+    event.mi.dy = dy
+    event.mi.dwFlags = 0x0001
+    sent = ctypes.windll.user32.SendInput(1, ctypes.byref(event), ctypes.sizeof(event))
+    return sent == 1
+
+
+def _mac_move(dx: int, dy: int) -> bool:
+    try:
+        quartz = ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+        core = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+    except OSError:
+        return False
+    quartz.CGEventCreate.restype = ctypes.c_void_p
+    quartz.CGEventCreate.argtypes = [ctypes.c_void_p]
+    event = quartz.CGEventCreate(None)
+    if not event:
+        return False
+    quartz.CGEventSetType(event, 5)
+    quartz.CGEventSetIntegerValueField(event, 4, int(dx))
+    quartz.CGEventSetIntegerValueField(event, 5, int(dy))
+    quartz.CGEventPost(0, event)
+    core.CFRelease(event)
+    return True
+
+
+_x_bundle = None
+_x_failed = False
+
+
+def _linux_xtest(dx: int, dy: int) -> bool:
+    global _x_bundle, _x_failed
+    if _x_failed:
+        return False
+    try:
+        if _x_bundle is None:
+            x11 = ctypes.CDLL("libX11.so.6")
+            xtst = ctypes.CDLL("libXtst.so.6")
+            x11.XOpenDisplay.restype = ctypes.c_void_p
+            disp = x11.XOpenDisplay(None)
+            if not disp:
+                _x_failed = True
+                return False
+            _x_bundle = (x11, xtst, disp)
+        x11, xtst, disp = _x_bundle
+        xtst.XTestFakeRelativeMotionEvent(ctypes.c_void_p(disp), int(dx), int(dy), 0)
+        x11.XFlush(ctypes.c_void_p(disp))
+        return True
+    except OSError:
+        _x_failed = True
+        return False
 
 
 def mouse_click(button: str, count: int = 1) -> None:
@@ -307,7 +419,8 @@ def cursor_status() -> dict[str, str]:
 
 def _cursor_target(mode: str) -> Any:
     if SYSTEM == "Windows":
-        return {"normal": 1, "large": 8, "huge": 15}[mode]
+        size = {"normal": 1, "large": 8, "huge": 15}[mode]
+        return (size, _windows_base(size))
     if SYSTEM == "Darwin":
         return {"normal": 1.0, "large": 2.5, "huge": 4.0}[mode]
     return {"normal": 24, "large": 48, "huge": 96}[mode]
@@ -315,14 +428,21 @@ def _cursor_target(mode: str) -> Any:
 
 def _read_cursor_size() -> Any:
     if SYSTEM == "Windows":
-        try:
-            import winreg
+        import winreg
 
+        cursor = 1
+        base = 32
+        try:
             with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Accessibility") as key:
-                value, _typ = winreg.QueryValueEx(key, "CursorSize")
-                return int(value)
+                cursor = int(winreg.QueryValueEx(key, "CursorSize")[0])
         except OSError:
-            return 1
+            cursor = 1
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Cursors") as key:
+                base = int(winreg.QueryValueEx(key, "CursorBaseSize")[0])
+        except OSError:
+            base = _windows_base(cursor)
+        return (cursor, base)
     if SYSTEM == "Darwin":
         result = _run(
             ["defaults", "read", "com.apple.universalaccess", "mouseDriverCursorSize"]
@@ -341,17 +461,34 @@ def _read_cursor_size() -> Any:
     return 24
 
 
+def _windows_base(size: int) -> int:
+    size = max(1, min(15, int(size)))
+    return 32 + (size - 1) * 16
+
+
+def _windows_refresh_cursors() -> None:
+    user32 = ctypes.windll.user32
+    user32.SystemParametersInfoW(0x0057, 0, None, 0x0001 | 0x0002)
+    user32.SendMessageTimeoutW(0xFFFF, 0x001A, 0, "ImmersiveColorSet", 0x0002, 500, None)
+    if _which("rundll32"):
+        _run(["rundll32.exe", "user32.dll,UpdatePerUserSystemParameters", "1,", "True"])
+
+
 def _apply_cursor_size(size: Any) -> str:
     if SYSTEM == "Windows":
         import winreg
 
+        if isinstance(size, tuple):
+            cursor, base = int(size[0]), int(size[1])
+        else:
+            cursor = int(size)
+            base = _windows_base(cursor)
         with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Accessibility") as key:
-            winreg.SetValueEx(key, "CursorSize", 0, winreg.REG_DWORD, int(size))
-        spi_setcursors = 0x0057
-        ctypes.windll.user32.SystemParametersInfoW(spi_setcursors, 0, None, 0x03)
-        if _which("rundll32"):
-            _run(["rundll32.exe", "user32.dll,UpdatePerUserSystemParameters"])
-        return "Tamaño de puntero de Windows. Si no cambia al instante, cierra sesión una vez."
+            winreg.SetValueEx(key, "CursorSize", 0, winreg.REG_DWORD, cursor)
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Cursors") as key:
+            winreg.SetValueEx(key, "CursorBaseSize", 0, winreg.REG_DWORD, base)
+        _windows_refresh_cursors()
+        return "Cursor de Windows cambiado"
     if SYSTEM == "Darwin":
         result = _run(
             [
