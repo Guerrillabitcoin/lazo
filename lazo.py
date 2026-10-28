@@ -178,7 +178,12 @@ def plain_url(ip: str) -> str:
 def qr_svg(url: str) -> str:
     import segno
 
-    return segno.make(url, error="l").svg_inline(scale=12, border=4, dark="#000000", light="#ffffff")
+    svg = segno.make(url, error="l").svg_inline(scale=8, border=4, dark="#000000", light="#ffffff")
+    match = re.search(r'width="(\d+(?:\.\d+)?)"\s+height="(\d+(?:\.\d+)?)"', svg)
+    if match and "viewBox" not in svg:
+        width, height = match.group(1), match.group(2)
+        svg = svg.replace("<svg ", f'<svg viewBox="0 0 {width} {height}" ', 1)
+    return svg
 
 
 def note_visit(ip: str) -> None:
@@ -193,7 +198,7 @@ def note_visit(ip: str) -> None:
 def connect_page() -> bytes:
     targets = lan_targets()[:3]
     blocks: list[str] = []
-    for label, ip in targets:
+    for index, (label, ip) in enumerate(targets):
         url = plain_url(ip)
         try:
             svg = qr_svg(url)
@@ -202,9 +207,9 @@ def connect_page() -> bytes:
         blocks.append(
             f"""<section class="card">
               <h2>{escape(label)}</h2>
-              <div class="qr">{svg or ""}</div>
               <p class="url">{escape(url)}</p>
               <p class="hint">PIN {escape(PIN)}</p>
+              <div class="qr">{svg if index == 0 else ""}</div>
             </section>"""
         )
     if not blocks:
@@ -220,9 +225,17 @@ def connect_page() -> bytes:
     main {{ max-width: 480px; margin: 0 auto; padding: 28px 16px 48px; text-align: center; }}
     h1 {{ font-weight: 500; font-size: 1.5rem; }}
     h2 {{ font-size: 1rem; font-weight: 500; color: #e07a3d; }}
-    .card {{ margin: 0 auto 32px; }}
-    .qr {{ display: inline-block; background: #fff; padding: 12px; border-radius: 16px; }}
-    svg {{ width: min(320px, 86vw); height: auto; }}
+    .card {{ margin: 0 auto 28px; }}
+    .qr {{
+      width: min(240px, calc(100vw - 80px));
+      aspect-ratio: 1;
+      margin: 16px auto 0;
+      background: #fff;
+      padding: 16px;
+      box-sizing: content-box;
+    }}
+    .qr:empty {{ display: none; }}
+    svg {{ width: 100%; height: 100%; display: block; }}
     .url {{ font-size: 1.35rem; color: #fff; word-break: break-all; margin: 14px 0 4px; }}
     .hint {{ letter-spacing: 0.18em; font-size: 1.2rem; }}
     .note, #estado {{ color: #c4b8aa; text-align: left; }}
@@ -409,11 +422,10 @@ def main() -> None:
     PIN = args.pin if args.pin.isdigit() and len(args.pin) == 6 else f"{secrets.randbelow(900000) + 100000}"
     PORT = args.port
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    urls = [phone_url(ip) for ip in lan_ips()]
     print()
     print("  Lazo está en este PC")
     print(f"  PIN: {PIN}")
-    print("  Se abre una ventana con el QR. Escanéalo con la cámara del móvil.")
+    print("  En el PC se abre la dirección. Escríbela en el móvil, no hace falta el QR.")
     print("  Misma Wi-Fi de casa. No hace falta VPN. Si no se abre, entra aquí en el PC:")
     print(f"    http://127.0.0.1:{args.port}/conectar")
     for label, ip in lan_targets():
@@ -423,12 +435,6 @@ def main() -> None:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     if not args.no_browser:
         threading.Timer(0.3, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/conectar")).start()
-    try:
-        import segno
-
-        segno.make(urls[0], error="m").terminal(compact=True)
-    except Exception:
-        pass
     try:
         while True:
             time.sleep(0.5)
