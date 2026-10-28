@@ -187,6 +187,66 @@ document.querySelector("#clip-form").addEventListener("submit", async (event) =>
   }
 });
 
+document.querySelector("#photo-input").addEventListener("change", (event) => sendPhotos(event.target));
+document.querySelector("#photo-dir").addEventListener("change", (event) => sendPhotos(event.target));
+
+const PHOTO_NAME = /\.(jpe?g|png|gif|webp|heic|heif|bmp|avif|mp4|mov|m4v|webm|3gp|mkv)$/i;
+
+function isPhoto(file) {
+  const type = file.type || "";
+  return type.startsWith("image/") || type.startsWith("video/") || PHOTO_NAME.test(file.name);
+}
+
+async function sendPhotos(input) {
+  const files = [...(input.files || [])].filter(isPhoto);
+  input.value = "";
+  const progress = document.querySelector("#photo-progress");
+  if (!files.length) {
+    progress.textContent = "No hay fotos ni vídeos";
+    return;
+  }
+  let sent = 0;
+  let skipped = 0;
+  for (let index = 0; index < files.length; index += 1) {
+    const file = files[index];
+    progress.textContent = `${index + 1} de ${files.length} · ${file.name}`;
+    try {
+      const check = await fetch("/api/photos/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: file.name, size: file.size }),
+      });
+      const known = await check.json().catch(() => ({}));
+      if (check.status === 401) {
+        showPin();
+        return;
+      }
+      if (!check.ok) throw new Error(known.error || "No se pudo");
+      if (known.skip) {
+        skipped += 1;
+        continue;
+      }
+      const res = await fetch("/api/photos", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-Filename": encodeURIComponent(file.name),
+        },
+        body: file,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "No se pudo enviar");
+      if (data.skipped) skipped += 1;
+      else sent += 1;
+    } catch (err) {
+      progress.textContent = err.message;
+      return;
+    }
+  }
+  progress.textContent = `En el PC: ${sent} nuevas, ${skipped} ya estaban`;
+  say(progress.textContent);
+}
+
 document.querySelector("#file-input").addEventListener("change", async (event) => {
   const file = event.target.files && event.target.files[0];
   event.target.value = "";

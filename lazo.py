@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.14"
+VERSION = "0.15"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -392,6 +392,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/files":
             self._guard(lambda _body: control.list_files())
             return
+        if path == "/api/photos":
+            self._guard(lambda _body: control.list_photos())
+            return
         if path.startswith("/api/files/"):
             self._download(path.rsplit("/", 1)[-1])
             return
@@ -453,6 +456,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/files":
             self._upload()
+            return
+        if path == "/api/photos/check":
+            self._photo_check()
+            return
+        if path == "/api/photos":
+            self._upload_photo()
+            return
+        if path == "/api/photos/open":
+            self._photo_open()
             return
         action = path.removeprefix("/api/")
         if action not in ACTIONS:
@@ -544,6 +556,58 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, control.save_file(name, data))
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)})
+
+    def _photo_check(self) -> None:
+        if not self._authed():
+            self._send(401, {"error": "Entra con el PIN"})
+            return
+        try:
+            body = self._read_json()
+            self._send(200, control.photo_status(str(body.get("name", "")), int(body.get("size", 0))))
+        except (control.ControlError, TypeError, ValueError) as exc:
+            self._send(400, {"error": str(exc)})
+
+    def _photo_open(self) -> None:
+        if not self._authed():
+            self._send(401, {"error": "Entra con el PIN"})
+            return
+        try:
+            self._send(200, control.open_photos_folder())
+        except control.ControlError as exc:
+            self._send(400, {"error": str(exc)})
+
+    def _upload_photo(self) -> None:
+        if not self._authed():
+            self._send(401, {"error": "Entra con el PIN"})
+            return
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        name = unquote(self.headers.get("X-Filename", "foto"))
+        try:
+            started = control.start_photo(name, length)
+        except control.ControlError as exc:
+            self._send(400, {"error": str(exc)})
+            return
+        if started is None:
+            if length:
+                self.rfile.read(length)
+            self._send(200, {"skipped": True})
+            return
+        part, final = started
+        remaining = length
+        try:
+            with part.open("wb") as out:
+                while remaining > 0:
+                    chunk = self.rfile.read(min(256 * 1024, remaining))
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    remaining -= len(chunk)
+            self._send(200, control.finish_photo(part, final, length))
+        except control.ControlError as exc:
+            self._send(400, {"error": str(exc)})
+        except OSError:
+            part.unlink(missing_ok=True)
+            self._send(400, {"error": "No se pudo guardar"})
 
     def _download(self, file_id: str) -> None:
         if not self._authed():

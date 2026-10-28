@@ -1410,13 +1410,114 @@ def _physical_mouse_loop() -> None:
 
 
 _files_dir = Path(__file__).with_name("nube")
+_photos_dir = Path(__file__).with_name("Fotos")
 _FILE_CAP = 80 * 1024 * 1024
 _FILE_TOTAL = 400 * 1024 * 1024
+_PHOTO_CAP = 1536 * 1024 * 1024
+_PHOTO_TOTAL = 30 * 1024 * 1024 * 1024
+_photo_lock = threading.Lock()
 
 
 def set_files_dir(path: Path) -> None:
     global _files_dir
     _files_dir = Path(path)
+
+
+def set_photos_dir(path: Path) -> None:
+    global _photos_dir
+    _photos_dir = Path(path)
+
+
+def list_photos() -> dict[str, Any]:
+    _photos_dir.mkdir(parents=True, exist_ok=True)
+    rows = _photo_rows()
+    return {"folder": str(_photos_dir), "count": len(rows), "photos": rows[:40]}
+
+
+def photo_status(name: str, size: int) -> dict[str, Any]:
+    size = int(size)
+    if size <= 0 or size > _PHOTO_CAP:
+        raise ControlError("Pasa de 1,5 GB o está vacío")
+    clean = _photo_name(name)
+    path = _photos_dir / clean
+    skip = path.is_file() and path.stat().st_size == size
+    return {"skip": skip, "name": clean}
+
+
+def start_photo(name: str, size: int) -> tuple[Path, Path] | None:
+    size = int(size)
+    if size <= 0 or size > _PHOTO_CAP:
+        raise ControlError("Pasa de 1,5 GB o está vacío")
+    clean = _photo_name(name)
+    with _photo_lock:
+        _photos_dir.mkdir(parents=True, exist_ok=True)
+        current = _photos_dir / clean
+        if current.is_file() and current.stat().st_size == size:
+            return None
+        used = sum(path.stat().st_size for path in _photos_dir.iterdir() if path.is_file() and not path.name.endswith(".part"))
+        if used + size > _PHOTO_TOTAL:
+            raise ControlError("La carpeta Fotos está llena")
+        final = current if not current.exists() else _unique_photo(clean)
+        part = Path(str(final) + ".part")
+        part.write_bytes(b"")
+        return part, final
+
+
+def finish_photo(part: Path, final: Path, size: int) -> dict[str, Any]:
+    if not part.is_file() or part.stat().st_size != int(size):
+        part.unlink(missing_ok=True)
+        raise ControlError("Se cortó el envío")
+    if final.parent != _photos_dir:
+        part.unlink(missing_ok=True)
+        raise ControlError("nombre no válido")
+    part.replace(final)
+    return {"name": final.name, "size": int(size), "folder": str(_photos_dir)}
+
+
+def open_photos_folder() -> dict[str, Any]:
+    import os
+
+    _photos_dir.mkdir(parents=True, exist_ok=True)
+    if SYSTEM == "Windows":
+        os.startfile(_photos_dir)  # type: ignore[attr-defined]
+    elif SYSTEM == "Darwin":
+        _run(["open", str(_photos_dir)])
+    else:
+        _run(["xdg-open", str(_photos_dir)])
+    return {"folder": str(_photos_dir)}
+
+
+def _photo_name(name: str) -> str:
+    base = Path(str(name).replace("\\", "/")).name
+    base = "".join(ch for ch in base if ch not in '<>:"|?*' and ord(ch) >= 32).strip().strip(".")
+    return (base or "foto")[:120]
+
+
+def _unique_photo(name: str) -> Path:
+    stem, dot, ext = name.rpartition(".")
+    if not dot or not stem:
+        stem, ext = name, ""
+    else:
+        ext = "." + ext
+    number = 2
+    while True:
+        candidate = _photos_dir / f"{stem} ({number}){ext}"
+        if not candidate.exists():
+            return candidate
+        number += 1
+
+
+def _photo_rows() -> list[dict[str, Any]]:
+    if not _photos_dir.is_dir():
+        return []
+    rows = []
+    for path in _photos_dir.iterdir():
+        if not path.is_file() or path.name.endswith(".part") or path.name.startswith("."):
+            continue
+        stat = path.stat()
+        rows.append({"name": path.name, "size": stat.st_size, "at": int(stat.st_mtime)})
+    rows.sort(key=lambda row: (row["at"], row["name"]), reverse=True)
+    return rows
 
 
 def list_files() -> dict[str, Any]:

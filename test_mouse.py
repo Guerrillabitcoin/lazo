@@ -103,6 +103,31 @@ def test_mesa_and_small_cursor() -> None:
     print("mesa y cursor pequeño")
 
 
+def test_photos_folder() -> None:
+    import tempfile
+    from pathlib import Path
+
+    folder = Path(tempfile.mkdtemp())
+    control.set_photos_dir(folder)
+    first = control.start_photo("../IMG_1.jpg", 4)
+    if first is None or first[1].parent != folder or first[1].name != "IMG_1.jpg":
+        raise SystemExit(first)
+    first[0].write_bytes(b"foto")
+    control.finish_photo(first[0], first[1], 4)
+    if control.photo_status("IMG_1.jpg", 4)["skip"] is not True:
+        raise SystemExit("volvió a copiar la misma foto")
+    second = control.start_photo("IMG_1.jpg", 5)
+    if second is None or second[1].name != "IMG_1 (2).jpg":
+        raise SystemExit(second)
+    second[0].write_bytes(b"foto2")
+    control.finish_photo(second[0], second[1], 5)
+    names = sorted(path.name for path in folder.iterdir())
+    if names != ["IMG_1 (2).jpg", "IMG_1.jpg"]:
+        raise SystemExit(names)
+    control.set_photos_dir(Path(__file__).with_name("Fotos"))
+    print("fotos sin repetir")
+
+
 def test_hook_speed() -> None:
     seen: list[tuple[int, int]] = []
     control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
@@ -197,6 +222,7 @@ if __name__ == "__main__":
     test_clipboard_memory()
     test_notes_order()
     test_mesa_and_small_cursor()
+    test_photos_folder()
     test_hook_speed()
     test_live_channel()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")

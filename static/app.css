@@ -263,6 +263,8 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
   background: var(--key);
 }
 
+.photo-actions { display: grid; gap: 8px; }
+
 .file-row { display: flex; gap: 8px; }
 .file-row a, .file-row button { flex: 1; }
 .file-row a {
