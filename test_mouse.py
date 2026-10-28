@@ -129,11 +129,11 @@ def test_photos_folder() -> None:
 
 
 def test_youtube_speeds() -> None:
-    for raw, expected in ((1, 1.0), ("1.1", 1.1), (1.25, 1.25), (1.50, 1.5), (2, 2.0)):
-        if control.match_youtube_speed(raw) != expected:
+    for raw, expected, ups in ((1, 1.0, 3), (1.25, 1.25, 4), (1.50, 1.5, 5), (2, 2.0, 7)):
+        if control.match_youtube_speed(raw) != expected or control.youtube_speed_ups(raw) != ups:
             raise SystemExit(raw)
     try:
-        control.match_youtube_speed(3)
+        control.match_youtube_speed(1.1)
     except control.ControlError:
         print("velocidades de YouTube")
         return

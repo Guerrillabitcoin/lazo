@@ -871,8 +871,9 @@ def _find_title(needle: str, exclude: str | None = None) -> dict[str, str] | Non
 
 
 _levels = {"youtube": 50, "spotify": 50, "youtube_speed": 1.0}
-_YOUTUBE_SPEEDS = (1.0, 1.1, 1.25, 1.5, 2.0)
-_YOUTUBE_SPEED_TEXT = {1.0: "1", 1.1: "1.1", 1.25: "1.25", 1.5: "1.5", 2.0: "2"}
+_YOUTUBE_SPEEDS = (1.0, 1.25, 1.5, 2.0)
+_YOUTUBE_LADDER = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
+_YOUTUBE_SPEED_TEXT = {1.0: "1.0", 1.25: "1.25", 1.5: "1.50", 2.0: "2"}
 
 
 def match_youtube_speed(raw: object) -> float:
@@ -881,6 +882,10 @@ def match_youtube_speed(raw: object) -> float:
         if abs(rate - item) < 0.001:
             return item
     raise ControlError("velocidad no válida")
+
+
+def youtube_speed_ups(raw: object) -> int:
+    return _YOUTUBE_LADDER.index(match_youtube_speed(raw))
 
 
 def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
@@ -932,15 +937,17 @@ def _youtube_speed(raw: object) -> dict[str, Any]:
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
         _focus_unlocked(row["id"])
-    time.sleep(0.16)
-    script = (
-        "document.querySelectorAll('video').forEach(function(v){v.playbackRate="
-        + _YOUTUBE_SPEED_TEXT[rate]
-        + "})"
-    )
-    _run_page_js(script, row["title"])
+    time.sleep(0.12)
+    # YouTube solo salta 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75 y 2.
+    # Bajar del todo y luego subir deja la velocidad exacta, sin abrir ventanas.
+    for _ in range(8):
+        _speed_tap(False)
+        time.sleep(0.04)
+    for _ in range(youtube_speed_ups(rate)):
+        _speed_tap(True)
+        time.sleep(0.04)
     _levels["youtube_speed"] = rate
-    label = "1.50" if rate == 1.5 else "1.0" if rate == 1 else _YOUTUBE_SPEED_TEXT[rate]
+    label = _YOUTUBE_SPEED_TEXT[rate]
     return {
         "detail": f"Velocidad {label}",
         "title": row["title"],
@@ -949,48 +956,13 @@ def _youtube_speed(raw: object) -> dict[str, Any]:
     }
 
 
-def _run_page_js(script: str, title: str) -> None:
-    if SYSTEM == "Darwin" and _mac_page_js(script, title):
+def _speed_tap(faster: bool) -> None:
+    if SYSTEM == "Windows" and _win_speed_key(faster):
         return
-    chord = ["ctrl", "shift", "k" if "firefox" in title.lower() else "j"]
-    _chord(chord)
-    time.sleep(0.45)
-    try:
-        if SYSTEM == "Windows":
-            _win_type_line(script)
-        else:
-            _type_line(script)
-    finally:
-        time.sleep(0.12)
-        _chord(chord)
+    _chord(["shift", "." if faster else ","])
 
 
-def _mac_page_js(script: str, title: str) -> bool:
-    low = title.lower()
-    if "firefox" in low:
-        return False
-    if "edge" in low:
-        app = "Microsoft Edge"
-    elif "brave" in low:
-        app = "Brave Browser"
-    else:
-        app = "Google Chrome"
-    js = script.replace("\\", "\\\\").replace('"', '\\"')
-    source = f'tell application "{app}" to execute javascript "{js}" in active tab of front window'
-    result = _run(["osascript", "-e", source], timeout=4)
-    return result.returncode == 0
-
-
-def _type_line(script: str) -> None:
-    from pynput.keyboard import Key
-
-    _mouse, keyboard = _input()
-    keyboard.type(script)
-    keyboard.press(Key.enter)
-    keyboard.release(Key.enter)
-
-
-def _win_type_line(script: str) -> None:
+def _win_speed_key(faster: bool) -> bool:
     extra = ctypes.c_size_t
 
     class KEYBDINPUT(ctypes.Structure):
@@ -1020,23 +992,16 @@ def _win_type_line(script: str) -> None:
         _fields_ = [("type", ctypes.c_ulong), ("u", _U)]
 
     if ctypes.sizeof(INPUT) != 40:
-        _type_line(script)
-        return
-    pieces: list[tuple[int, int, int]] = []
-    for char in script:
-        pieces.append((0, ord(char), 0x0004))
-        pieces.append((0, ord(char), 0x0004 | 0x0002))
-    pieces.append((0x0D, 0, 0))
-    pieces.append((0x0D, 0, 0x0002))
-    batch = (INPUT * len(pieces))()
-    for index, (vk, scan, flags) in enumerate(pieces):
+        return False
+    # Shift + punto sube, Shift + coma baja. Son las teclas del vídeo, no un carácter.
+    vk = 0xBE if faster else 0xBC
+    steps = ((0x10, 0), (vk, 0), (vk, 0x0002), (0x10, 0x0002))
+    batch = (INPUT * 4)()
+    for index, (key, flags) in enumerate(steps):
         batch[index].type = 1
-        batch[index].ki.wVk = vk
-        batch[index].ki.wScan = scan
+        batch[index].ki.wVk = key
         batch[index].ki.dwFlags = flags
-    sent = ctypes.windll.user32.SendInput(len(pieces), batch, ctypes.sizeof(INPUT))
-    if sent != len(pieces):
-        raise ControlError("Windows no dejó fijar la velocidad")
+    return ctypes.windll.user32.SendInput(4, batch, ctypes.sizeof(INPUT)) == 4
 
 
 def _youtube_volume(level: int) -> dict[str, Any]:

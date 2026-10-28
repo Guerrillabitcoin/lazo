@@ -746,8 +746,8 @@ document.querySelector("#yt-vol").addEventListener("change", async (event) => {
   }
 });
 
-const YT_SPEEDS = [1, 1.1, 1.25, 1.5, 2];
-const YT_SPEED_LABELS = ["1.0", "1.1", "1.25", "1.50", "2"];
+const YT_SPEEDS = [1, 1.25, 1.5, 2];
+const YT_SPEED_LABELS = ["1.0", "1.25", "1.50", "2"];
 
 function showSpeed(rate) {
   const index = YT_SPEEDS.findIndex((item) => Math.abs(item - Number(rate)) < 0.001);
