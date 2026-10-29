@@ -27,7 +27,7 @@ const TOOLS = [
   { id: "notes", name: "Notas" },
   { id: "volume", name: "Volumen" },
 ];
-const PINNED = ["mouse", "bridge"];
+const PINNED = ["mouse"];
 
 let tab = "mouse";
 let winId = "";
@@ -89,9 +89,12 @@ function setLink(mode) {
 }
 
 function showPin() {
+  const input = document.querySelector("#pin-input");
+  const saved = sessionStorage.getItem("lazo-pin") || "";
+  if (saved && !input.value) input.value = saved;
   pinPanel.hidden = false;
   app.hidden = true;
-  if (dock) dock.hidden = true;
+  dock.hidden = true;
   setLink("off");
   window.clearInterval(poll);
   window.clearInterval(clipsTimer);
@@ -120,7 +123,7 @@ function showApp() {
   app.hidden = false;
   dock.hidden = false;
   setLink("on");
-  openCube(tab || "mouse");
+  openCube("mouse");
   if (visor.textContent === "Conectando…") say("Listo");
   refreshStatus();
   poll = window.setInterval(refreshStatus, 4000);
@@ -409,6 +412,7 @@ document.querySelector("#file-input").addEventListener("change", async (event) =
 
 async function login() {
   const pin = document.querySelector("#pin-input").value.trim();
+  if (/^\d{4}$/.test(pin)) sessionStorage.setItem("lazo-pin", pin);
   try {
     const headers = { "Content-Type": "application/octet-stream" };
     const raw = JSON.stringify({ pin });
@@ -425,6 +429,7 @@ async function login() {
     if (data.token) {
       sessionToken = data.token;
       localStorage.setItem("lazo-token", data.token);
+      sessionStorage.setItem("lazo-pin", pin);
     }
     say(wireKey ? "Conectado y cifrado" : "Conectado a este PC");
     showApp();
@@ -451,8 +456,11 @@ function loadOrder() {
   return [...PINNED, ...rest];
 }
 
-function dragTool(button, pointerId, startX) {
+function dragTool(event) {
+  const button = event.currentTarget;
+  const pointerId = event.pointerId;
   const scroller = button.parentElement;
+  const startX = event.clientX;
   let lastX = startX;
   let dragged = false;
   try {
@@ -467,6 +475,9 @@ function dragTool(button, pointerId, startX) {
     dragged = true;
     const right = ev.clientX >= lastX;
     lastX = ev.clientX;
+    const edge = scroller.getBoundingClientRect();
+    if (ev.clientX > edge.right - 28) scroller.scrollLeft += 14;
+    if (ev.clientX < edge.left + 28) scroller.scrollLeft -= 14;
     const sibling = right ? button.nextElementSibling : button.previousElementSibling;
     if (!sibling) return;
     const box = sibling.getBoundingClientRect();
@@ -489,36 +500,6 @@ function dragTool(button, pointerId, startX) {
   button.addEventListener("pointercancel", stop);
 }
 
-function watchTool(event) {
-  const button = event.currentTarget;
-  const pointerId = event.pointerId;
-  const startX = event.clientX;
-  const startY = event.clientY;
-  let hold = window.setTimeout(() => {
-    hold = 0;
-    dragTool(button, pointerId, startX);
-  }, 320);
-  function move(ev) {
-    if (!hold || ev.pointerId !== pointerId) return;
-    if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10) {
-      window.clearTimeout(hold);
-      hold = 0;
-      end();
-    }
-  }
-  function end(ev) {
-    if (ev && ev.pointerId !== pointerId) return;
-    if (hold) window.clearTimeout(hold);
-    hold = 0;
-    button.removeEventListener("pointermove", move);
-    button.removeEventListener("pointerup", end);
-    button.removeEventListener("pointercancel", end);
-  }
-  button.addEventListener("pointermove", move);
-  button.addEventListener("pointerup", end);
-  button.addEventListener("pointercancel", end);
-}
-
 function renderDock() {
   const fixed = document.createElement("div");
   const scroller = document.createElement("div");
@@ -538,7 +519,7 @@ function renderDock() {
       }
       openCube(id);
     });
-    if (!PINNED.includes(id)) button.addEventListener("pointerdown", watchTool);
+    if (!PINNED.includes(id)) button.addEventListener("pointerdown", dragTool);
     (PINNED.includes(id) ? fixed : scroller).append(button);
   });
   dock.replaceChildren(fixed, scroller);
@@ -569,10 +550,8 @@ if (/^\d{4}$/.test(fromLink)) {
     const sealed = res.headers.get("content-type") !== "application/json";
     if (res.status === 401 || (wireKey && sealed && !data.platform)) {
       sessionToken = "";
-      wireKey = null;
       localStorage.removeItem("lazo-token");
-      localStorage.removeItem("lazo-key");
-      say("La sesión caducó. Escanea el QR.");
+      say("Desconectado");
       showPin();
       return;
     }

@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.22"
+VERSION = "0.23"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -37,6 +37,8 @@ VISITS: list[str] = []
 VISITS_LOCK = threading.Lock()
 MESA_OPENED = False
 PAIRED = False
+LAST_PHONE = 0.0
+PHONE_LOCK = threading.Lock()
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
@@ -263,6 +265,18 @@ def qr_svg(url: str) -> str:
     return svg
 
 
+def note_phone() -> None:
+    global LAST_PHONE, PAIRED
+    with PHONE_LOCK:
+        LAST_PHONE = time.time()
+        PAIRED = True
+
+
+def phone_online() -> bool:
+    with PHONE_LOCK:
+        return LAST_PHONE > 0 and (time.time() - LAST_PHONE) < 12
+
+
 def note_visit(ip: str) -> None:
     if ip in ("127.0.0.1", "::1"):
         return
@@ -285,7 +299,7 @@ def connect_page() -> bytes:
             f"""<section class="card">
               <h2>{escape(label)}</h2>
               <p class="url">{escape(url)}</p>
-              <p class="hint">PIN {escape(PIN)}</p>
+              <p class="hint pin-line">PIN {escape(PIN)}</p>
               <div class="qr">{svg if index == 0 else ""}</div>
             </section>"""
         )
@@ -322,8 +336,8 @@ def connect_page() -> bytes:
 </head>
 <body>
   <main>
-    <h1>Escanea el QR</h1>
-    <p class="note">El QR ya lleva el PIN y cifra el puente. Misma Wi-Fi, sin VPN y sin internet. Quien escuche la red ve ruido, no lo que copias ni los archivos. Si el QR no abre, escribe la dirección y el PIN a mano.</p>
+    <h1 id="titulo">Escanea el QR</h1>
+    <p id="ayuda" class="note">El QR ya lleva el PIN y cifra el puente. Misma Wi-Fi, sin VPN y sin internet. Quien escuche la red ve ruido, no lo que copias ni los archivos. Si el QR no abre, escribe la dirección y el PIN a mano.</p>
     <p id="estado">Todavía no llega el móvil.</p>
     <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a> para pegar texto y soltar archivos.</p>
     {''.join(blocks)}
@@ -332,11 +346,13 @@ def connect_page() -> bytes:
     async function tick() {{
       try {{
         const data = await fetch("/api/seen").then((res) => res.json());
+        const pinBits = document.querySelectorAll(".pin-line, #ayuda, #titulo");
         if (data.paired) {{
-          document.querySelector("#estado").textContent = "Móvil conectado. El PIN ya no hace falta.";
-          document.querySelectorAll(".hint").forEach((el) => {{ el.hidden = true; }});
-        }} else if (data.visits && data.visits.length) {{
-          document.querySelector("#estado").textContent = "El móvil ya entró.";
+          document.querySelector("#estado").textContent = "Móvil conectado";
+          pinBits.forEach((el) => {{ el.hidden = true; }});
+        }} else {{
+          document.querySelector("#estado").textContent = "Escanea el QR";
+          pinBits.forEach((el) => {{ el.hidden = false; }});
         }}
       }} catch (_err) {{}}
     }}
@@ -403,9 +419,13 @@ class Handler(BaseHTTPRequestHandler):
             return True
         header = self.headers.get("X-Lazo", "")
         if header and len(header) == len(TOKEN) and hmac.compare_digest(header, TOKEN):
+            note_phone()
             return True
         got = cookies(self.headers.get("Cookie")).get("lazo", "")
-        return bool(got) and len(got) == len(TOKEN) and hmac.compare_digest(got, TOKEN)
+        if got and len(got) == len(TOKEN) and hmac.compare_digest(got, TOKEN):
+            note_phone()
+            return True
+        return False
 
     def _send(self, code: int, payload: dict | None = None, body: bytes | None = None, content_type: str = "application/json") -> None:
         data = body if body is not None else json.dumps(payload or {}, ensure_ascii=False).encode()
@@ -466,7 +486,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.client_address[0] not in ("127.0.0.1", "::1"):
                 self._send(404, {"error": "no está"})
                 return
-            self._send(200, {"visits": list(VISITS), "paired": PAIRED})
+            self._send(200, {"visits": list(VISITS), "paired": phone_online()})
             return
         if path == "/api/windows":
             self._guard(lambda _body: {"windows": control.list_windows()})
@@ -509,9 +529,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         sock = self.connection
         sock.settimeout(None)
+        note_phone()
         try:
             while True:
                 opcode, payload = _ws_read(sock)
+                note_phone()
                 if opcode == 0x8:
                     break
                 if opcode == 0x9:
@@ -588,8 +610,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(401, {"error": "PIN incorrecto"})
                 return
             FAILS["n"] = 0
-        global PAIRED
-        PAIRED = True
+        note_phone()
         if self.client_address[0] not in ("127.0.0.1", "::1"):
             maybe_open_mesa()
         payload = json.dumps({"ok": True, "token": TOKEN}).encode()
