@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.27</title>
+    <title>LaZoo 0.28</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.27</p>
+          <p class="ver">0.28</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -173,6 +173,37 @@
               <button id="lab-lock" type="button">Bloquear</button>
               <button id="lab-screen" type="button">Apagar pantalla</button>
             </div>
+          </article>
+          <article class="deck">
+            <p class="now">Atajos en prueba</p>
+            <div class="tools">
+              <button type="button" data-lab="desktop">Escritorio</button>
+              <button type="button" data-lab="alttab">Cambiar</button>
+              <button type="button" data-lab="back">Atrás</button>
+              <button type="button" data-lab="forward">Adelante</button>
+              <button type="button" data-lab="copy">Copiar</button>
+              <button type="button" data-lab="paste">Pegar</button>
+              <button type="button" data-lab="undo">Deshacer</button>
+              <button type="button" data-lab="close">Cerrar</button>
+              <button type="button" data-lab="middle">Clic central</button>
+              <button type="button" data-lab="zoomin">Zoom +</button>
+              <button type="button" data-lab="zoomout">Zoom −</button>
+            </div>
+          </article>
+          <article class="deck">
+            <p class="now">Sistema en prueba</p>
+            <div class="tools">
+              <button type="button" data-lab="shot">Captura</button>
+              <button type="button" data-lab="bright_down">Brillo −</button>
+              <button type="button" data-lab="bright_up">Brillo +</button>
+              <button type="button" data-lab="battery">Batería</button>
+              <button type="button" data-lab="front">Ventana activa</button>
+              <button type="button" data-lab="sleep">Suspender</button>
+            </div>
+            <form id="lab-open" class="phrase">
+              <input id="lab-url" maxlength="200" placeholder="Abrir en el PC" />
+              <button type="submit">Abrir</button>
+            </form>
           </article>
         </div>
         </div>

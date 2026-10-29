@@ -1309,3 +1309,26 @@ document.querySelector("#lab-screen").addEventListener("click", async () => {
     say(err.message);
   }
 });
+
+document.querySelector("#view-lab").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-lab]");
+  if (!button) return;
+  try {
+    const data = await api("/api/lab", { action: button.dataset.lab });
+    say(data.detail || "Prueba");
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#lab-open").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const url = document.querySelector("#lab-url").value.trim();
+  if (!url) return;
+  try {
+    await api("/api/lab", { action: "open", url });
+    say(`Abrir «${url}»`);
+  } catch (err) {
+    say(err.message);
+  }
+});

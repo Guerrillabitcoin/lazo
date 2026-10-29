@@ -1432,20 +1432,173 @@ def _spotify_lab(action: str, extra: dict | None = None) -> dict[str, Any]:
     raise ControlError("Me gusta está en prueba en Windows y Mac")
 
 
-def lab(action: str) -> dict[str, str]:
+def clean_url(raw: str) -> str:
+    text = str(raw or "").strip()[:200]
+    if text.startswith(("http://", "https://")):
+        return text
+    if "://" in text or " " in text or "." not in text:
+        raise ControlError("escribe una dirección web")
+    return "https://" + text
+
+
+def lab(action: str, extra: dict | None = None) -> dict[str, Any]:
+    extra = extra or {}
+    notices = {
+        "desktop": "Escritorio",
+        "alttab": "Cambiar de ventana",
+        "back": "Atrás",
+        "forward": "Adelante",
+        "copy": "Copiar",
+        "paste": "Pegar",
+        "undo": "Deshacer",
+        "close": "Cerrar ventana",
+        "middle": "Clic central",
+        "zoomin": "Zoom +",
+        "zoomout": "Zoom −",
+    }
+    if action in notices:
+        _lab_shortcut(action)
+        return {"detail": notices[action]}
+    if action == "open":
+        import webbrowser
+
+        url = clean_url(extra.get("url", ""))
+        webbrowser.open(url)
+        return {"detail": "Abierto en el PC"}
+    if SYSTEM != "Windows":
+        raise ControlError("Esa prueba está solo en Windows")
     if action == "lock":
-        if SYSTEM != "Windows":
-            raise ControlError("Bloquear está en prueba en Windows")
         ctypes.windll.user32.LockWorkStation()
         return {"detail": "Windows bloqueado"}
     if action == "screen":
-        if SYSTEM != "Windows":
-            raise ControlError("Apagar la pantalla está en prueba en Windows")
         user32 = ctypes.windll.user32
         user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
         user32.SendMessageW(0xFFFF, 0x0112, 0xF170, 2)
         return {"detail": "Pantalla apagada"}
+    if action == "sleep":
+        ctypes.windll.Powrprof.SetSuspendState(0, 1, 0)
+        return {"detail": "Windows suspendido"}
+    if action == "shot":
+        return {"detail": _windows_shot()}
+    if action == "bright_up":
+        return {"detail": _windows_brightness(10)}
+    if action == "bright_down":
+        return {"detail": _windows_brightness(-10)}
+    if action == "battery":
+        return {"detail": _windows_battery()}
+    if action == "front":
+        return {"detail": _windows_front() or "Sin ventana activa"}
     raise ControlError("prueba no válida")
+
+
+def _lab_shortcut(action: str) -> None:
+    from pynput.keyboard import Key
+
+    chords = {
+        "desktop": ["cmd", "d"],
+        "alttab": ["alt", "tab"],
+        "back": ["alt", "left"],
+        "forward": ["alt", "right"],
+        "copy": ["ctrl", "c"],
+        "paste": ["ctrl", "v"],
+        "undo": ["ctrl", "z"],
+        "close": ["alt", "f4"],
+    }
+    if action == "middle":
+        mouse_click("middle")
+        return
+    if action in {"zoomin", "zoomout"}:
+        _mouse, keyboard = _input()
+        keyboard.press(Key.ctrl)
+        try:
+            mouse, _keyboard = _input()
+            mouse.scroll(0, 1 if action == "zoomin" else -1)
+        finally:
+            keyboard.release(Key.ctrl)
+        return
+    _lab_chord(chords[action])
+
+
+def _lab_chord(parts: list[str]) -> None:
+    from pynput.keyboard import Key
+
+    table = {
+        "shift": Key.shift,
+        "ctrl": Key.ctrl,
+        "alt": Key.alt,
+        "cmd": Key.cmd,
+        "tab": Key.tab,
+        "left": Key.left,
+        "right": Key.right,
+        "f4": Key.f4,
+    }
+    _mouse, keyboard = _input()
+    held = []
+    try:
+        for part in parts:
+            key = table.get(part, part if len(part) == 1 else None)
+            if key is None:
+                raise ControlError("atajo no válido")
+            keyboard.press(key)
+            if part in table and part not in {"tab", "left", "right", "f4"}:
+                held.append(key)
+            else:
+                keyboard.release(key)
+    finally:
+        for key in reversed(held):
+            keyboard.release(key)
+
+
+def _windows_shot() -> str:
+    _files_dir.mkdir(parents=True, exist_ok=True)
+    dest = _files_dir / f"captura-{time.strftime('%H%M%S')}.png"
+    path = str(dest).replace("'", "''")
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "Add-Type -AssemblyName System.Drawing; "
+        "$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "
+        "$bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height; "
+        "$g = [System.Drawing.Graphics]::FromImage($bmp); "
+        "$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); "
+        f"$bmp.Save('{path}', [System.Drawing.Imaging.ImageFormat]::Png); "
+        "$g.Dispose(); $bmp.Dispose()"
+    )
+    result = _run(["powershell", "-NoProfile", "-Command", script], timeout=15)
+    if result.returncode != 0 or not dest.is_file():
+        raise ControlError("No pude guardar la captura")
+    return "Captura en el puente"
+
+
+def _windows_brightness(delta: int) -> str:
+    script = (
+        "$m = Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightness -ErrorAction Stop; "
+        f"$n = [Math]::Max(0, [Math]::Min(100, [int]$m.CurrentBrightness + ({int(delta)}))); "
+        "$w = Get-CimInstance -Namespace root/WMI -ClassName WmiMonitorBrightnessMethods; "
+        "Invoke-CimMethod -InputObject $w -MethodName WmiSetBrightness -Arguments @{Timeout=1; Brightness=$n} | Out-Null; "
+        "Write-Output $n"
+    )
+    result = _run(["powershell", "-NoProfile", "-Command", script], timeout=8)
+    level = result.stdout.strip().splitlines()[-1:] or [""]
+    if result.returncode != 0 or not level[0].isdigit():
+        raise ControlError("Este PC no dejó cambiar el brillo")
+    return f"Brillo {level[0]}"
+
+
+def _windows_battery() -> str:
+    script = "(Get-CimInstance Win32_Battery -ErrorAction SilentlyContinue).EstimatedChargeRemaining"
+    result = _run(["powershell", "-NoProfile", "-Command", script], timeout=8)
+    text = result.stdout.strip().splitlines()[-1:] or [""]
+    if not text[0].isdigit():
+        return "Sin batería"
+    return f"Batería {text[0]}%"
+
+
+def _windows_front() -> str:
+    user32 = ctypes.windll.user32
+    hwnd = user32.GetForegroundWindow()
+    buf = ctypes.create_unicode_buffer(256)
+    user32.GetWindowTextW(hwnd, buf, 256)
+    return buf.value.strip()[:80]
 
 
 def _spotify_title(row: dict[str, str]) -> str:

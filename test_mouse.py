@@ -42,6 +42,17 @@ def test_spotify_skips_web() -> None:
     print("spotify nativo y cursor 32/256")
 
 
+def test_clean_url() -> None:
+    assert control.clean_url("ejemplo.com") == "https://ejemplo.com"
+    assert control.clean_url("http://192.168.1.2/a") == "http://192.168.1.2/a"
+    try:
+        control.clean_url("javascript:alert(1)")
+    except control.ControlError:
+        print("direcciones de prueba")
+        return
+    raise SystemExit("aceptó una dirección rara")
+
+
 def test_queue_order() -> None:
     tracks = ["a", "b", "c"]
     control.move_tracks(tracks, 2, -1)
@@ -242,6 +253,7 @@ if __name__ == "__main__":
     os.environ.setdefault("LAZO_TEST", "1")
     test_backends()
     test_spotify_skips_web()
+    test_clean_url()
     test_queue_order()
     test_clipboard_memory()
     test_notes_order()
