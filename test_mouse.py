@@ -42,6 +42,17 @@ def test_spotify_skips_web() -> None:
     print("spotify nativo y cursor 32/256")
 
 
+def test_queue_order() -> None:
+    tracks = ["a", "b", "c"]
+    control.move_tracks(tracks, 2, -1)
+    assert tracks == ["a", "c", "b"]
+    control.move_tracks(tracks, 0, -1)
+    assert tracks == ["a", "c", "b"]
+    moved = control.spotify("queue_move", {"index": 0, "dir": 1})
+    assert "tracks" in moved
+    print("cola de prueba")
+
+
 def test_clipboard_memory() -> None:
     import tempfile
     from pathlib import Path
@@ -231,6 +242,7 @@ if __name__ == "__main__":
     os.environ.setdefault("LAZO_TEST", "1")
     test_backends()
     test_spotify_skips_web()
+    test_queue_order()
     test_clipboard_memory()
     test_notes_order()
     test_mesa_and_small_cursor()

@@ -52,8 +52,9 @@
         margin-bottom: 10px;
       }
       ul { list-style: none; margin: 12px 0 0; padding: 0; }
-      li { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
-      li button, li a { flex: 1; }
+      li { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
+      li button, li a { flex: 1; text-align: left; }
+      li .copy { flex: none; width: 88px; text-align: center; }
       a {
         color: #f3eee6;
         text-decoration: none;
@@ -150,13 +151,19 @@
           const button = document.createElement("button");
           button.type = "button";
           button.textContent = item.text.slice(0, 180);
-          button.addEventListener("click", async () => {
+          const copy = document.createElement("button");
+          copy.type = "button";
+          copy.className = "copy";
+          copy.textContent = "Copiar";
+          const take = async () => {
             paste.value = item.text;
             try { await navigator.clipboard.writeText(item.text); } catch (_err) {}
-          });
+          };
+          button.addEventListener("click", take);
+          copy.addEventListener("click", take);
           const when = document.createElement("small");
           when.textContent = stamp(item.at);
-          row.append(button, when);
+          row.append(button, copy, when);
           clips.append(row);
         }
         const listed = await fetch("/api/files").then((res) => res.json());

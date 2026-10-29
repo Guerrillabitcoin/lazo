@@ -176,7 +176,10 @@ button:focus-visible, input:focus-visible {
 .dock-scroll {
   flex: 1;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   scrollbar-width: none;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
 }
 
 .dock-scroll::-webkit-scrollbar { display: none; }
@@ -189,7 +192,24 @@ button:focus-visible, input:focus-visible {
   border-radius: 999px;
 }
 
-.dock-scroll button { touch-action: none; }
+.dock-scroll button {
+  touch-action: pan-x;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.grip {
+  width: 16px;
+  height: 18px;
+  flex: none;
+  border-radius: 5px;
+  touch-action: none;
+  background: repeating-linear-gradient(to bottom, currentColor 0 2px, transparent 2px 5px);
+  opacity: 0.75;
+}
+
+.dock button.dragging { background: var(--copper); color: var(--ink); }
 
 .dock button.on { background: var(--copper); color: var(--ink); }
 
@@ -211,9 +231,18 @@ button:focus-visible, input:focus-visible {
   flex: 1;
   min-height: 48dvh;
   border-radius: 16px;
-  background: #efe6da;
+  background: #16130f;
   touch-action: none;
-  box-shadow: inset 0 0 0 1px #d5c8b8;
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+
+#trail {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
 .cubes {
@@ -259,11 +288,12 @@ button:focus-visible, input:focus-visible {
 
 #finger {
   position: absolute;
-  width: 28px;
-  height: 28px;
-  margin: -14px 0 0 -14px;
+  width: 16px;
+  height: 16px;
+  margin: -8px 0 0 -8px;
   border-radius: 50%;
-  background: var(--copper);
+  background: #e07a3d;
+  box-shadow: 0 0 14px rgba(224, 122, 61, 0.85);
   pointer-events: none;
 }
 
@@ -407,13 +437,23 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 
 .tabs button { font-size: 11px; padding: 6px 1px; }
 
-.clip {
-  width: 100%;
-  text-align: left;
-  padding: 10px 12px;
+.clip-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
   margin-bottom: 6px;
+}
+
+.clip-row .clip {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
   white-space: normal;
 }
+
+.clip-row .copy { flex: none; width: 76px; margin: 0; }
 
 .clip b {
   font-weight: 500;

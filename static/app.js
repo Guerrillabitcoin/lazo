@@ -16,6 +16,7 @@ const views = {
   bridge: document.querySelector("#view-bridge"),
   notes: document.querySelector("#view-notes"),
   volume: document.querySelector("#view-volume"),
+  lab: document.querySelector("#view-lab"),
 };
 
 const TOOLS = [
@@ -26,6 +27,7 @@ const TOOLS = [
   { id: "spotify", name: "Spotify" },
   { id: "notes", name: "Notas" },
   { id: "volume", name: "Volumen" },
+  { id: "lab", name: "Pruebas" },
 ];
 const PINNED = ["mouse"];
 
@@ -37,7 +39,8 @@ let caretTimer = 0;
 let caretWas = false;
 
 function say(text) {
-  visor.textContent = text || "Listo";
+  const clean = String(text || "Listo").replace(/\s+/g, " ").trim();
+  visor.textContent = clean.length > 64 ? `${clean.slice(0, 63)}…` : clean;
 }
 
 function authHeaders(extra) {
@@ -78,8 +81,7 @@ async function api(path, body, method = "POST") {
   }
   if (!res.ok) throw new Error(data.error || "No se pudo");
   if (data.detail) say(data.detail);
-  if (data.label) say(data.label);
-  if (data.title) say(data.title);
+  else if (data.label) say(data.label);
   return data;
 }
 
@@ -161,7 +163,7 @@ async function copyToPhone(text) {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
-      say("Copiado al móvil");
+      say("Nota copiada");
       return;
     }
   } catch (_err) {
@@ -177,7 +179,7 @@ async function copyToPhone(text) {
   area.select();
   const ok = document.execCommand("copy");
   area.remove();
-  say(ok ? "Copiado al móvil" : "Mantén pulsado el texto para copiarlo");
+  say(ok ? "Nota copiada" : "Mantén pulsado el texto para copiarlo");
 }
 
 function renderClips(items) {
@@ -200,11 +202,14 @@ function renderClips(items) {
     title.textContent = item.text;
     const when = document.createElement("small");
     when.textContent = clipTime(item.at);
+    button.append(title, when);
+    button.addEventListener("click", () => copyToPhone(item.text));
     const copy = document.createElement("button");
     copy.type = "button";
+    copy.className = "copy";
     copy.textContent = "Copiar";
     copy.addEventListener("click", () => copyToPhone(item.text));
-    button.append(title, when);
+    row.className = "clip-row";
     row.append(button, copy);
     list.append(row);
   }
@@ -256,7 +261,7 @@ document.querySelector("#clip-form").addEventListener("submit", async (event) =>
     await api("/api/clipboard", { text });
     input.value = "";
     syncClipboard();
-    say("Guardado en la mesa del PC");
+    say("Nota guardada");
   } catch (err) {
     say(err.message);
   }
@@ -456,36 +461,35 @@ function loadOrder() {
   return [...PINNED, ...rest];
 }
 
-function dragTool(event) {
-  const button = event.currentTarget;
-  const pointerId = event.pointerId;
+function dragTool(button, pointerId, originX) {
   const scroller = button.parentElement;
-  const startX = event.clientX;
-  let lastX = startX;
+  let lastX = originX;
   let dragged = false;
+  button.classList.add("dragging");
   try {
     button.setPointerCapture(pointerId);
   } catch (_err) {
+    button.classList.remove("dragging");
     return;
   }
   function move(ev) {
     if (ev.pointerId !== pointerId) return;
-    const dx = ev.clientX - startX;
-    if (!dragged && Math.abs(dx) < 8) return;
-    dragged = true;
+    ev.preventDefault();
+    if (Math.abs(ev.clientX - originX) > 6) dragged = true;
     const right = ev.clientX >= lastX;
     lastX = ev.clientX;
     const edge = scroller.getBoundingClientRect();
-    if (ev.clientX > edge.right - 28) scroller.scrollLeft += 14;
-    if (ev.clientX < edge.left + 28) scroller.scrollLeft -= 14;
+    if (ev.clientX > edge.right - 28) scroller.scrollLeft += 16;
+    if (ev.clientX < edge.left + 28) scroller.scrollLeft -= 16;
     const sibling = right ? button.nextElementSibling : button.previousElementSibling;
     if (!sibling) return;
     const box = sibling.getBoundingClientRect();
-    if (right && ev.clientX > box.left + box.width * 0.45) scroller.insertBefore(sibling, button);
-    else if (!right && ev.clientX < box.right - box.width * 0.45) scroller.insertBefore(button, sibling);
+    if (right && ev.clientX > box.left + box.width * 0.5) scroller.insertBefore(sibling, button);
+    else if (!right && ev.clientX < box.right - box.width * 0.5) scroller.insertBefore(button, sibling);
   }
   function stop(ev) {
     if (ev.pointerId !== pointerId) return;
+    button.classList.remove("dragging");
     button.removeEventListener("pointermove", move);
     button.removeEventListener("pointerup", stop);
     button.removeEventListener("pointercancel", stop);
@@ -500,6 +504,32 @@ function dragTool(event) {
   button.addEventListener("pointercancel", stop);
 }
 
+function armTool(event) {
+  const button = event.currentTarget;
+  const pointerId = event.pointerId;
+  const startX = event.clientX;
+  const startY = event.clientY;
+  let timer = window.setTimeout(() => {
+    timer = 0;
+    dragTool(button, pointerId, startX);
+  }, 260);
+  function moved(ev) {
+    if (!timer || ev.pointerId !== pointerId) return;
+    if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 12) end();
+  }
+  function end(ev) {
+    if (ev && ev.pointerId !== pointerId) return;
+    if (timer) window.clearTimeout(timer);
+    timer = 0;
+    button.removeEventListener("pointermove", moved);
+    button.removeEventListener("pointerup", end);
+    button.removeEventListener("pointercancel", end);
+  }
+  button.addEventListener("pointermove", moved);
+  button.addEventListener("pointerup", end);
+  button.addEventListener("pointercancel", end);
+}
+
 function renderDock() {
   const fixed = document.createElement("div");
   const scroller = document.createElement("div");
@@ -510,8 +540,10 @@ function renderDock() {
     const button = document.createElement("button");
     button.type = "button";
     button.dataset.cube = id;
-    button.textContent = tool.name;
     button.classList.toggle("on", id === tab);
+    const label = document.createElement("span");
+    label.textContent = tool.name;
+    button.append(label);
     button.addEventListener("click", () => {
       if (button.dataset.moved === "1") {
         button.dataset.moved = "";
@@ -519,7 +551,18 @@ function renderDock() {
       }
       openCube(id);
     });
-    if (!PINNED.includes(id)) button.addEventListener("pointerdown", dragTool);
+    if (!PINNED.includes(id)) {
+      const grip = document.createElement("span");
+      grip.className = "grip";
+      grip.setAttribute("aria-hidden", "true");
+      grip.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        dragTool(button, event.pointerId, event.clientX);
+      });
+      button.append(grip);
+      button.addEventListener("pointerdown", armTool);
+    }
     (PINNED.includes(id) ? fixed : scroller).append(button);
   });
   dock.replaceChildren(fixed, scroller);
@@ -577,7 +620,7 @@ document.querySelectorAll("[data-cursor]").forEach((button) => {
   button.addEventListener("click", async () => {
     try {
       const data = await api("/api/cursor", { mode: button.dataset.cursor });
-      say(data.detail || data.label);
+      say(button.dataset.cursor === "large" ? "Cursor grande" : button.dataset.cursor === "huge" ? "Cursor enorme" : "Cursor normal");
       document.querySelectorAll("[data-cursor]").forEach((item) => {
         item.classList.toggle("on", item === button);
       });
@@ -588,6 +631,43 @@ document.querySelectorAll("[data-cursor]").forEach((button) => {
 });
 
 const pad = document.querySelector("#pad");
+const trail = document.querySelector("#trail");
+const trailCtx = trail.getContext("2d");
+const crumbs = [];
+let trailFrame = 0;
+
+function fitTrail() {
+  const box = pad.getBoundingClientRect();
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  trail.width = Math.max(1, Math.round(box.width * dpr));
+  trail.height = Math.max(1, Math.round(box.height * dpr));
+  trailCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function paintTrail() {
+  const box = pad.getBoundingClientRect();
+  trailCtx.clearRect(0, 0, box.width, box.height);
+  for (const crumb of crumbs) {
+    trailCtx.beginPath();
+    trailCtx.fillStyle = `rgba(224,122,61,${crumb.a})`;
+    trailCtx.arc(crumb.x, crumb.y, crumb.r, 0, Math.PI * 2);
+    trailCtx.fill();
+    crumb.a *= 0.86;
+    crumb.r *= 0.96;
+  }
+  while (crumbs.length && crumbs[0].a < 0.04) crumbs.shift();
+  if (crumbs.length) trailFrame = requestAnimationFrame(paintTrail);
+  else trailFrame = 0;
+}
+
+function leaveCrumb(x, y) {
+  crumbs.push({ x, y, r: 8, a: 0.55 });
+  if (crumbs.length > 48) crumbs.shift();
+  if (!trailFrame) trailFrame = requestAnimationFrame(paintTrail);
+}
+
+fitTrail();
+window.addEventListener("resize", fitTrail);
 const pointers = new Map();
 let gesture = "tap";
 let travel = 0;
@@ -722,6 +802,7 @@ function onPadMove(event) {
     finger.hidden = false;
     finger.style.left = `${event.clientX - box.left}px`;
     finger.style.top = `${event.clientY - box.top}px`;
+    leaveCrumb(event.clientX - box.left, event.clientY - box.top);
   }
   if (pointers.size >= 2 || gesture === "scroll") {
     gesture = "scroll";
@@ -839,14 +920,29 @@ nativeType.addEventListener("input", () => {
   lastTyped = value;
 });
 
-document.querySelector("#vol-down").addEventListener("click", () => {
-  api("/api/volume", { delta: -1 }).catch((err) => say(err.message));
+document.querySelector("#vol-down").addEventListener("click", async () => {
+  try {
+    await api("/api/volume", { delta: -1 });
+    say("Volumen de Windows bajado");
+  } catch (err) {
+    say(err.message);
+  }
 });
-document.querySelector("#vol-up").addEventListener("click", () => {
-  api("/api/volume", { delta: 1 }).catch((err) => say(err.message));
+document.querySelector("#vol-up").addEventListener("click", async () => {
+  try {
+    await api("/api/volume", { delta: 1 });
+    say("Volumen de Windows subido");
+  } catch (err) {
+    say(err.message);
+  }
 });
-document.querySelector("#vol-mute").addEventListener("click", () => {
-  api("/api/volume", { delta: 0 }).catch((err) => say(err.message));
+document.querySelector("#vol-mute").addEventListener("click", async () => {
+  try {
+    await api("/api/volume", { delta: 0 });
+    say("Volumen de Windows muteado");
+  } catch (err) {
+    say(err.message);
+  }
 });
 
 const rows = [
@@ -967,7 +1063,15 @@ document.querySelectorAll("[data-win]").forEach((button) => {
       return;
     }
     const action = button.dataset.win;
-    api("/api/window", { id: winId, action }).catch((err) => say(err.message));
+    const names = {
+      focus: "Ventana al frente",
+      minimize: "Ventana minimizada",
+      maximize: "Ventana maximizada",
+      snap_left: "Ventana a la izquierda",
+      snap_right: "Ventana a la derecha",
+      close: "Ventana cerrada",
+    };
+    api("/api/window", { id: winId, action }).then(() => say(names[action] || "Ventana")).catch((err) => say(err.message));
   });
 });
 
@@ -977,8 +1081,26 @@ document.querySelectorAll("[data-yt]").forEach((button) => {
       const data = await api("/api/youtube", { action: button.dataset.yt });
       if (data.title) document.querySelector("#yt-title").textContent = data.title;
       if (typeof data.level === "number") setLevel("yt", data.level);
-      if (button.dataset.yt === "play") flipPlay(button);
-      if (button.dataset.yt === "mute") button.classList.toggle("muted");
+      if (button.dataset.yt === "play") {
+        const started = button.textContent === "Play";
+        flipPlay(button);
+        say(started ? "YouTube en play" : "YouTube en pausa");
+      } else if (button.dataset.yt === "mute") {
+        button.classList.toggle("muted");
+        say(button.classList.contains("muted") ? "YouTube silencio" : "YouTube con sonido");
+      } else {
+        const names = {
+          prev: "YouTube anterior",
+          next: "YouTube siguiente",
+          back: "YouTube −10 s",
+          forward: "YouTube +10 s",
+          home: "YouTube inicio",
+          full: "YouTube pantalla",
+          theater: "YouTube cine",
+          captions: "YouTube subtítulos",
+        };
+        say(names[button.dataset.yt] || "YouTube");
+      }
     } catch (err) {
       say(err.message);
     }
@@ -991,8 +1113,17 @@ document.querySelectorAll("[data-sp]").forEach((button) => {
       const data = await api("/api/spotify", { action: button.dataset.sp });
       if (data.title) document.querySelector("#sp-title").textContent = data.title;
       if (typeof data.level === "number") setLevel("sp", data.level);
-      if (button.dataset.sp === "play") flipPlay(button);
-      if (button.dataset.sp === "mute") button.classList.toggle("muted");
+      if (button.dataset.sp === "play") {
+        const started = button.textContent === "Play";
+        flipPlay(button);
+        say(started ? "Spotify en play" : "Spotify en pausa");
+      } else if (button.dataset.sp === "mute") {
+        button.classList.toggle("muted");
+        say(button.classList.contains("muted") ? "Spotify silencio" : "Spotify con sonido");
+      } else {
+        const names = { prev: "Spotify anterior", next: "Spotify siguiente" };
+        say(names[button.dataset.sp] || "Spotify");
+      }
     } catch (err) {
       say(err.message);
     }
@@ -1013,6 +1144,7 @@ document.querySelector("#yt-vol").addEventListener("change", async (event) => {
   try {
     const data = await api("/api/youtube", { action: "volume", level: Number(event.target.value) });
     if (typeof data.level === "number") setLevel("yt", data.level);
+    say(`Volumen YouTube ${data.level ?? event.target.value}`);
   } catch (err) {
     say(err.message);
   }
@@ -1037,6 +1169,7 @@ document.querySelector("#yt-speed").addEventListener("change", async (event) => 
   try {
     const data = await api("/api/youtube", { action: "speed", rate });
     if (typeof data.rate === "number") showSpeed(data.rate);
+    say(`Velocidad YouTube ${YT_SPEED_LABELS[Number(event.target.value)] || "1.0"}`);
   } catch (err) {
     say(err.message);
   }
@@ -1047,6 +1180,7 @@ document.querySelector("#sp-vol").addEventListener("change", async (event) => {
     const data = await api("/api/spotify", { action: "volume", level: Number(event.target.value) });
     if (typeof data.level === "number") setLevel("sp", data.level);
     if (data.title) document.querySelector("#sp-title").textContent = data.title;
+    say(`Volumen Spotify ${data.level ?? event.target.value}`);
   } catch (err) {
     say(err.message);
   }
@@ -1066,12 +1200,12 @@ document.querySelector("#yt-search").addEventListener("submit", async (event) =>
       button.type = "button";
       button.textContent = item.title;
       button.addEventListener("click", () => {
-        api("/api/youtube", { action: "open", video: item.id }).catch((err) => say(err.message));
+        api("/api/youtube", { action: "open", video: item.id }).then(() => say(`YouTube «${item.title}»`)).catch((err) => say(err.message));
       });
       row.append(button);
       list.append(row);
     }
-    if (!(data.results || []).length) say("Búsqueda abierta en YouTube del PC");
+    say(`Búsqueda YouTube «${query}»`);
   } catch (err) {
     say(err.message);
   }
@@ -1084,7 +1218,93 @@ document.querySelector("#sp-search").addEventListener("submit", async (event) =>
   try {
     const data = await api("/api/spotify", { action: "search", query });
     if (data.title) document.querySelector("#sp-title").textContent = data.title;
-    say(data.detail || "Búsqueda en Spotify");
+    say(`Búsqueda Spotify «${query}»`);
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+let labTracks = [];
+
+function renderLab(tracks) {
+  labTracks = tracks || [];
+  const list = document.querySelector("#lab-tracks");
+  list.replaceChildren();
+  if (!labTracks.length) return;
+  labTracks.forEach((title, index) => {
+    const row = document.createElement("li");
+    row.className = "clip-row";
+    const name = document.createElement("button");
+    name.type = "button";
+    name.className = "clip";
+    name.textContent = title;
+    const up = document.createElement("button");
+    up.type = "button";
+    up.className = "copy";
+    up.textContent = "Subir";
+    up.addEventListener("click", () => moveLab(index, -1));
+    const down = document.createElement("button");
+    down.type = "button";
+    down.className = "copy";
+    down.textContent = "Bajar";
+    down.addEventListener("click", () => moveLab(index, 1));
+    row.append(name, up, down);
+    list.append(row);
+  });
+}
+
+async function moveLab(index, dir) {
+  try {
+    const data = await api("/api/spotify", { action: "queue_move", index, dir });
+    renderLab(data.tracks || []);
+    say(data.detail || "Orden de prueba");
+  } catch (err) {
+    say(err.message);
+  }
+}
+
+document.querySelector("#lab-like").addEventListener("click", async () => {
+  try {
+    await api("/api/spotify", { action: "like" });
+    say("Spotify me gusta");
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#lab-queue").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/spotify", { action: "queue" });
+    renderLab(data.tracks || []);
+    say(data.tracks && data.tracks.length ? "Próximas de Spotify" : "Spotify no publica las próximas");
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#lab-add").addEventListener("click", async () => {
+  try {
+    const data = await api("/api/spotify", { action: "queue_add" });
+    renderLab(data.tracks || []);
+    say(data.detail || "Sumada a la cola de prueba");
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#lab-lock").addEventListener("click", async () => {
+  try {
+    await api("/api/lab", { action: "lock" });
+    say("Windows bloqueado");
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+document.querySelector("#lab-screen").addEventListener("click", async () => {
+  try {
+    await api("/api/lab", { action: "screen" });
+    say("Pantalla apagada");
   } catch (err) {
     say(err.message);
   }

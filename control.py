@@ -1224,11 +1224,33 @@ def _focus_unlocked(window_id: str) -> None:
         _linux_window_action(window_id, "focus")
 
 
+def move_tracks(tracks: list[str], index: int, direction: int) -> list[str]:
+    step = 1 if direction > 0 else -1
+    other = index + step
+    if index < 0 or other < 0 or index >= len(tracks) or other >= len(tracks):
+        return tracks
+    tracks[index], tracks[other] = tracks[other], tracks[index]
+    return tracks
+
+
+_lab_queue: list[str] = []
+
+
 def spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     extra = extra or {}
-    allowed = {"play", "next", "prev", "volup", "voldown", "status", "volume", "mute", "search"}
+    allowed = {
+        "play", "next", "prev", "volup", "voldown", "status", "volume", "mute", "search",
+        "like", "queue", "queue_add", "queue_move",
+    }
     if action not in allowed:
         raise ControlError("acción de Spotify no válida")
+    if action == "queue_move":
+        move_tracks(_lab_queue, int(extra.get("index", -1)), int(extra.get("dir", 0)))
+        return {
+            "detail": "Cola de prueba reordenada. Spotify no aplica ese orden.",
+            "tracks": list(_lab_queue),
+            "level": _levels["spotify"],
+        }
     with _lock:
         if SYSTEM == "Darwin":
             return _mac_spotify(action, extra)
@@ -1241,6 +1263,8 @@ def _mac_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     extra = extra or {}
     if action == "search":
         return _spotify_search(str(extra.get("query", "")))
+    if action in {"like", "queue", "queue_add"}:
+        return _spotify_lab(action, extra)
     if action == "volume":
         level = max(0, min(100, int(extra.get("level", _levels["spotify"]))))
         command = f"set sound volume to {level}"
@@ -1282,6 +1306,8 @@ def _linux_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     extra = extra or {}
     if action == "search":
         return _spotify_search(str(extra.get("query", "")))
+    if action in {"like", "queue", "queue_add"}:
+        return _spotify_lab(action, extra)
     if not _which("playerctl"):
         raise ControlError("Instala playerctl para Spotify (sudo apt install playerctl)")
     players = _run(["playerctl", "-l"])
@@ -1318,6 +1344,8 @@ def _windows_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     extra = extra or {}
     if action == "search":
         return _spotify_search(str(extra.get("query", "")))
+    if action in {"like", "queue", "queue_add"}:
+        return _spotify_lab(action, extra)
     row = pick_spotify_window(_windows_list())
     if row is None:
         if action != "status":
@@ -1350,6 +1378,74 @@ def _windows_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     if fresh is not None:
         title = _spotify_title(fresh)
     return {"detail": "Spotify", "title": title, "level": _levels["spotify"]}
+
+
+def _spotify_now() -> str:
+    try:
+        if SYSTEM == "Darwin":
+            info = _mac_spotify("status")
+        elif SYSTEM == "Linux":
+            info = _linux_spotify("status")
+        else:
+            info = _windows_spotify("status")
+    except ControlError:
+        return ""
+    title = str(info.get("title") or "")
+    return "" if title == "Spotify" else title
+
+
+def _spotify_lab(action: str, extra: dict | None = None) -> dict[str, Any]:
+    extra = extra or {}
+    if action == "queue":
+        return {
+            "detail": "Spotify no publica las próximas" if not _lab_queue else "Cola de prueba",
+            "tracks": list(_lab_queue),
+            "title": _spotify_now(),
+            "level": _levels["spotify"],
+        }
+    if action == "queue_add":
+        title = _spotify_now()
+        if not title:
+            raise ControlError("No veo qué está sonando")
+        if title not in _lab_queue:
+            _lab_queue.append(title)
+        return {"detail": "Sumada a la cola de prueba", "tracks": list(_lab_queue), "title": title, "level": _levels["spotify"]}
+    if SYSTEM == "Windows":
+        row = pick_spotify_window(_windows_list())
+        if row is None:
+            _launch_spotify_app()
+            raise ControlError("Abro Spotify. Espera un segundo y pulsa otra vez.")
+        if not _focus_for_keys(row["id"]):
+            raise ControlError("No pude poner Spotify delante.")
+        time.sleep(0.12)
+        _win_hotkey(0x12, 0x10, 0x42)
+        return {"detail": "Spotify me gusta", "title": _spotify_title(row), "level": _levels["spotify"]}
+    if SYSTEM == "Darwin":
+        _run(["osascript", "-e", 'tell application "Spotify" to activate'], timeout=4)
+        result = _run(
+            ["osascript", "-e", 'tell application "System Events" to keystroke "b" using {option down, shift down}'],
+            timeout=4,
+        )
+        if result.returncode != 0:
+            raise ControlError("Abre la app de Spotify en el Mac")
+        return {"detail": "Spotify me gusta", "title": _spotify_now(), "level": _levels["spotify"]}
+    raise ControlError("Me gusta está en prueba en Windows y Mac")
+
+
+def lab(action: str) -> dict[str, str]:
+    if action == "lock":
+        if SYSTEM != "Windows":
+            raise ControlError("Bloquear está en prueba en Windows")
+        ctypes.windll.user32.LockWorkStation()
+        return {"detail": "Windows bloqueado"}
+    if action == "screen":
+        if SYSTEM != "Windows":
+            raise ControlError("Apagar la pantalla está en prueba en Windows")
+        user32 = ctypes.windll.user32
+        user32.SendMessageW.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_ssize_t]
+        user32.SendMessageW(0xFFFF, 0x0112, 0xF170, 2)
+        return {"detail": "Pantalla apagada"}
+    raise ControlError("prueba no válida")
 
 
 def _spotify_title(row: dict[str, str]) -> str:

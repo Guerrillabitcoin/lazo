@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.26</title>
+    <title>LaZoo 0.27</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.26</p>
+          <p class="ver">0.27</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -33,7 +33,7 @@
               <button type="button" data-cursor="large">Grande</button>
               <button type="button" data-cursor="huge">Enorme</button>
             </div>
-            <div id="pad" class="pad" role="application" aria-label="Trackpad"><span id="finger" hidden></span></div>
+            <div id="pad" class="pad" role="application" aria-label="Trackpad"><canvas id="trail"></canvas><span id="finger" hidden></span></div>
             <div class="split three">
               <button id="btn-left" type="button">Clic</button>
               <button id="btn-type" type="button">Teclado</button>
@@ -153,6 +153,25 @@
               <button id="vol-down" type="button">Bajar</button>
               <button id="vol-mute" type="button">Mute</button>
               <button id="vol-up" type="button">Subir</button>
+            </div>
+          </article>
+        </div>
+
+        <div id="view-lab" class="view" hidden>
+          <article class="deck">
+            <p class="now">Spotify en prueba</p>
+            <div class="split">
+              <button id="lab-like" type="button">Me gusta</button>
+              <button id="lab-queue" type="button">Leer próximas</button>
+            </div>
+            <button id="lab-add" type="button">Sumar la que suena</button>
+            <ul id="lab-tracks" class="list"></ul>
+          </article>
+          <article class="deck">
+            <p class="now">PC en prueba</p>
+            <div class="split">
+              <button id="lab-lock" type="button">Bloquear</button>
+              <button id="lab-screen" type="button">Apagar pantalla</button>
             </div>
           </article>
         </div>
