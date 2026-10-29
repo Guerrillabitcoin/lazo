@@ -1,4 +1,4 @@
-# LaZoo 0.24
+# LaZoo 0.25
 
 Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada sale a internet. En Windows el portapapeles y los archivos de la mesa se guardan cifrados para tu usuario.
 
@@ -25,7 +25,7 @@ chmod +x iniciar.sh
 ./iniciar.sh
 ```
 
-En el PC se abre una ventana con la dirección, por ejemplo `https://192.168.1.20:8787`, un QR y el PIN. La primera vez Windows pide permiso: acéptalo, así el certificado de Lazo queda en el PC y el navegador deja de decir que la conexión no es segura. En el móvil, si sale el mismo aviso, abre el enlace «instala el certificado Lazo» de esa ventana, instálalo y recarga.
+En el PC se abre una ventana con la dirección, por ejemplo `http://192.168.1.20:8787`, un QR y el PIN. El navegador puede decir que la conexión no es segura. En una dirección de casa eso solo significa que no hay candado: no es un aviso de sitio malicioso. No instales un certificado. La primera vez Windows pide permiso del firewall: acéptalo.
 
 No hace falta VPN. El móvil y el PC tienen que estar en la misma Wi-Fi de casa, no en datos móviles. Si Windows pregunta, permite Lazo: la Wi-Fi a veces está marcada como red pública y, si no se permite, el móvil no carga nada.
 

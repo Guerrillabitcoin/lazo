@@ -1,5 +1,5 @@
 @echo off
-title LaZoo 0.24
+title LaZoo 0.25
 cd /d "%~dp0"
 where py >nul 2>&1 && (set "PY=py") || (set "PY=python")
 %PY% -c "import sys; raise SystemExit(0 if sys.version_info>=(3,10) else 1)"
@@ -25,7 +25,6 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-python -c "import lazo; lazo.ensure_tls(lazo.lan_ips())"
 echo.
 echo Acepta la ventana de Windows. Si la cancelas, el movil no entra.
 powershell -NoProfile -Command "Start-Process -Verb RunAs -Wait -FilePath powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','%~dp0permitir.ps1'"

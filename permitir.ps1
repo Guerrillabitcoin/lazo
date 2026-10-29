@@ -8,7 +8,8 @@ if (Test-Path $python) {
 Get-NetConnectionProfile | ForEach-Object {
   try { Set-NetConnectionProfile -InterfaceIndex $_.InterfaceIndex -NetworkCategory Private } catch {}
 }
-$crt = Join-Path $PSScriptRoot "lazo-ca.crt"
-if (Test-Path $crt) {
-  try { Import-Certificate -FilePath $crt -CertStoreLocation Cert:\LocalMachine\Root | Out-Null } catch {}
+foreach ($store in @("Cert:\LocalMachine\Root", "Cert:\CurrentUser\Root")) {
+  Get-ChildItem $store -ErrorAction SilentlyContinue |
+    Where-Object { $_.Subject -like "*Lazo CA*" } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
 }
