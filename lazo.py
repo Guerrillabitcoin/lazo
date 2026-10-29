@@ -11,6 +11,7 @@ import json
 import re
 import secrets
 import socket
+import ssl
 import struct
 import subprocess
 import sys
@@ -26,7 +27,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.23"
+VERSION = "0.24"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -39,6 +40,7 @@ MESA_OPENED = False
 PAIRED = False
 LAST_PHONE = 0.0
 PHONE_LOCK = threading.Lock()
+SCHEME = "http"
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
@@ -247,11 +249,112 @@ def lan_targets() -> list[tuple[str, str]]:
 
 def phone_url(ip: str) -> str:
     key = base64.urlsafe_b64encode(WIRE_KEY).decode().rstrip("=")
-    return f"http://{ip}:{PORT}/#p={PIN}&k={key}"
+    return f"{SCHEME}://{ip}:{PORT}/#p={PIN}&k={key}"
 
 
 def plain_url(ip: str) -> str:
-    return f"http://{ip}:{PORT}/"
+    return f"{SCHEME}://{ip}:{PORT}/"
+
+
+def ensure_tls(ips: list[str]) -> tuple[Path, Path] | None:
+    """Certificado de esta casa. La autoridad se crea una vez; el del servidor incluye las IP de ahora."""
+    try:
+        import datetime
+        import ipaddress
+
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+    except ImportError:
+        return None
+    folder = Path(__file__).resolve().parent
+    ca_key_path = folder / "lazo-ca.key"
+    ca_crt_path = folder / "lazo-ca.crt"
+    cert_path = folder / "lazo-cert.pem"
+    key_path = folder / "lazo-key.pem"
+    wanted = {"127.0.0.1"}
+    for ip in ips:
+        try:
+            ipaddress.ip_address(ip)
+        except ValueError:
+            continue
+        wanted.add(ip)
+    if not ca_key_path.exists() or not ca_crt_path.exists():
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Lazo CA")])
+        now = datetime.datetime.now(datetime.timezone.utc)
+        ca_cert = (
+            x509.CertificateBuilder()
+            .subject_name(name)
+            .issuer_name(name)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - datetime.timedelta(minutes=5))
+            .not_valid_after(now + datetime.timedelta(days=3650))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(
+                x509.KeyUsage(
+                    digital_signature=True,
+                    content_commitment=False,
+                    key_encipherment=False,
+                    data_encipherment=False,
+                    key_agreement=False,
+                    key_cert_sign=True,
+                    crl_sign=True,
+                    encipher_only=False,
+                    decipher_only=False,
+                ),
+                critical=True,
+            )
+            .sign(key, hashes.SHA256())
+        )
+        ca_key_path.write_bytes(
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            )
+        )
+        ca_crt_path.write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
+    covered: set[str] = set()
+    if cert_path.exists():
+        current = x509.load_pem_x509_certificate(cert_path.read_bytes())
+        try:
+            san = current.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+            covered = {str(ip) for ip in san.get_values_for_type(x509.IPAddress)}
+        except x509.ExtensionNotFound:
+            covered = set()
+    if wanted <= covered and key_path.exists():
+        return cert_path, key_path
+    ca_key = serialization.load_pem_private_key(ca_key_path.read_bytes(), password=None)
+    ca_cert = x509.load_pem_x509_certificate(ca_crt_path.read_bytes())
+    host_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    alt = [x509.DNSName("localhost"), x509.DNSName("lazo.local")]
+    alt.extend(x509.IPAddress(ipaddress.ip_address(ip)) for ip in sorted(wanted))
+    host_cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "Lazo")]))
+        .issuer_name(ca_cert.subject)
+        .public_key(host_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=5))
+        .not_valid_after(now + datetime.timedelta(days=825))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(x509.SubjectAlternativeName(alt), critical=False)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    key_path.write_bytes(
+        host_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    cert_path.write_bytes(host_cert.public_bytes(serialization.Encoding.PEM))
+    return cert_path, key_path
 
 
 def qr_svg(url: str) -> str:
@@ -337,7 +440,7 @@ def connect_page() -> bytes:
 <body>
   <main>
     <h1 id="titulo">Escanea el QR</h1>
-    <p id="ayuda" class="note">El QR ya lleva el PIN y cifra el puente. Misma Wi-Fi, sin VPN y sin internet. Quien escuche la red ve ruido, no lo que copias ni los archivos. Si el QR no abre, escribe la dirección y el PIN a mano.</p>
+    <p id="ayuda" class="note">La dirección es https. El certificado lo crea este PC y no sale a internet. Si el navegador dice que no es seguro, es solo la primera vez: <a href="/lazo-ca.crt">instala el certificado Lazo</a> y recarga.</p>
     <p id="estado">Todavía no llega el móvil.</p>
     <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a> para pegar texto y soltar archivos.</p>
     {''.join(blocks)}
@@ -459,6 +562,13 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/ws":
             self._pointer_socket()
+            return
+        if path == "/lazo-ca.crt":
+            crt = ROOT / "lazo-ca.crt"
+            if not crt.is_file():
+                self._send(404, {"error": "todavía no hay certificado"})
+                return
+            self._send(200, body=crt.read_bytes(), content_type="application/x-x509-ca-cert")
             return
         if path in ("/", "/index.html"):
             self._file(STATIC / "index.html", "text/html; charset=utf-8")
@@ -773,11 +883,11 @@ def maybe_open_mesa() -> None:
     if MESA_OPENED:
         return
     MESA_OPENED = True
-    webbrowser.open(f"http://127.0.0.1:{PORT}/mesa")
+    webbrowser.open(f"{SCHEME}://127.0.0.1:{PORT}/mesa")
 
 
 def main() -> None:
-    global PIN, PORT
+    global PIN, PORT, SCHEME
     parser = argparse.ArgumentParser(description="Mando Lazo para este PC")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8787)
@@ -786,15 +896,26 @@ def main() -> None:
     args = parser.parse_args()
     PIN = args.pin if args.pin.isdigit() and len(args.pin) == 4 else f"{secrets.randbelow(9000) + 1000}"
     PORT = args.port
+    tls = ensure_tls(lan_ips())
+    if tls:
+        SCHEME = "https"
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+    if tls:
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(tls[0], tls[1])
+        server.socket = context.wrap_socket(server.socket, server_side=True)
     print()
     print(f"  LaZoo {VERSION}")
     print(f"  PIN: {PIN}")
     print("  En el PC se abre la dirección. Escríbela en el móvil, no hace falta el QR.")
     print("  Misma Wi-Fi de casa. No hace falta VPN. Si no se abre, entra aquí en el PC:")
-    print(f"    http://127.0.0.1:{args.port}/conectar")
+    print(f"    {SCHEME}://127.0.0.1:{args.port}/conectar")
     for label, ip in lan_targets():
         print(f"  {label}: {plain_url(ip)}")
+    if tls:
+        print("  La página va por https. El certificado es de este PC.")
+    else:
+        print("  Sin certificado: el navegador dirá que no es seguro.")
     print("  Al entrar el móvil se abre el puente Wi-Fi. No pasa por internet.")
     print("  No abras este puerto en el router.")
     print()
@@ -805,7 +926,7 @@ def main() -> None:
         pass
     control.watch_physical_mouse()
     if not args.no_browser:
-        threading.Timer(0.3, lambda: webbrowser.open(f"http://127.0.0.1:{args.port}/conectar")).start()
+        threading.Timer(0.3, lambda: webbrowser.open(f"{SCHEME}://127.0.0.1:{args.port}/conectar")).start()
     try:
         while True:
             time.sleep(0.5)

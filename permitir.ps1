@@ -8,3 +8,7 @@ if (Test-Path $python) {
 Get-NetConnectionProfile | ForEach-Object {
   try { Set-NetConnectionProfile -InterfaceIndex $_.InterfaceIndex -NetworkCategory Private } catch {}
 }
+$crt = Join-Path $PSScriptRoot "lazo-ca.crt"
+if (Test-Path $crt) {
+  try { Import-Certificate -FilePath $crt -CertStoreLocation Cert:\LocalMachine\Root | Out-Null } catch {}
+}
