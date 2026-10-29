@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.29"
+VERSION = "0.30"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -315,39 +315,39 @@ def connect_page() -> bytes:
   <title>Conectar Lazo</title>
   <style>
     body {{ margin: 0; background: #141210; color: #f3eee6; font-family: "Segoe UI", system-ui, sans-serif; }}
-    main {{ max-width: 480px; margin: 0 auto; padding: 28px 16px 48px; text-align: center; }}
-    h1 {{ font-weight: 500; font-size: 1.5rem; }}
+    main {{ max-width: 520px; margin: 0 auto; padding: 48px 16px; text-align: center; }}
+    .top {{
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 14px;
-      padding: 14px 18px;
-      background: #241f1a;
-      border-bottom: 1px solid #4a4036;
-      text-align: left;
+      gap: 8px;
+      margin-bottom: 8px;
     }}
     .brand {{
       display: flex;
       align-items: baseline;
+      justify-content: center;
       margin: 0;
       font-family: Georgia, "Times New Roman", serif;
       font-style: italic;
-      font-size: 34px;
+      font-size: 72px;
       line-height: 1;
     }}
-    .ver {{ margin: 2px 0 0; font-size: 11px; letter-spacing: 0.12em; color: #c4b8aa; }}
+    .ver {{ margin: 0; font-size: 12px; letter-spacing: 0.14em; color: #c4b8aa; }}
     .oo {{ display: inline-flex; align-items: center; }}
     .bridge {{
-      width: 0; height: 3px; border-radius: 99px; background: transparent;
+      width: 0; height: 4px; border-radius: 99px; background: transparent;
       transition: width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease;
     }}
     .o.right {{ transition: margin-left 0.35s ease; }}
-    .top[data-link="on"] .bridge {{ width: 16px; background: #3dbe6e; box-shadow: 0 0 10px #3dbe6e; }}
+    .top[data-link="on"] .bridge {{ width: 28px; background: #3dbe6e; box-shadow: 0 0 12px #3dbe6e; }}
     .top[data-link="on"] .oo {{ color: #3dbe6e; }}
     .top[data-link="off"] .o.right {{ margin-left: -0.55em; }}
-    .top[data-link="off"] .oo {{ color: #e23b3b; text-shadow: 0 0 12px rgba(226, 59, 59, 0.9); }}
-    #link-label {{ margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }}
+    .top[data-link="off"] .oo {{ color: #e23b3b; text-shadow: 0 0 16px rgba(226, 59, 59, 0.9); }}
+    #link-label {{ margin: 4px 0 0; font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }}
     .top[data-link="on"] #link-label {{ color: #3dbe6e; }}
     .top[data-link="off"] #link-label {{ color: #e23b3b; }}
+    h1 {{ font-weight: 500; font-size: 1.4rem; margin: 18px 0 8px; }}
     h2 {{ font-size: 1rem; font-weight: 500; color: #e07a3d; }}
     .card {{ margin: 0 auto 28px; }}
     .qr {{
@@ -362,39 +362,39 @@ def connect_page() -> bytes:
     svg {{ width: 100%; height: 100%; display: block; }}
     .url {{ font-size: 1.35rem; color: #fff; word-break: break-all; margin: 14px 0 4px; }}
     .hint {{ letter-spacing: 0.18em; font-size: 1.2rem; }}
-    .note, #estado {{ color: #c4b8aa; text-align: left; }}
+    .note {{ color: #c4b8aa; }}
     a {{ color: #e07a3d; }}
-    #estado {{ font-size: 1.05rem; color: #f3eee6; }}
+    #pair[hidden] {{ display: none; }}
   </style>
 </head>
 <body>
-  <header id="status" class="top" data-link="off">
-    <div>
-      <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.29</p>
-    </div>
-    <p id="link-label">Sin conexión</p>
-  </header>
   <main>
-    <h1 id="titulo">Escanea el QR</h1>
-    <p id="ayuda" class="note">Misma Wi-Fi, sin VPN y sin internet. Si el navegador dice que no es segura, es la dirección de casa: no es un sitio malicioso y no hace falta instalar un certificado.</p>
-    <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a> para pegar texto y soltar archivos.</p>
-    {''.join(blocks)}
+    <header id="status" class="top" data-link="off">
+      <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
+      <p class="ver">0.30</p>
+      <p id="link-label">Sin conexión</p>
+    </header>
+    <div id="pair">
+      <h1 id="titulo">Escanea el QR</h1>
+      <p id="ayuda" class="note">Misma Wi-Fi, sin VPN y sin internet. Si el navegador dice que no es segura, es la dirección de casa: no es un sitio malicioso y no hace falta instalar un certificado.</p>
+      {''.join(blocks)}
+    </div>
+    <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a></p>
   </main>
   <script>
     async function tick() {{
       try {{
         const data = await fetch("/api/seen").then((res) => res.json());
-        const pinBits = document.querySelectorAll(".pin-line, #ayuda, #titulo");
         const bar = document.querySelector("#status");
+        const pair = document.querySelector("#pair");
         if (data.paired) {{
           bar.dataset.link = "on";
           document.querySelector("#link-label").textContent = "Móvil conectado";
-          pinBits.forEach((el) => {{ el.hidden = true; }});
+          pair.hidden = true;
         }} else {{
           bar.dataset.link = "off";
           document.querySelector("#link-label").textContent = "Sin conexión";
-          pinBits.forEach((el) => {{ el.hidden = false; }});
+          pair.hidden = false;
         }}
       }} catch (_err) {{}}
     }}
