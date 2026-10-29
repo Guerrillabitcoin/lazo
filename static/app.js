@@ -101,6 +101,7 @@ function showPin() {
   window.clearInterval(poll);
   window.clearInterval(clipsTimer);
   window.clearInterval(caretTimer);
+  fetch("/api/bye", { method: "POST", headers: authHeaders() }).catch(() => {});
 }
 
 function showHome() {
@@ -567,6 +568,10 @@ function renderDock() {
   });
   dock.replaceChildren(fixed, scroller);
 }
+
+window.addEventListener("pagehide", () => {
+  if (navigator.sendBeacon) navigator.sendBeacon("/api/bye");
+});
 
 renderDock();
 

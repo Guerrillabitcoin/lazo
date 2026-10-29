@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.30"
+VERSION = "0.31"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -274,9 +274,16 @@ def note_phone() -> None:
         PAIRED = True
 
 
+def phone_gone() -> None:
+    global LAST_PHONE, PAIRED
+    with PHONE_LOCK:
+        LAST_PHONE = 0.0
+        PAIRED = False
+
+
 def phone_online() -> bool:
     with PHONE_LOCK:
-        return LAST_PHONE > 0 and (time.time() - LAST_PHONE) < 12
+        return LAST_PHONE > 0 and (time.time() - LAST_PHONE) < 5
 
 
 def note_visit(ip: str) -> None:
@@ -299,10 +306,10 @@ def connect_page() -> bytes:
             svg = ""
         blocks.append(
             f"""<section class="card">
-              <h2>{escape(label)}</h2>
-              <p class="url">{escape(url)}</p>
               <p class="hint pin-line">PIN {escape(PIN)}</p>
               <div class="qr">{svg if index == 0 else ""}</div>
+              <h2>{escape(label)}</h2>
+              <p class="url">{escape(url)}</p>
             </section>"""
         )
     if not blocks:
@@ -361,23 +368,23 @@ def connect_page() -> bytes:
     .qr:empty {{ display: none; }}
     svg {{ width: 100%; height: 100%; display: block; }}
     .url {{ font-size: 1.35rem; color: #fff; word-break: break-all; margin: 14px 0 4px; }}
-    .hint {{ letter-spacing: 0.18em; font-size: 1.2rem; }}
-    .note {{ color: #c4b8aa; }}
+    .hint {{ margin: 8px 0 0; letter-spacing: 0.18em; font-size: 2rem; color: #fff; }}
+    .note {{ color: #c4b8aa; font-size: 0.95rem; }}
     a {{ color: #e07a3d; }}
-    #pair[hidden] {{ display: none; }}
+    body.on #pair {{ display: none; }}
+    #pair {{ display: block; }}
   </style>
 </head>
 <body>
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.30</p>
+      <p class="ver">0.31</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
-      <h1 id="titulo">Escanea el QR</h1>
-      <p id="ayuda" class="note">Misma Wi-Fi, sin VPN y sin internet. Si el navegador dice que no es segura, es la dirección de casa: no es un sitio malicioso y no hace falta instalar un certificado.</p>
       {''.join(blocks)}
+      <p id="ayuda" class="note">Misma Wi-Fi. Si el navegador dice que no es segura, es la dirección de casa.</p>
     </div>
     <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a></p>
   </main>
@@ -386,16 +393,10 @@ def connect_page() -> bytes:
       try {{
         const data = await fetch("/api/seen").then((res) => res.json());
         const bar = document.querySelector("#status");
-        const pair = document.querySelector("#pair");
-        if (data.paired) {{
-          bar.dataset.link = "on";
-          document.querySelector("#link-label").textContent = "Móvil conectado";
-          pair.hidden = true;
-        }} else {{
-          bar.dataset.link = "off";
-          document.querySelector("#link-label").textContent = "Sin conexión";
-          pair.hidden = false;
-        }}
+        const on = data.paired === true;
+        document.body.classList.toggle("on", on);
+        bar.dataset.link = on ? "on" : "off";
+        document.querySelector("#link-label").textContent = on ? "Móvil conectado" : "Sin conexión";
       }} catch (_err) {{}}
     }}
     tick();
@@ -620,6 +621,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/photos/open":
             self._photo_open()
+            return
+        if path == "/api/bye":
+            phone_gone()
+            self._send(200, {"ok": True})
             return
         action = path.removeprefix("/api/")
         if action not in ACTIONS:
