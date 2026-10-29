@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.25"
+VERSION = "0.26"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -478,13 +478,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/conectar":
             host = self.client_address[0]
-            if host not in ("127.0.0.1", "::1"):
+            if not _local_pc(host):
                 self._send(404, {"error": "no está"})
                 return
             self._send(200, body=connect_page(), content_type="text/html; charset=utf-8")
             return
         if path == "/api/seen":
-            if self.client_address[0] not in ("127.0.0.1", "::1"):
+            if not _local_pc(self.client_address[0]):
                 self._send(404, {"error": "no está"})
                 return
             self._send(200, {"visits": list(VISITS), "paired": phone_online()})
@@ -774,7 +774,32 @@ def maybe_open_mesa() -> None:
     if MESA_OPENED:
         return
     MESA_OPENED = True
-    webbrowser.open(f"{SCHEME}://127.0.0.1:{PORT}/mesa")
+    open_local(f"http://127.0.0.1:{PORT}/mesa")
+
+
+def _local_pc(host: str) -> bool:
+    host = host.split("%", 1)[0]
+    return host in {"127.0.0.1", "::1", "localhost"} or host.endswith("127.0.0.1")
+
+
+def open_local(url: str) -> None:
+    if sys.platform == "win32":
+        subprocess.Popen(f'start "" "{url}"', shell=True)
+        return
+    webbrowser.open(url)
+
+
+def listen(host: str, port: int) -> tuple[ThreadingHTTPServer, int]:
+    ThreadingHTTPServer.allow_reuse_address = True
+    try:
+        return ThreadingHTTPServer((host, port), Handler), port
+    except OSError:
+        print()
+        print(f"  El puerto {port} ya está cogido.")
+        print("  Cierra la otra ventana negra de Lazo y abre iniciar.bat otra vez.")
+        print("  Mientras, uso otro puerto para que la página sí salga.")
+        server = ThreadingHTTPServer((host, 0), Handler)
+        return server, server.server_address[1]
 
 
 def main() -> None:
@@ -787,13 +812,21 @@ def main() -> None:
     args = parser.parse_args()
     PIN = args.pin if args.pin.isdigit() and len(args.pin) == 4 else f"{secrets.randbelow(9000) + 1000}"
     PORT = args.port
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    try:
+        server, PORT = listen(args.host, args.port)
+    except OSError as exc:
+        print()
+        print("  No pude abrir la página en este PC.")
+        print(f"  {exc}")
+        print("  Cierra las ventanas negras de Lazo y vuelve a abrir iniciar.bat.")
+        return
+    home = f"http://127.0.0.1:{PORT}/conectar"
     print()
     print(f"  LaZoo {VERSION}")
     print(f"  PIN: {PIN}")
-    print("  En el PC se abre la dirección. Escríbela en el móvil, no hace falta el QR.")
-    print("  Misma Wi-Fi de casa. No hace falta VPN. Si no se abre, entra aquí en el PC:")
-    print(f"    {SCHEME}://127.0.0.1:{args.port}/conectar")
+    print("  En este PC abre, con http y no con https:")
+    print(f"    {home}")
+    print("  Misma Wi-Fi de casa. No hace falta VPN.")
     for label, ip in lan_targets():
         print(f"  {label}: {plain_url(ip)}")
     print("  Al entrar el móvil se abre el puente Wi-Fi. No pasa por internet.")
@@ -804,9 +837,12 @@ def main() -> None:
         control.set_cursor_mode("normal")
     except Exception:
         pass
-    control.watch_physical_mouse()
+    try:
+        control.watch_physical_mouse()
+    except Exception:
+        pass
     if not args.no_browser:
-        threading.Timer(0.3, lambda: webbrowser.open(f"{SCHEME}://127.0.0.1:{args.port}/conectar")).start()
+        threading.Timer(0.4, lambda: open_local(home)).start()
     try:
         while True:
             time.sleep(0.5)
