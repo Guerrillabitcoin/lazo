@@ -26,7 +26,7 @@ import control
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.28"
+VERSION = "0.29"
 PIN = ""
 PORT = 8787
 TOKEN = secrets.token_urlsafe(32)
@@ -317,6 +317,37 @@ def connect_page() -> bytes:
     body {{ margin: 0; background: #141210; color: #f3eee6; font-family: "Segoe UI", system-ui, sans-serif; }}
     main {{ max-width: 480px; margin: 0 auto; padding: 28px 16px 48px; text-align: center; }}
     h1 {{ font-weight: 500; font-size: 1.5rem; }}
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 18px;
+      background: #241f1a;
+      border-bottom: 1px solid #4a4036;
+      text-align: left;
+    }}
+    .brand {{
+      display: flex;
+      align-items: baseline;
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-style: italic;
+      font-size: 34px;
+      line-height: 1;
+    }}
+    .ver {{ margin: 2px 0 0; font-size: 11px; letter-spacing: 0.12em; color: #c4b8aa; }}
+    .oo {{ display: inline-flex; align-items: center; }}
+    .bridge {{
+      width: 0; height: 3px; border-radius: 99px; background: transparent;
+      transition: width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease;
+    }}
+    .o.right {{ transition: margin-left 0.35s ease; }}
+    .top[data-link="on"] .bridge {{ width: 16px; background: #3dbe6e; box-shadow: 0 0 10px #3dbe6e; }}
+    .top[data-link="on"] .oo {{ color: #3dbe6e; }}
+    .top[data-link="off"] .o.right {{ margin-left: -0.55em; }}
+    .top[data-link="off"] .oo {{ color: #e23b3b; text-shadow: 0 0 12px rgba(226, 59, 59, 0.9); }}
+    #link-label {{ margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }}
+    .top[data-link="on"] #link-label {{ color: #3dbe6e; }}
+    .top[data-link="off"] #link-label {{ color: #e23b3b; }}
     h2 {{ font-size: 1rem; font-weight: 500; color: #e07a3d; }}
     .card {{ margin: 0 auto 28px; }}
     .qr {{
@@ -337,10 +368,16 @@ def connect_page() -> bytes:
   </style>
 </head>
 <body>
+  <header id="status" class="top" data-link="off">
+    <div>
+      <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
+      <p class="ver">0.29</p>
+    </div>
+    <p id="link-label">Sin conexión</p>
+  </header>
   <main>
     <h1 id="titulo">Escanea el QR</h1>
     <p id="ayuda" class="note">Misma Wi-Fi, sin VPN y sin internet. Si el navegador dice que no es segura, es la dirección de casa: no es un sitio malicioso y no hace falta instalar un certificado.</p>
-    <p id="estado">Todavía no llega el móvil.</p>
     <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a> para pegar texto y soltar archivos.</p>
     {''.join(blocks)}
   </main>
@@ -349,15 +386,19 @@ def connect_page() -> bytes:
       try {{
         const data = await fetch("/api/seen").then((res) => res.json());
         const pinBits = document.querySelectorAll(".pin-line, #ayuda, #titulo");
+        const bar = document.querySelector("#status");
         if (data.paired) {{
-          document.querySelector("#estado").textContent = "Móvil conectado";
+          bar.dataset.link = "on";
+          document.querySelector("#link-label").textContent = "Móvil conectado";
           pinBits.forEach((el) => {{ el.hidden = true; }});
         }} else {{
-          document.querySelector("#estado").textContent = "Escanea el QR";
+          bar.dataset.link = "off";
+          document.querySelector("#link-label").textContent = "Sin conexión";
           pinBits.forEach((el) => {{ el.hidden = false; }});
         }}
       }} catch (_err) {{}}
     }}
+    tick();
     setInterval(tick, 2000);
   </script>
 </body>

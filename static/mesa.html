@@ -15,13 +15,45 @@
       }
       main { max-width: 980px; margin: 0 auto; padding: 28px 20px 48px; }
       h1 {
-        margin: 0;
+        margin: 0 0 8px;
         font-family: Georgia, serif;
         font-style: italic;
         font-weight: 500;
-        font-size: 2.4rem;
+        font-size: 2rem;
       }
       h2 { margin: 0 0 10px; font-size: 1rem; color: #e07a3d; }
+      .top {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin: -28px -20px 22px;
+        padding: 14px 18px;
+        background: #241f1a;
+        border-bottom: 1px solid #4a4036;
+      }
+      .brand {
+        display: flex;
+        align-items: baseline;
+        margin: 0;
+        font-family: Georgia, "Times New Roman", serif;
+        font-style: italic;
+        font-size: 34px;
+        line-height: 1;
+      }
+      .ver { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.12em; color: #c4b8aa; }
+      .oo { display: inline-flex; align-items: center; }
+      .bridge {
+        width: 0; height: 3px; border-radius: 99px; background: transparent;
+        transition: width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease;
+      }
+      .o.right { transition: margin-left 0.35s ease; }
+      .top[data-link="on"] .bridge { width: 16px; background: #3dbe6e; box-shadow: 0 0 10px #3dbe6e; }
+      .top[data-link="on"] .oo { color: #3dbe6e; }
+      .top[data-link="off"] .o.right { margin-left: -0.55em; }
+      .top[data-link="off"] .oo { color: #e23b3b; text-shadow: 0 0 12px rgba(226, 59, 59, 0.9); }
+      #link-label { margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+      .top[data-link="on"] #link-label { color: #3dbe6e; }
+      .top[data-link="off"] #link-label { color: #e23b3b; }
       p { color: #c4b8aa; }
       .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
       section { background: #241f1a; border-radius: 18px; padding: 16px; min-height: 420px; }
@@ -68,6 +100,13 @@
   </head>
   <body>
     <main>
+      <header id="status" class="top" data-link="off">
+        <div>
+          <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
+          <p class="ver">0.29</p>
+        </div>
+        <p id="link-label">Sin conexión</p>
+      </header>
       <h1>Puente Wi-Fi</h1>
       <p>Solo la Wi-Fi de esta casa. Nada de esto sale a internet. Si el móvil entró con el QR, quien escuche la red ve el tráfico cifrado, no el texto ni los archivos. Lo que ya estaba copiado al abrir no se guarda: pégalo si lo quieres en las notas.</p>
       <div class="grid">
@@ -115,6 +154,15 @@
         const text = event.clipboardData && event.clipboardData.getData("text");
         if (text) pushText(text, false);
       });
+
+      async function watchLink() {
+        try {
+          const data = await fetch("/api/seen").then((res) => res.json());
+          const bar = document.querySelector("#status");
+          bar.dataset.link = data.paired ? "on" : "off";
+          document.querySelector("#link-label").textContent = data.paired ? "Móvil conectado" : "Sin conexión";
+        } catch (_err) {}
+      }
 
       async function watchClipboard() {
         try {
@@ -226,7 +274,9 @@
         fetch("/api/photos/open", { method: "POST" });
       });
       load();
+      watchLink();
       setInterval(load, 2000);
+      setInterval(watchLink, 2000);
       setInterval(watchClipboard, 2000);
     </script>
   </body>

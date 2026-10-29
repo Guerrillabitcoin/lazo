@@ -1,4 +1,4 @@
-# LaZoo 0.28
+# LaZoo 0.29
 
 Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada sale a internet. En Windows el portapapeles y los archivos de la mesa se guardan cifrados para tu usuario.
 
