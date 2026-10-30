@@ -68,6 +68,7 @@ const views = {
   bridge: document.querySelector("#view-bridge"),
   notes: document.querySelector("#view-notes"),
   system: document.querySelector("#view-system"),
+  dl: document.querySelector("#view-dl"),
   lab: document.querySelector("#view-lab"),
 };
 
@@ -80,6 +81,7 @@ const TOOLS = [
   { id: "notes", name: "Notas" },
   { id: "system", name: "Sistema" },
   { id: "lab", name: "Pruebas" },
+  { id: "dl", name: "Descargatodo" },
 ];
 const PINNED = ["mouse"];
 
@@ -170,6 +172,8 @@ function openCube(id) {
   if (id === "system") loadSystem();
   if (id === "spotify") refreshStatus();
   if (id === "notes" || id === "bridge") syncClipboard();
+  if (id === "dl") dlOpen();
+  else dlStop();
 }
 
 function showApp() {
@@ -1489,6 +1493,307 @@ document.querySelector("#lab-open").addEventListener("submit", async (event) => 
   try {
     await api("/api/lab", { action: "open", url });
     say(`Abrir «${url}»`);
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+/* ---- Descargatodo: el móvil manda el enlace; el PC descarga con yt-dlp ---- */
+var dlTimer = 0;
+var dlInfo = null;
+var dlUrl = "";
+var dlSent = {};
+
+function dlEl(id) {
+  return document.querySelector(id);
+}
+
+function dlSize(bytes) {
+  if (!bytes) return "";
+  if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + " KB";
+  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+}
+
+function dlTime(sec) {
+  if (!sec) return "";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = String(sec % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+function dlStop() {
+  clearInterval(dlTimer);
+  dlTimer = 0;
+}
+
+async function dlOpen() {
+  dlStop();
+  await dlTools();
+  await dlPoll();
+  dlTimer = setInterval(dlPoll, 1200);
+}
+
+async function dlTools() {
+  try {
+    const t = await api("/api/dl/tools", null, "GET");
+    const box = dlEl("#dl-tools");
+    const missing = !t.ytdlp || (!t.ffmpeg && t.ffmpeg_can_install);
+    box.hidden = !missing && t.install.state !== "instalando";
+    const parts = [];
+    if (!t.ytdlp) parts.push("yt-dlp");
+    if (!t.ffmpeg) parts.push("ffmpeg");
+    dlEl("#dl-tools-msg").textContent = parts.length
+      ? `Falta ${parts.join(" y ")}. Se descarga del sitio oficial y se comprueba su huella.`
+      : "Herramientas listas.";
+    dlEl("#dl-install").hidden = !missing;
+    dlEl("#dl-version").textContent =
+      (t.ytdlp ? `yt-dlp ${t.version || ""}` : "yt-dlp no instalado") +
+      (t.ffmpeg ? " · ffmpeg listo" : t.ffmpeg_hint ? " · " + t.ffmpeg_hint : " · sin ffmpeg (sin MP3 ni unir vídeo+audio)") +
+      ` · Se guarda en ${t.folder}`;
+    dlEl("#dl-update").hidden = !t.ytdlp;
+    dlShowInstall(t.install);
+    return t;
+  } catch (err) {
+    say(err.message);
+    return null;
+  }
+}
+
+function dlShowInstall(inst) {
+  const bar = dlEl("#dl-install-bar");
+  if (!inst || !inst.state) {
+    bar.hidden = true;
+    return;
+  }
+  if (inst.state === "instalando") {
+    bar.hidden = false;
+    const pct = inst.total ? Math.round((inst.done * 100) / inst.total) : 5;
+    dlEl("#dl-install-fill").style.width = pct + "%";
+    dlEl("#dl-tools-msg").textContent = `Instalando ${inst.what || ""}… ${dlSize(inst.done)}${inst.total ? " de " + dlSize(inst.total) : ""}`;
+    dlEl("#dl-install").hidden = true;
+  } else {
+    bar.hidden = true;
+    if (inst.state === "error") dlEl("#dl-tools-msg").textContent = "No se pudo instalar: " + inst.error;
+  }
+}
+
+var dlWasInstalling = false;
+
+async function dlPoll() {
+  try {
+    const data = await api("/api/dl/status", null, "GET");
+    const inst = data.install || {};
+    if (inst.state === "instalando") {
+      dlWasInstalling = true;
+      dlEl("#dl-tools").hidden = false;
+      dlShowInstall(inst);
+    } else if (dlWasInstalling) {
+      dlWasInstalling = false;
+      dlTools();
+    }
+    dlRenderJobs(data.jobs || []);
+  } catch (_err) {}
+}
+
+function dlRenderJobs(jobs) {
+  const list = dlEl("#dl-jobs");
+  list.replaceChildren();
+  for (const job of jobs.slice(0, 12)) {
+    const row = document.createElement("li");
+    row.className = "dl-job";
+    const name = document.createElement("p");
+    name.className = "dl-job-name";
+    name.textContent = job.name || job.title;
+    const stat = document.createElement("p");
+    stat.className = "hint";
+    let text = `${job.label} · ${job.state}`;
+    if (job.state === "descargando") {
+      text += ` ${job.pct || 0}%`;
+      if (job.speed) text += ` · ${dlSize(job.speed)}/s`;
+      if (job.eta) text += ` · quedan ${dlTime(job.eta)}`;
+    }
+    if (job.state === "hecha") text += ` · ${dlSize(job.size)}`;
+    if (job.error) text += ` · ${job.error}`;
+    stat.textContent = text;
+    row.append(name, stat);
+    if (job.state === "descargando" || job.state === "procesando") {
+      const track = document.createElement("div");
+      track.className = "xfer-track";
+      const fill = document.createElement("div");
+      fill.className = "dl-fill";
+      fill.style.width = (job.state === "procesando" ? 100 : job.pct || 0) + "%";
+      track.append(fill);
+      row.append(track);
+    }
+    const actions = document.createElement("div");
+    actions.className = "dl-row";
+    if (job.state === "hecha") {
+      const send = document.createElement("button");
+      send.type = "button";
+      send.className = "primary";
+      send.textContent = dlSent[job.id] ? "Enviado ✓" : "Enviar al móvil";
+      send.addEventListener("click", () => dlReceive(job, send));
+      actions.append(send);
+    }
+    if (["en cola", "descargando", "procesando"].includes(job.state)) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancelar";
+      cancel.addEventListener("click", async () => {
+        try {
+          await api("/api/dl/cancel", { id: job.id });
+          dlPoll();
+        } catch (err) {
+          say(err.message);
+        }
+      });
+      actions.append(cancel);
+    }
+    if (actions.childElementCount) row.append(actions);
+    list.append(row);
+  }
+}
+
+async function dlReceive(job, button) {
+  button.disabled = true;
+  button.textContent = "Recibiendo…";
+  try {
+    const res = await lzFetch("/api/dl/file/" + job.id);
+    if (!res.ok) {
+      const data = await readBody(res);
+      throw new Error(data.error || "No se pudo recibir");
+    }
+    const blob = new Uint8Array(await res.arrayBuffer());
+    const plain = wireKey ? openSeal(blob, wireKey) : blob;
+    const url = URL.createObjectURL(new Blob([plain]));
+    const temp = document.createElement("a");
+    temp.href = url;
+    temp.download = job.name || "descarga";
+    document.body.append(temp);
+    temp.click();
+    temp.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    dlSent[job.id] = true;
+    button.textContent = "Enviado ✓";
+    say("Guardado en el móvil");
+  } catch (err) {
+    button.textContent = "Enviar al móvil";
+    say(err.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function dlChoiceButton(id, label, detail, extra) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = extra || "";
+  button.textContent = label;
+  if (detail) {
+    const small = document.createElement("small");
+    small.textContent = " " + detail;
+    button.append(small);
+  }
+  button.addEventListener("click", async () => {
+    try {
+      await api("/api/dl/start", { url: dlUrl, choice: id, title: dlInfo ? dlInfo.title : "", playlist: dlEl("#dl-playlist").checked });
+      dlPoll();
+    } catch (err) {
+      say(err.message);
+    }
+  });
+  return button;
+}
+
+function dlRenderInfo(info) {
+  dlInfo = info;
+  dlEl("#dl-card").hidden = false;
+  dlEl("#dl-title").textContent = info.title;
+  const meta = [];
+  if (info.uploader) meta.push(info.uploader);
+  if (info.duration) meta.push(dlTime(info.duration));
+  if (info.playlist) meta.push(`${info.count} vídeos`);
+  dlEl("#dl-meta").textContent = meta.join(" · ");
+  const box = dlEl("#dl-choices");
+  box.replaceChildren();
+  info.choices.forEach((c, i) => {
+    const off = c.ffmpeg && !info.ffmpeg;
+    const button = dlChoiceButton(c.id, c.label, off ? "(necesita ffmpeg)" : c.detail, i === 0 ? "primary" : "");
+    button.disabled = off;
+    box.append(button);
+  });
+  const list = dlEl("#dl-formats");
+  list.replaceChildren();
+  list.hidden = true;
+  dlEl("#dl-adv-open").hidden = !info.formats.length;
+  info.formats
+    .slice()
+    .reverse()
+    .forEach((f) => {
+      const row = document.createElement("li");
+      const id = f.kind === "solo vídeo" && info.ffmpeg ? f.id + "+bestaudio" : f.id;
+      const label = `${f.id} · ${f.res || "-"} · ${f.ext} · ${f.kind}${f.size ? " · ~" + dlSize(f.size) : ""}`;
+      row.append(dlChoiceButton(id.replace("+bestaudio", "+ba"), label, f.note, ""));
+      list.append(row);
+    });
+}
+
+dlEl("#dl-adv-open").addEventListener("click", () => {
+  const list = dlEl("#dl-formats");
+  list.hidden = !list.hidden;
+});
+
+dlEl("#dl-paste").addEventListener("click", async () => {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) dlEl("#dl-url").value = text.trim();
+  } catch (_err) {
+    dlEl("#dl-url").focus();
+    say("Mantén pulsado el campo y elige Pegar");
+  }
+});
+
+dlEl("#dl-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const url = dlEl("#dl-url").value.trim();
+  if (!/^https?:\/\//i.test(url)) {
+    say("El enlace tiene que empezar por http:// o https://");
+    return;
+  }
+  const find = dlEl("#dl-find");
+  find.disabled = true;
+  find.textContent = "Buscando…";
+  dlEl("#dl-card").hidden = true;
+  try {
+    dlUrl = url;
+    const info = await api("/api/dl/info", { url, playlist: dlEl("#dl-playlist").checked });
+    dlRenderInfo(info);
+    say(info.title);
+  } catch (err) {
+    say(err.message);
+  } finally {
+    find.disabled = false;
+    find.textContent = "Buscar formatos";
+  }
+});
+
+dlEl("#dl-install").addEventListener("click", async () => {
+  try {
+    await api("/api/dl/install", { what: "all" });
+    dlWasInstalling = true;
+    dlEl("#dl-install").hidden = true;
+    dlEl("#dl-install-bar").hidden = false;
+  } catch (err) {
+    say(err.message);
+  }
+});
+
+dlEl("#dl-update").addEventListener("click", async () => {
+  try {
+    await api("/api/dl/update", {});
+    dlWasInstalling = true;
   } catch (err) {
     say(err.message);
   }

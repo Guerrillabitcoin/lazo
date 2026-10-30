@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.34</title>
+    <title>LaZoo 0.35</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.34</p>
+          <p class="ver">0.35</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -174,6 +174,37 @@
               <button id="sys-lock" type="button" data-sys="lock">Bloquear PC</button>
             </div>
             <p id="sys-na" class="screen-note" hidden></p>
+          </article>
+        </div>
+
+        <div id="view-dl" class="view" hidden>
+          <article class="deck dl-deck">
+            <p class="dl-notice">Solo para uso personal. Respeta los derechos de autor y las normas de cada web.</p>
+            <div id="dl-tools" class="dl-tools" hidden>
+              <p id="dl-tools-msg" class="hint">Faltan las herramientas (yt-dlp y ffmpeg).</p>
+              <button id="dl-install" type="button" class="primary">Instalar herramientas (una vez)</button>
+              <div id="dl-install-bar" class="xfer" hidden><div class="xfer-track"><div id="dl-install-fill"></div></div></div>
+            </div>
+            <form id="dl-form" class="dl-form">
+              <input id="dl-url" type="url" inputmode="url" maxlength="2048" autocomplete="off" placeholder="Pega un enlace de YouTube, Instagram, TikTok, X…" />
+              <div class="dl-row">
+                <button id="dl-paste" type="button">Pegar</button>
+                <button id="dl-find" type="submit" class="primary">Buscar formatos</button>
+              </div>
+              <label class="dl-check"><input id="dl-playlist" type="checkbox" /> Lista completa</label>
+            </form>
+            <div id="dl-card" class="dl-card" hidden>
+              <p id="dl-title" class="dl-title"></p>
+              <p id="dl-meta" class="hint"></p>
+              <div id="dl-choices" class="dl-choices"></div>
+              <button id="dl-adv-open" type="button" class="dl-adv-open">Avanzado</button>
+              <ul id="dl-formats" class="list dl-formats" hidden></ul>
+            </div>
+            <ul id="dl-jobs" class="list dl-jobs"></ul>
+            <div class="dl-row dl-foot">
+              <button id="dl-update" type="button">Actualizar yt-dlp</button>
+            </div>
+            <p id="dl-version" class="hint"></p>
           </article>
         </div>
 

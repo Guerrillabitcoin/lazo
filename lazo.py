@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -18,11 +19,12 @@ from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import control
+import descargas
 import protocol
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.34"
+VERSION = "0.35"
 PAIRING = protocol.Pairing()
 PORT = 8787
 VISITS: list[str] = []
@@ -48,6 +50,15 @@ ACTIONS = {
     "lab": lambda body: control.lab(str(body.get("action", "")), body),
     "system": lambda body: control.system_action(str(body.get("action", ""))),
     "screen": lambda body: control.window_to_screen(str(body.get("id", "")), body.get("screen", 0)),
+}
+
+DL_ACTIONS = {
+    "/api/dl/info": lambda body: descargas.get_info(body.get("url", ""), bool(body.get("playlist"))),
+    "/api/dl/start": lambda body: descargas.QUEUE.start(body.get("url", ""), str(body.get("choice", "")), str(body.get("title", "")), bool(body.get("playlist"))),
+    "/api/dl/cancel": lambda body: descargas.QUEUE.cancel(str(body.get("id", ""))),
+    "/api/dl/install": lambda body: descargas.install(str(body.get("what", "all"))),
+    "/api/dl/update": lambda _body: descargas.update(),
+    "/api/dl/open": lambda _body: descargas.open_folder(),
 }
 
 
@@ -283,7 +294,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.34</p>
+      <p class="ver">0.35</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -472,6 +483,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/photos":
             self._guard(lambda _body: control.list_photos())
             return
+        if path == "/api/dl/tools":
+            self._guard(lambda _body: descargas.tools_status())
+            return
+        if path == "/api/dl/status":
+            self._guard(lambda _body: descargas.QUEUE.status())
+            return
+        if path.startswith("/api/dl/file/"):
+            self._dl_file(path.rsplit("/", 1)[-1])
+            return
         if path.startswith("/api/files/"):
             self._download(path.rsplit("/", 1)[-1])
             return
@@ -534,6 +554,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/bye":
             PAIRING.phone_gone(parse_qs(urlsplit(self.path).query).get("i", [self._who()])[0])
             self._send(200, {"ok": True})
+            return
+        if path in DL_ACTIONS:
+            self._guard(DL_ACTIONS[path])
             return
         action = path.removeprefix("/api/")
         if action not in ACTIONS:
@@ -706,6 +729,40 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+
+    def _dl_file(self, job_id: str) -> None:
+        """Manda al móvil un archivo del Descargatodo, sellado como el puente."""
+        if not self._authed():
+            self._unauth()
+            return
+        try:
+            target = descargas.QUEUE.file(job_id)
+            size = target.stat().st_size
+        except (control.ControlError, OSError) as exc:
+            self._send(404, {"error": str(exc) or "ese archivo ya no está"})
+            return
+        sealed = self.headers.get("X-Seal") == "1"
+        if self.remote and not sealed:
+            self._send(400, {"error": "hace falta cifrado"})
+            return
+        if sealed and size > descargas.SEND_CAP:
+            self._send(413, {"error": "Pasa de 400 MB: cógelo en la carpeta Descargas/LaZoo del PC"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        if sealed:
+            data = PAIRING.seal(target.read_bytes())
+            self.send_header("Content-Length", str(len(data)))
+        else:
+            self.send_header("Content-Length", str(size))
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(target.name)}")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        if sealed:
+            self.wfile.write(data)
+            return
+        with target.open("rb") as src:
+            shutil.copyfileobj(src, self.wfile, 256 * 1024)
 
     def do_DELETE(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]

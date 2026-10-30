@@ -508,3 +508,26 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 @media (prefers-reduced-motion: reduce) {
   button:active { transform: none; }
 }
+
+/* Descargatodo */
+.dl-deck { display: grid; gap: 10px; align-content: start; }
+.dl-notice { margin: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--copper); color: var(--copper); font-size: 12px; }
+.dl-form { display: grid; gap: 8px; }
+.dl-form input[type="url"] { width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 12px; border: 1px solid #4a4036; background: var(--pad); color: inherit; font: inherit; }
+.dl-row { display: flex; gap: 8px; }
+.dl-row > button { flex: 1; min-height: 46px; }
+.dl-check { display: flex; gap: 8px; align-items: center; color: var(--fog); font-size: 13px; }
+.dl-tools { display: grid; gap: 8px; }
+.dl-tools button { min-height: 52px; }
+.dl-card { display: grid; gap: 8px; padding: 10px; border-radius: 14px; background: var(--pad); }
+.dl-title { margin: 0; font-weight: 650; }
+.dl-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dl-choices button { min-height: 54px; }
+.dl-choices button:first-child { grid-column: 1 / -1; }
+.dl-choices small { color: inherit; opacity: 0.75; }
+.dl-adv-open { min-height: 40px; }
+.dl-formats button { font-size: 12px; text-align: left; }
+.dl-job { display: grid; gap: 6px; padding: 10px; border-radius: 12px; background: var(--pad); margin-bottom: 8px; }
+.dl-job-name { margin: 0; word-break: break-word; }
+.dl-job .hint { margin: 0; }
+.dl-fill { height: 100%; background: var(--copper); transition: width 0.4s ease; }

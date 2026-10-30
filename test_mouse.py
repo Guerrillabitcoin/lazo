@@ -574,6 +574,173 @@ def test_system_pill() -> None:
     assert "system" in lazo.ACTIONS and "screen" in lazo.ACTIONS
 
 
+SAMPLE_INFO = {
+    "id": "abc123", "title": "Vídeo de prueba", "duration": 125, "uploader": "Canal",
+    "thumbnail": "https://i.example/t.jpg",
+    "formats": [
+        {"format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a", "filesize": 2000000},
+        {"format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus"},
+        {"format_id": "18", "ext": "mp4", "vcodec": "avc1", "acodec": "mp4a", "height": 360},
+        {"format_id": "136", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "height": 720, "filesize_approx": 9000000},
+        {"format_id": "137", "ext": "mp4", "vcodec": "avc1", "acodec": "none", "height": 1080},
+    ],
+}
+
+FAKE_YTDLP = r"""
+import json, os, sys, time
+args = sys.argv[1:]
+if "--version" in args:
+    print("2099.01.01"); sys.exit(0)
+url = args[args.index("--") + 1]
+if "-J" in args:
+    print(%s); sys.exit(0)
+out = args[args.index("-P") + 1]
+steps = 200 if "lento" in url else 3
+for i in range(steps):
+    print("LZP %%d|%%d|NA|1000|%%d" %% ((i + 1) * 10, steps * 10, steps - i), flush=True)
+    time.sleep(0.05 if "lento" in url else 0)
+path = os.path.join(out, "Fake [abc123].mp4")
+with open(path, "wb") as fh:
+    fh.write(b"video-falso" * 10)
+print("LZF " + path, flush=True)
+"""
+
+
+def test_descargatodo() -> None:
+    """Descargatodo sin red: enlaces, orden como lista, formatos, cola, cancelar y firma."""
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    import descargas
+
+    good = descargas.check_url("  https://www.youtube.com/watch?v=abc  ")
+    if good != "https://www.youtube.com/watch?v=abc":
+        raise SystemExit("no aceptó un enlace https")
+    for bad in ("-x", "--exec=calc", "file:///etc/passwd", "", "   ", "ftp://a/b", "https://a b",
+                "javascript:alert(1)", "https://" + "a" * 2050, None, "http://"):
+        try:
+            descargas.check_url(bad)
+        except descargas.DlError:
+            continue
+        raise SystemExit(f"aceptó un enlace malo: {bad!r}")
+
+    tmp = Path(tempfile.mkdtemp(prefix="lazo-dl-"))
+    fake = tmp / "fake_ytdlp.py"
+    fake.write_text(FAKE_YTDLP.replace("%%", "%").replace("%s", repr(json.dumps(SAMPLE_INFO))), encoding="utf-8")
+    real_cmd, real_ff, real_out = descargas.ytdlp_cmd, descargas.find_ffmpeg, descargas.QUEUE.out_dir
+    descargas.ytdlp_cmd = lambda: [sys.executable, str(fake)]
+    descargas.find_ffmpeg = lambda: None
+    descargas.QUEUE.out_dir = tmp / "out"
+    try:
+        cmd = descargas.download_cmd("https://x.com/a/status/1", "best", tmp / "out")
+        if not isinstance(cmd, list) or cmd[-2:] != ["--", "https://x.com/a/status/1"]:
+            raise SystemExit(f"la URL no va tras --: {cmd[-3:]}")
+        if "--no-playlist" not in cmd or "--ignore-config" not in cmd or any("cookies" in a for a in cmd):
+            raise SystemExit("orden sin las protecciones")
+        if descargas.info_cmd("https://a.example/v")[-2:] != ["--", "https://a.example/v"]:
+            raise SystemExit("info sin --")
+        for bad_choice in ("-x", "f:--exec", "f:a;b", "f:1+2+3", "loquesea"):
+            try:
+                descargas.selector(bad_choice, True)
+            except descargas.DlError:
+                continue
+            raise SystemExit(f"aceptó un formato malo: {bad_choice}")
+        if descargas.selector("720", False)[0] != ["-f", "b[height<=720]/b"]:
+            raise SystemExit("sin ffmpeg debe pedir un solo archivo")
+        try:
+            descargas.selector("mp3", False)
+            raise SystemExit("MP3 sin ffmpeg")
+        except descargas.DlError:
+            pass
+
+        parsed = descargas.parse_info(SAMPLE_INFO)
+        ids = [c["id"] for c in parsed["choices"]]
+        if ids != ["best", "1080", "720", "480", "mp3", "audio"] or parsed["duration"] != 125:
+            raise SystemExit(f"opciones simples: {ids}")
+        if {f["id"] for f in parsed["formats"]} != {"140", "251", "18", "136", "137"}:
+            raise SystemExit("faltan formatos avanzados")
+        small = descargas.parse_info({"title": "x", "formats": [{"format_id": "1", "height": 480, "vcodec": "h264", "acodec": "aac"}]})
+        if [c["id"] for c in small["choices"]] != ["best", "480", "mp3", "audio"]:
+            raise SystemExit("ofreció calidades que no hay")
+        info = descargas.get_info("https://www.youtube.com/watch?v=abc123")
+        if info["title"] != "Vídeo de prueba":
+            raise SystemExit("no leyó la salida de yt-dlp")
+
+        out = tmp / "out"
+        out.mkdir()
+        inside = out / "a.mp4"
+        inside.write_bytes(b"x")
+        if descargas.safe_output(str(inside), out) != inside.resolve():
+            raise SystemExit("rechazó un archivo bueno")
+        outside = tmp / "fuera.mp4"
+        outside.write_bytes(b"x")
+        if descargas.safe_output(str(outside), out) or descargas.safe_output(str(out / ".." / "fuera.mp4"), out):
+            raise SystemExit("aceptó un archivo fuera de Descargas/LaZoo")
+
+        queue = descargas.QUEUE
+        done = queue.start("https://www.youtube.com/watch?v=abc123", "720", "Prueba")["job"]["id"]
+        slow = queue.start("https://www.youtube.com/watch?v=lento", "best", "Lenta")["job"]["id"]
+        deadline = time.time() + 20
+        state = {}
+        while time.time() < deadline:
+            state = {j["id"]: j for j in queue.status()["jobs"]}
+            if state[done]["state"] == "hecha" and state[slow]["state"] == "descargando" and state[slow]["pct"] > 0:
+                break
+            time.sleep(0.05)
+        if state[done]["state"] != "hecha" or state[done]["name"] != "Fake [abc123].mp4" or "720p" not in " ".join(descargas.download_cmd("https://a.b/c", "720", tmp)):
+            raise SystemExit(f"la descarga falsa no terminó: {state[done]}")
+        if "url" in state[done] or "path" in state[done]:
+            raise SystemExit("el estado enseña rutas o enlaces")
+        if queue.file(done).read_bytes() != b"video-falso" * 10:
+            raise SystemExit("archivo equivocado")
+        queue.cancel(slow)
+        while time.time() < deadline and any(p.poll() is None for p in list(queue.procs.values())):
+            time.sleep(0.05)
+        time.sleep(0.2)
+        if {j["id"]: j for j in queue.status()["jobs"]}[slow]["state"] != "cancelada":
+            raise SystemExit("no canceló")
+
+        # Endpoints: el móvil firma y sella; sin firma, nada.
+        server = lazo.ThreadingHTTPServer(("127.0.0.1", 0), lazo.Handler)
+        port = server.server_address[1]
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        real_loopback = lazo.Handler._loopback
+        pairing = lazo.PAIRING
+        try:
+            for path in ("/api/dl/info", "/api/dl/start", "/api/dl/cancel", "/api/dl/install", "/api/dl/update", "/api/dl/open"):
+                if _post(port, path, b"{}", {"Content-Type": "application/json"})[0] != 401:
+                    raise SystemExit(f"{path} sin cabecera local")
+            lazo.Handler._loopback = lambda self: False
+            for path in ("/api/dl/tools", "/api/dl/status", "/api/dl/file/" + done):
+                req = urllib.request.Request(f"http://127.0.0.1:{port}{path}")
+                try:
+                    urllib.request.urlopen(req, timeout=5)
+                    raise SystemExit(f"{path} sin firma")
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 401:
+                        raise SystemExit(f"{path}: {exc.code}")
+            body = pairing.seal(json.dumps({"url": "https://www.youtube.com/watch?v=abc123"}).encode())
+            headers = {"Content-Type": "application/octet-stream", "X-Seal": "1", protocol.H_ID: "cd" * 8, **pairing.sign("POST", "/api/dl/info", len(body))}
+            status, raw = _post(port, "/api/dl/info", body, headers)
+            if status != 200 or json.loads(pairing.open(raw))["title"] != "Vídeo de prueba":
+                raise SystemExit(f"info firmada: {status}")
+            plain = json.dumps({"url": "-x"}).encode()
+            if _post(port, "/api/dl/info", plain, {protocol.H_ID: "cd" * 8, **pairing.sign("POST", "/api/dl/info", len(plain))})[0] != 400:
+                raise SystemExit("aceptó cuerpo sin sellar")
+            path = "/api/dl/file/" + done
+            req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", headers={"X-Seal": "1", protocol.H_ID: "cd" * 8, **pairing.sign("GET", path, 0)})
+            got = urllib.request.urlopen(req, timeout=5).read()
+            if not got.startswith(protocol.MAGIC) or pairing.open(got) != b"video-falso" * 10:
+                raise SystemExit("el archivo no llegó sellado")
+        finally:
+            lazo.Handler._loopback = real_loopback
+            server.shutdown()
+        print("descargatodo: enlaces validados, orden en lista con --, formatos, cola, cancelar y firma")
+    finally:
+        descargas.ytdlp_cmd, descargas.find_ffmpeg, descargas.QUEUE.out_dir = real_cmd, real_ff, real_out
+
+
 if __name__ == "__main__":
     os.environ.setdefault("LAZO_TEST", "1")
     test_backends()
@@ -593,4 +760,5 @@ if __name__ == "__main__":
     test_place_on_screen()
     test_move_window_linux()
     test_system_pill()
+    test_descargatodo()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")
