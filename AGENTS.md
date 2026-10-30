@@ -1,43 +1,51 @@
-# Encargo para quien siga LaZoo
+# Agente de LaZoo
 
-Léelo antes de tocar código. No reescribas la app. El usuario ya usa la 0.31 en un PC Windows y un móvil por Wi-Fi.
+Eres el agente que convierte LaZoo en un producto para varios sistemas. No reescribas la 0.31: el usuario ya la usa. Cada fase tiene que seguir arrancando con `iniciar.bat` hasta que el reemplazo haga lo mismo.
 
 Repositorio: https://github.com/Guerrillabitcoin/lazo
-Arranque: `iniciar.bat` (Windows) o `./iniciar.sh`. Python 3.10+. Puerto 8787. Página del PC: `http://127.0.0.1:8787/conectar`. Pruebas: `python test_mouse.py`.
+Hoy: Python 3.10+, puerto 8787, página del PC en `http://127.0.0.1:8787/conectar`, móvil en el navegador. Pruebas: `python test_mouse.py`.
 
-## Qué es
+## Qué tiene que quedar
 
-Mando local del PC desde el navegador del móvil. No es una web suelta ni una cuenta en la nube. El programa corre en el PC. El móvil entra por la Wi-Fi de casa. Nada debe salir a internet. No abras el 8787 en el router.
+Un solo protocolo. Tres programas, no tres apps distintas.
 
-Nombre de cara al público: **LaZoo**. En el logo se escribe **LaZo**: la segunda o se separa y se pone verde al conectar, y se junta en rojo al cortarse. Misma animación en el móvil y en la pantalla del QR del PC. Debajo del logo va el número de versión.
+| Pieza | Dónde | Forma |
+| --- | --- | --- |
+| Anfitrión | Windows, Linux y macOS | Icono en la bandeja. Sin ventana negra. Al pulsar, abre la pantalla del QR: primero la página local, y solo si hace falta una ventana propia. |
+| Mando | Android y GrapheneOS | Una APK instalable, sin tienda y sin servicios de Google. La misma interfaz que ahora. |
+| Mando | iOS | El navegador, hasta que exista cuenta de desarrollador de Apple. No bloquees el resto por iOS. |
 
-## Decisiones ya cerradas
+El PC controlado puede ser Windows, Linux o Mac. El móvil puede ser Android, GrapheneOS o iOS. Cualquier mando habla con cualquier anfitrión.
 
-- HTTP en la red local. No pongas un certificado: el usuario lo vio como aviso de sitio malicioso. Si el navegador dice «conexión no segura», es la dirección de casa. Explícalo, no lo «arregles» con TLS.
-- El QR y el PIN se ven solo cuando no hay móvil. Al conectar desaparecen y el logo pasa a verde. Si el móvil se va, vuelven al momento (`/api/bye` y una ventana de unos 5 s).
-- El QR ya trae el PIN. En el móvil, el campo de PIN se oculta al entrar y solo vuelve si se corta, con el PIN escrito.
-- El teclado del móvil es el del sistema, cuando el foco del PC está en un texto. El teclado de la app es opcional y se pliega con el mismo botón.
-- La pastilla Ratón va fija al principio del dock. El resto se desliza en horizontal y se reordena agarrando el asa, no el botón entero.
-- YouTube y Spotify se controlan con atajos de la app de verdad, no inyectando JavaScript ni abriendo la consola. No reescales su ventana al pulsar un botón. Play y pausa son el mismo botón y cambia el icono. El volumen es un slider.
-- Las notas no se duplican, la última queda arriba, y copiar está a la derecha. No guardes el portapapeles que ya había al arrancar.
-- El puente Wi-Fi es local: texto, archivos y fotos. Un observador de la Wi-Fi debe ver tráfico cifrado (sello `LZ2`, HMAC-SHA256), no el texto.
-- La interfaz va en español, oscura, con acento naranja `#e07a3d`. El trackpad es oscuro y deja una huella naranja.
-- Cada cambio que el usuario pueda instalar sube de versión, entra en una carpeta `LaZoo-X.Y` dentro del zip, con `VERSION.txt`, y se publica en GitHub Releases. El número tiene que coincidir con el logo, `iniciar.bat` y el README.
+Sigue siendo local. La misma Wi-Fi, nada sale a internet, no se abre el 8787 en el router. Nombre público **LaZoo**. En el logo, **LaZo**: la segunda o se abre en verde al conectar y se cierra en rojo al cortarse, en el móvil y en el PC.
 
-## No lo rompas
+## Decisiones cerradas
 
-Ratón (WebSocket binario), cursor normal/grande/enorme, ventanas, YouTube, Spotify, volumen del PC, notas, puente, logo de conexión y la pantalla del QR. Las pruebas (atajos, captura, brillo, batería, dormir, abrir una web, me gusta y cola de Spotify) viven solo en la pestaña Pruebas. No las mezcles con las pastillas estables.
+- HTTP en la red local. No instales un certificado: el usuario lo vio como aviso de sitio malicioso. Si el navegador dice «conexión no segura», explícalo.
+- El QR y el PIN solo se ven sin móvil. Al conectar desaparecen. Si se corta, vuelven al momento.
+- El QR ya lleva el PIN. En el móvil el campo se oculta al entrar.
+- Teclado del sistema al pulsar un texto del PC. El teclado de la app es opcional.
+- Ratón fijo en el dock. El resto se desliza y se reordena por el asa.
+- YouTube y Spotify con atajos de la app real. No inyectes JavaScript ni reescales su ventana.
+- Notas sin duplicar, la última arriba. No guardes el portapapeles que ya había al arrancar.
+- El puente es local. Quien escuche la Wi-Fi ve el sello `LZ2`, no el texto.
+- Interfaz en español, fondo oscuro, naranja `#e07a3d`, trackpad oscuro con huella naranja.
+- Cada entrega instalable sube de versión: carpeta `LaZoo-X.Y`, `VERSION.txt`, GitHub Release, y el mismo número en el logo.
 
-## Qué falta, sin hacerlo todo de golpe
+No rompas el ratón, el cursor, las ventanas, YouTube, Spotify, el volumen, las notas, el puente, el logo ni la pantalla del QR. Las pruebas (atajos, captura, brillo, batería, dormir, abrir una web, me gusta y cola de Spotify) se quedan en la pestaña Pruebas.
 
-Un solo encargo por vez, con prueba antes de publicar:
+## Orden de trabajo
 
-1. Fluidez del ratón en el teléfono real del usuario (sigue notando retardo).
-2. Barra de subida del puente: progreso, pendientes y velocidad.
-3. Que ignore adaptadores virtuales `172.*` al elegir la IP del QR.
-4. Servicio en segundo plano en Windows, sin ventana negra, y más adelante un `.exe`. El móvil sigue en el navegador hasta que exista una APK. No conviertas esto en un rewrite.
-5. Carpeta de fotos del móvil hacia el PC, al estilo de una copia local, no una nube pública.
+Una fase por encargo. No empieces la siguiente si la anterior no arranca.
+
+1. **Protocolo.** Deja escrito, en un solo módulo, el emparejamiento, el WebSocket del ratón y el sello `LZ2`. Windows, Linux y Mac ya entran por `control.py`. No dupliques eso en cada plataforma.
+2. **Bandeja en Windows.** El proceso queda en la bandeja, abre la pantalla del QR y se cierra desde el icono. `iniciar.bat` puede seguir existiendo como atajo. Nada de ventana negra obligatoria.
+3. **El mismo anfitrión en Linux y macOS.** Misma bandeja o el equivalente, mismos fallos cortos si falta un permiso. En Wayland, di qué no puede hacer el ratón en vez de fingir que funciona.
+4. **APK.** Un contenedor Android que cargue la interfaz actual, hable con el anfitrión y se instale a mano. Sin Google Play Services, para que sirva en GrapheneOS. El navegador del móvil sigue valiendo.
+5. **iOS.** Documenta el límite: Safari ya entra. Una app propia solo cuando haya firma de Apple.
+
+Después, y solo después: fluidez del ratón, barra de subida del puente, ignorar IPs `172.*` virtuales, y la copia local de fotos. No son el primer trabajo.
 
 ## Cómo trabajar
 
-Diff corto. No renombres el producto ni cambies el puerto. Si una función de Windows no existe en Linux o macOS, degrada con un error corto. No añadas dependencias si `requirements.txt` y la biblioteca estándar bastan. Cuando publiques, el zip se llama `LaZoo-X.Y.zip`.
+Diff corto. No cambies el puerto ni el nombre. No añadas una dependencia si la biblioteca estándar basta. Si publicas, el zip se llama `LaZoo-X.Y.zip` y la APK, cuando exista, `LaZoo-X.Y.apk`.
