@@ -22,7 +22,7 @@ import protocol
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.33-beta2"
+VERSION = "0.34"
 PAIRING = protocol.Pairing()
 PORT = 8787
 VISITS: list[str] = []
@@ -283,7 +283,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.33 beta 2</p>
+      <p class="ver">0.34</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
