@@ -568,7 +568,7 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 .win-empty { list-style: none; padding: 12px; color: #999; }
 .win-tabs { margin-top: 8px; display: grid; gap: 6px; }
 .win-tabs-bar { display: grid; grid-template-columns: 1fr 56px 56px; gap: 8px; align-items: center; }
-.win-tabs-bar button { min-height: 40px; font-size: 22px; padding: 0; }
+.win-tabs-bar button { min-height: 44px; font-size: 22px; padding: 0; }
 .win-tabs-title { color: #e07a3d; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .win-tabs-list { max-height: 30vh; overflow-y: auto; }
 .win-tabs-list .active { border-left: 4px solid #e07a3d; }
@@ -577,3 +577,20 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
   .win-tabs-list { max-height: 22vh; }
   .win-list { min-height: 90px; }
 }
+
+/* Puente por trozos */
+.xfer-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.xfer-list { margin-top: 8px; }
+.xfer-row { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; align-items: center; padding: 8px 0; border-bottom: 1px solid #2a241e; }
+.xfer-row b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.xfer-row .xfer-track { grid-column: 1 / -1; height: 6px; }
+.xfer-row small { grid-column: 1 / -1; color: #b8ab9c; overflow-wrap: anywhere; }
+.xfer-fill { height: 100%; width: 0; background: var(--copper); transition: width 0.2s linear; }
+.xfer-row[data-state="ok"] .xfer-fill, .xfer-row[data-state="skip"] .xfer-fill { background: #3dbe6e; }
+.xfer-row[data-state="error"] .xfer-fill { background: #d9534f; }
+.xfer-row[data-state="error"] small { color: #ff9b8f; }
+.xfer-x { min-width: 44px; min-height: 44px; border-radius: 12px; }
+
+/* Toques cómodos: al menos 44 px */
+button[data-cursor] { min-height: 44px; }
+.about-links a { display: inline-block; padding: 13px 0; }

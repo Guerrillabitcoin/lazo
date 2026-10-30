@@ -2139,7 +2139,7 @@ def _physical_mouse_loop() -> None:
 _files_dir = Path(__file__).with_name("nube")
 _photos_dir = Path(__file__).with_name("Fotos")
 _FILE_CAP = 80 * 1024 * 1024
-_FILE_TOTAL = 400 * 1024 * 1024
+_files_lock = threading.Lock()
 _PHOTO_CAP = 1536 * 1024 * 1024
 _PHOTO_TOTAL = 30 * 1024 * 1024 * 1024
 _photo_lock = threading.Lock()
@@ -2158,7 +2158,7 @@ def set_photos_dir(path: Path) -> None:
 def list_photos() -> dict[str, Any]:
     _photos_dir.mkdir(parents=True, exist_ok=True)
     rows = _photo_rows()
-    return {"folder": str(_photos_dir), "count": len(rows), "photos": rows[:40]}
+    return {"folder": str(_photos_dir), "count": len(rows), "bytes": sum(row["size"] for row in rows), "photos": rows[:60]}
 
 
 def photo_status(name: str, size: int) -> dict[str, Any]:
@@ -2215,9 +2215,13 @@ def open_photos_folder() -> dict[str, Any]:
 
 
 def _photo_name(name: str) -> str:
-    base = Path(str(name).replace("\\", "/")).name
-    base = "".join(ch for ch in base if ch not in '<>:"|?*' and ord(ch) >= 32).strip().strip(".")
-    return (base or "foto")[:120]
+    import puente
+
+    return puente.clean_name(name, "foto")
+
+
+def received_dir() -> Path:
+    return _photos_dir
 
 
 def _unique_photo(name: str) -> Path:
@@ -2256,34 +2260,90 @@ def save_file(name: str, data: bytes) -> dict[str, Any]:
         raise ControlError("archivo vacío")
     if len(data) > _FILE_CAP:
         raise ControlError("El archivo pasa de 80 MB")
-    clean = "".join(ch for ch in name if ch.isalnum() or ch in "._- ").strip()[:80] or "archivo"
     _files_dir.mkdir(parents=True, exist_ok=True)
-    rows = _file_rows()
-    total = sum(int(row["size"]) for row in rows) + len(data)
-    if total > _FILE_TOTAL:
-        raise ControlError("La mesa está llena. Quita algún archivo.")
+    _check_space(len(data))
     file_id = secrets.token_hex(4)
     (_files_dir / file_id).write_bytes(_seal(data))
-    rows.insert(0, {"id": file_id, "name": clean, "size": len(data), "at": int(time.time())})
-    _write_file_rows(rows[:30])
-    return {"file": rows[0]}
+    return _add_file_row({"id": file_id, "name": _nube_name(name), "size": len(data), "at": int(time.time())})
+
+
+def save_file_stream(name: str, source, length: int, limit: int) -> dict[str, Any]:
+    """Guarda un archivo grande del PC en la mesa leyendo a trozos, sin cargarlo entero.
+    Va sin DPAPI (sería cargarlo en memoria): se queda en la carpeta `nube` del PC."""
+    if length <= 0:
+        raise ControlError("archivo vacío")
+    if length > limit:
+        raise ControlError("El archivo pasa del límite del puente")
+    _files_dir.mkdir(parents=True, exist_ok=True)
+    _check_space(length)
+    file_id = secrets.token_hex(4)
+    path = _files_dir / file_id
+    left = length
+    try:
+        with path.open("wb") as out:
+            while left > 0:
+                chunk = source.read(min(1024 * 1024, left))
+                if not chunk:
+                    break
+                out.write(chunk)
+                left -= len(chunk)
+    except OSError as exc:
+        path.unlink(missing_ok=True)
+        raise ControlError("No se pudo guardar en el PC") from exc
+    if left:
+        path.unlink(missing_ok=True)
+        raise ControlError("Se cortó el envío")
+    return _add_file_row({"id": file_id, "name": _nube_name(name), "size": length, "at": int(time.time()), "raw": True})
+
+
+def _nube_name(name: str) -> str:
+    import puente
+
+    return puente.clean_name(name)[:120]
+
+
+def _check_space(size: int) -> None:
+    import puente
+
+    free = shutil.disk_usage(_files_dir).free
+    if free - size < puente.MARGIN:
+        raise ControlError(f"No cabe en el PC: quedan {puente.human(max(0, free - puente.MARGIN))} libres")
+
+
+def _add_file_row(row: dict[str, Any]) -> dict[str, Any]:
+    with _files_lock:
+        rows = _file_rows()
+        rows.insert(0, row)
+        for old in rows[30:]:
+            (_files_dir / old["id"]).unlink(missing_ok=True)
+        _write_file_rows(rows[:30])
+    return {"file": row}
+
+
+def file_path(file_id: str) -> tuple[dict[str, Any], Path]:
+    row = _file_row(file_id)
+    if row is None:
+        raise ControlError("ese archivo ya no está")
+    return row, _files_dir / row["id"]
 
 
 def read_file(file_id: str) -> tuple[str, bytes]:
     row = _file_row(file_id)
     if row is None:
         raise ControlError("ese archivo ya no está")
-    return row["name"], _open_seal((_files_dir / row["id"]).read_bytes())
+    data = (_files_dir / row["id"]).read_bytes()
+    return row["name"], data if row.get("raw") else _open_seal(data)
 
 
 def delete_file(file_id: str) -> dict[str, Any]:
-    row = _file_row(file_id)
-    rows = [item for item in _file_rows() if item["id"] != file_id]
-    if row is not None:
-        path = _files_dir / row["id"]
-        if path.is_file():
-            path.unlink()
-    _write_file_rows(rows)
+    with _files_lock:
+        row = _file_row(file_id)
+        rows = [item for item in _file_rows() if item["id"] != file_id]
+        if row is not None:
+            path = _files_dir / row["id"]
+            if path.is_file():
+                path.unlink()
+        _write_file_rows(rows)
     return {"ok": True}
 
 
@@ -2313,9 +2373,10 @@ def _file_rows() -> list[dict[str, Any]]:
         rows.append(
             {
                 "id": file_id,
-                "name": str(item.get("name") or "archivo")[:80],
+                "name": str(item.get("name") or "archivo")[:120],
                 "size": int(item.get("size") or 0),
                 "at": int(item.get("at") or 0),
+                **({"raw": True} if item.get("raw") else {}),
             }
         )
     return rows
@@ -2323,7 +2384,9 @@ def _file_rows() -> list[dict[str, Any]]:
 
 def _write_file_rows(rows: list[dict[str, Any]]) -> None:
     _files_dir.mkdir(parents=True, exist_ok=True)
-    (_files_dir / "index.json").write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    tmp = _files_dir / "index.json.tmp"
+    tmp.write_text(json.dumps(rows, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(_files_dir / "index.json")
 
 
 def _seal(data: bytes) -> bytes:

@@ -1,5 +1,4 @@
 /* Cifrado del puente: HMAC-SHA256 en modo flujo. La clave vive solo en el QR, no viaja. */
-const SHA = new Uint32Array(64);
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
   0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
@@ -11,75 +10,95 @@ const K = new Uint32Array([
   0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ]);
 
-function rotr(n, x) {
-  return (x >>> n) | (x << (32 - n));
+/* SHA-256 por palabras, sin crear arrays por bloque: el puente cifra gigas con esto. */
+const W64 = new Int32Array(64);
+
+function compressWords(H, W) {
+  for (let i = 16; i < 64; i += 1) {
+    const x = W[i - 15];
+    const y = W[i - 2];
+    const s0 = ((x >>> 7) | (x << 25)) ^ ((x >>> 18) | (x << 14)) ^ (x >>> 3);
+    const s1 = ((y >>> 17) | (y << 15)) ^ ((y >>> 19) | (y << 13)) ^ (y >>> 10);
+    W[i] = (W[i - 16] + s0 + W[i - 7] + s1) | 0;
+  }
+  let a = H[0], b = H[1], c = H[2], d = H[3], e = H[4], f = H[5], g = H[6], h = H[7];
+  for (let i = 0; i < 64; i += 1) {
+    const S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+    const t1 = (h + S1 + ((e & f) ^ (~e & g)) + K[i] + W[i]) | 0;
+    const S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+    const t2 = (S0 + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+    h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+  }
+  H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+  H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+}
+
+const SHA_IV = new Int32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19]);
+
+function compressBytes(H, bytes, off) {
+  for (let i = 0; i < 16; i += 1) {
+    const p = off + i * 4;
+    W64[i] = (bytes[p] << 24) | (bytes[p + 1] << 16) | (bytes[p + 2] << 8) | bytes[p + 3];
+  }
+  compressWords(H, W64);
+}
+
+/* SHA-256 incremental: update() con trozos de cualquier tamaño, digest() al final. */
+class Sha256 {
+  constructor(state, length) {
+    this.H = state ? new Int32Array(state) : new Int32Array(SHA_IV);
+    this.buf = new Uint8Array(64);
+    this.fill = 0;
+    this.length = length || 0;
+  }
+
+  update(data) {
+    let pos = 0;
+    const n = data.length;
+    this.length += n;
+    if (this.fill) {
+      const take = Math.min(64 - this.fill, n);
+      this.buf.set(data.subarray(0, take), this.fill);
+      this.fill += take;
+      pos = take;
+      if (this.fill < 64) return this;
+      compressBytes(this.H, this.buf, 0);
+      this.fill = 0;
+    }
+    for (; pos + 64 <= n; pos += 64) compressBytes(this.H, data, pos);
+    if (pos < n) {
+      this.buf.set(data.subarray(pos), 0);
+      this.fill = n - pos;
+    }
+    return this;
+  }
+
+  digest() {
+    const bits = this.length * 8;
+    const tail = new Uint8Array(this.fill < 56 ? 64 : 128);
+    tail.set(this.buf.subarray(0, this.fill));
+    tail[this.fill] = 0x80;
+    const view = new DataView(tail.buffer);
+    view.setUint32(tail.length - 4, bits >>> 0);
+    view.setUint32(tail.length - 8, Math.floor(bits / 0x100000000));
+    for (let off = 0; off < tail.length; off += 64) compressBytes(this.H, tail, off);
+    const out = new Uint8Array(32);
+    const o = new DataView(out.buffer);
+    for (let i = 0; i < 8; i += 1) o.setUint32(i * 4, this.H[i] >>> 0);
+    return out;
+  }
 }
 
 function sha256(bytes) {
-  const bitLen = bytes.length * 8;
-  const withOne = bytes.length + 1;
-  const zeros = (64 - ((withOne + 8) % 64)) % 64;
-  const buf = new Uint8Array(withOne + zeros + 8);
-  buf.set(bytes);
-  buf[bytes.length] = 0x80;
-  const view = new DataView(buf.buffer);
-  view.setUint32(buf.length - 4, bitLen >>> 0);
-  view.setUint32(buf.length - 8, Math.floor(bitLen / 0x100000000));
-  let h0 = 0x6a09e667;
-  let h1 = 0xbb67ae85;
-  let h2 = 0x3c6ef372;
-  let h3 = 0xa54ff53a;
-  let h4 = 0x510e527f;
-  let h5 = 0x9b05688c;
-  let h6 = 0x1f83d9ab;
-  let h7 = 0x5be0cd19;
-  for (let off = 0; off < buf.length; off += 64) {
-    for (let i = 0; i < 16; i += 1) SHA[i] = view.getUint32(off + i * 4);
-    for (let i = 16; i < 64; i += 1) {
-      const s0 = rotr(7, SHA[i - 15]) ^ rotr(18, SHA[i - 15]) ^ (SHA[i - 15] >>> 3);
-      const s1 = rotr(17, SHA[i - 2]) ^ rotr(19, SHA[i - 2]) ^ (SHA[i - 2] >>> 10);
-      SHA[i] = (SHA[i - 16] + s0 + SHA[i - 7] + s1) >>> 0;
-    }
-    let a = h0;
-    let b = h1;
-    let c = h2;
-    let d = h3;
-    let e = h4;
-    let f = h5;
-    let g = h6;
-    let h = h7;
-    for (let i = 0; i < 64; i += 1) {
-      const S1 = rotr(6, e) ^ rotr(11, e) ^ rotr(25, e);
-      const ch = (e & f) ^ (~e & g);
-      const t1 = (h + S1 + ch + K[i] + SHA[i]) >>> 0;
-      const S0 = rotr(2, a) ^ rotr(13, a) ^ rotr(22, a);
-      const maj = (a & b) ^ (a & c) ^ (b & c);
-      const t2 = (S0 + maj) >>> 0;
-      h = g;
-      g = f;
-      f = e;
-      e = (d + t1) >>> 0;
-      d = c;
-      c = b;
-      b = a;
-      a = (t1 + t2) >>> 0;
-    }
-    h0 = (h0 + a) >>> 0;
-    h1 = (h1 + b) >>> 0;
-    h2 = (h2 + c) >>> 0;
-    h3 = (h3 + d) >>> 0;
-    h4 = (h4 + e) >>> 0;
-    h5 = (h5 + f) >>> 0;
-    h6 = (h6 + g) >>> 0;
-    h7 = (h7 + h) >>> 0;
-  }
-  const out = new Uint8Array(32);
-  const o = new DataView(out.buffer);
-  [h0, h1, h2, h3, h4, h5, h6, h7].forEach((word, i) => o.setUint32(i * 4, word));
-  return out;
+  return new Sha256().update(bytes).digest();
 }
 
-function hmacSha256(keyBytes, data) {
+/* Estados HMAC precalculados por clave (ipad/opad): cada bloque del flujo cuesta 2 compresiones. */
+const HMAC_PADS = new WeakMap();
+
+function hmacPads(keyBytes) {
+  let pads = HMAC_PADS.get(keyBytes);
+  if (pads) return pads;
   let key = keyBytes;
   if (key.length > 64) key = sha256(key);
   const block = new Uint8Array(64);
@@ -90,13 +109,33 @@ function hmacSha256(keyBytes, data) {
     ipad[i] = block[i] ^ 0x36;
     opad[i] = block[i] ^ 0x5c;
   }
-  const inner = new Uint8Array(64 + data.length);
-  inner.set(ipad);
-  inner.set(data, 64);
-  const outer = new Uint8Array(64 + 32);
-  outer.set(opad);
-  outer.set(sha256(inner), 64);
-  return sha256(outer);
+  const inner = new Int32Array(SHA_IV);
+  compressBytes(inner, ipad, 0);
+  const outer = new Int32Array(SHA_IV);
+  compressBytes(outer, opad, 0);
+  pads = { inner, outer };
+  HMAC_PADS.set(keyBytes, pads);
+  return pads;
+}
+
+class Hmac {
+  constructor(keyBytes) {
+    this.pads = hmacPads(keyBytes);
+    this.inner = new Sha256(this.pads.inner, 64);
+  }
+
+  update(data) {
+    this.inner.update(data);
+    return this;
+  }
+
+  digest() {
+    return new Sha256(this.pads.outer, 64).update(this.inner.digest()).digest();
+  }
+}
+
+function hmacSha256(keyBytes, data) {
+  return new Hmac(keyBytes).update(data).digest();
 }
 
 function concatBytes(parts) {
@@ -110,24 +149,38 @@ function concatBytes(parts) {
   return out;
 }
 
-function keystream(key, nonce, length) {
-  const out = new Uint8Array(length);
-  let filled = 0;
-  let counter = 0;
-  while (filled < length) {
-    const block = new Uint8Array(16);
-    block.set(nonce);
-    block[12] = (counter >>> 24) & 255;
-    block[13] = (counter >>> 16) & 255;
-    block[14] = (counter >>> 8) & 255;
-    block[15] = counter & 255;
-    const chunk = hmacSha256(key, block);
-    const take = Math.min(32, length - filled);
-    out.set(chunk.subarray(0, take), filled);
-    filled += take;
-    counter += 1;
+/* XOR con el flujo HMAC(key, nonce || contador) sin arrays intermedios. */
+function xorStream(key, nonce, src, dst) {
+  const { inner, outer } = hmacPads(key);
+  const H = new Int32Array(8);
+  const W = new Int32Array(64);
+  const n0 = (nonce[0] << 24) | (nonce[1] << 16) | (nonce[2] << 8) | nonce[3];
+  const n1 = (nonce[4] << 24) | (nonce[5] << 16) | (nonce[6] << 8) | nonce[7];
+  const n2 = (nonce[8] << 24) | (nonce[9] << 16) | (nonce[10] << 8) | nonce[11];
+  const length = src.length;
+  for (let counter = 0, pos = 0; pos < length; counter += 1, pos += 32) {
+    H.set(inner);
+    W[0] = n0; W[1] = n1; W[2] = n2; W[3] = counter; W[4] = 0x80000000;
+    for (let i = 5; i < 15; i += 1) W[i] = 0;
+    W[15] = (64 + 16) * 8;
+    compressWords(H, W);
+    for (let i = 0; i < 8; i += 1) W[i] = H[i];
+    W[8] = 0x80000000;
+    for (let i = 9; i < 15; i += 1) W[i] = 0;
+    W[15] = (64 + 32) * 8;
+    H.set(outer);
+    compressWords(H, W);
+    const take = Math.min(32, length - pos);
+    for (let i = 0; i < take; i += 1) {
+      const word = H[i >> 2];
+      dst[pos + i] = src[pos + i] ^ ((word >>> (24 - (i & 3) * 8)) & 255);
+    }
   }
-  return out;
+  return dst;
+}
+
+function keystream(key, nonce, length) {
+  return xorStream(key, nonce, new Uint8Array(length), new Uint8Array(length));
 }
 
 function b64urlToBytes(text) {
@@ -138,26 +191,29 @@ function b64urlToBytes(text) {
   return out;
 }
 
+const LZ2 = new Uint8Array([76, 90, 50]);
+
 function sealBytes(data, key) {
   const nonce = crypto.getRandomValues(new Uint8Array(12));
-  const stream = keystream(key, nonce, data.length);
-  const ct = new Uint8Array(data.length);
-  for (let i = 0; i < data.length; i += 1) ct[i] = data[i] ^ stream[i];
-  const tag = hmacSha256(key, concatBytes([new Uint8Array([76, 90, 50]), nonce, ct])).subarray(0, 16);
-  return concatBytes([new Uint8Array([76, 90, 50]), nonce, ct, tag]);
+  const out = new Uint8Array(15 + data.length + 16);
+  out.set(LZ2, 0);
+  out.set(nonce, 3);
+  xorStream(key, nonce, data, out.subarray(15, 15 + data.length));
+  const tag = new Hmac(key).update(out.subarray(0, 15 + data.length)).digest();
+  out.set(tag.subarray(0, 16), 15 + data.length);
+  return out;
 }
 
 function openSeal(blob, key) {
   if (blob.length < 31 || blob[0] !== 76 || blob[1] !== 90 || blob[2] !== 50) throw new Error("cifrado");
   const nonce = blob.subarray(3, 15);
   const tag = blob.subarray(blob.length - 16);
+  const expect = new Hmac(key).update(blob.subarray(0, blob.length - 16)).digest();
+  let diff = 0;
+  for (let i = 0; i < 16; i += 1) diff |= tag[i] ^ expect[i];
+  if (diff) throw new Error("cifrado");
   const ct = blob.subarray(15, blob.length - 16);
-  const expect = hmacSha256(key, concatBytes([new Uint8Array([76, 90, 50]), nonce, ct])).subarray(0, 16);
-  for (let i = 0; i < 16; i += 1) if (tag[i] !== expect[i]) throw new Error("cifrado");
-  const stream = keystream(key, nonce, ct.length);
-  const plain = new Uint8Array(ct.length);
-  for (let i = 0; i < ct.length; i += 1) plain[i] = ct[i] ^ stream[i];
-  return plain;
+  return xorStream(key, nonce, ct, new Uint8Array(ct.length));
 }
 
 function sealText(text, key) {

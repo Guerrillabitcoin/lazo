@@ -21,17 +21,21 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import control
 import descargas
 import protocol
+import puente
 import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.38"
+VERSION = "0.39"
 PAIRING = protocol.Pairing()
 PORT = 8787
 VISITS: list[str] = []
 VISITS_LOCK = threading.Lock()
 MESA_OPENED = False
 SCHEME = "http"
+UPLOADS = puente.Uploads(control.received_dir)
+UP_PATH = re.compile(r"/api/up/([0-9a-f]{20})/(\d{1,7}|done|cancel)")
+GET_PATH = re.compile(r"/api/get/(nube|dl)/([0-9A-Za-z_-]{1,40})/(\d{1,7}|info)")
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
@@ -297,7 +301,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.38</p>
+      <p class="ver">0.39</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -452,6 +456,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/seal.js":
             self._file(STATIC / "seal.js", "text/javascript; charset=utf-8")
             return
+        if path == "/puente-worker.js":
+            self._file(STATIC / "puente-worker.js", "text/javascript; charset=utf-8")
+            return
         if path == "/mesa":
             self._file(STATIC / "mesa.html", "text/html; charset=utf-8")
             return
@@ -494,6 +501,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/dl/file/"):
             self._dl_file(path.rsplit("/", 1)[-1])
+            return
+        match = GET_PATH.fullmatch(path)
+        if match:
+            self._get_chunk(*match.groups())
             return
         if path.startswith("/api/files/"):
             self._download(path.rsplit("/", 1)[-1])
@@ -548,6 +559,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/files":
             self._upload()
             return
+        if path == "/api/up/start":
+            self._guard(lambda body: UPLOADS.start(str(body.get("name", "")), body.get("size"), str(body.get("key", ""))[:200], self._who()))
+            return
+        match = UP_PATH.fullmatch(path)
+        if match:
+            up_id, step = match.groups()
+            if step == "done":
+                self._guard(lambda body: UPLOADS.finish(up_id, str(body.get("sha256", ""))))
+            elif step == "cancel":
+                self._guard(lambda _body: UPLOADS.cancel(up_id))
+            else:
+                self._up_chunk(up_id, int(step))
+            return
         if path == "/api/photos/check":
             self._photo_check()
             return
@@ -574,10 +598,27 @@ class Handler(BaseHTTPRequestHandler):
         self._guard(ACTIONS[action])
 
     def _file(self, path: Path, content_type: str) -> None:
-        if not path.is_file():
+        """Estáticos con ETag: el móvil revalida (304, sin cuerpo) y nunca se queda con
+        una versión vieja tras actualizar, porque la etiqueta cambia con el contenido."""
+        try:
+            data, tag = _static(path)
+        except OSError:
             self._send(404, {"error": "falta el archivo"})
             return
-        self._send(200, body=path.read_bytes(), content_type=content_type)
+        if self.headers.get("If-None-Match") == tag:
+            self.send_response(304)
+            self.send_header("ETag", tag)
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("ETag", tag)
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        self.wfile.write(data)
 
     def _login(self) -> None:
         """Emparejar con el PIN cuando no hay cámara. Devuelve la clave sin cifrar:
@@ -609,8 +650,11 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 body = {}
             result = fn(body)
-        except control.ControlError as exc:
+        except (control.ControlError, puente.BridgeError) as exc:
             self._send(400, {"error": str(exc)})
+            return
+        except OSError:
+            self._send(500, {"error": "El PC no pudo leer o escribir el disco"})
             return
         except (ValueError, TypeError, OverflowError):
             self._send(400, {"error": "Dato no válido"})
@@ -640,6 +684,15 @@ class Handler(BaseHTTPRequestHandler):
             self._unauth()
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
+        name = unquote(self.headers.get("X-Filename", "archivo"))
+        if not self.remote and self.headers.get("X-Seal") != "1" and length > 8 * 1024 * 1024:
+            # Desde la ventana del PC: sin sello y a disco a trozos, sin el tope de 80 MB.
+            try:
+                self._send(200, control.save_file_stream(name, self.rfile, length, puente.MAX_FILE))
+            except control.ControlError as exc:
+                self.close_connection = True
+                self._send(400, {"error": str(exc)})
+            return
         if length <= 0 or length > 80 * 1024 * 1024 + 4096:
             self.close_connection = True
             self._send(400, {"error": "El archivo pasa de 80 MB o está vacío"})
@@ -654,11 +707,93 @@ class Handler(BaseHTTPRequestHandler):
             except protocol.ProtocolError as exc:
                 self._send(400, {"error": str(exc)})
                 return
-        name = unquote(self.headers.get("X-Filename", "archivo"))
         try:
             self._send(200, control.save_file(name, data))
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)})
+
+    def _up_chunk(self, up_id: str, index: int) -> None:
+        """Un trozo de una subida: sellado si viene del móvil, firmado como cualquier petición."""
+        if not self._authed():
+            self._unauth()
+            return
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length < 0 or length > puente.CHUNK + 64:
+            self.close_connection = True
+            self._send(413, {"error": "Trozo demasiado grande"})
+            return
+        data = b""
+        left = length
+        parts = []
+        while left > 0:
+            got = self.rfile.read(min(left, 1024 * 1024))
+            if not got:
+                break
+            parts.append(got)
+            left -= len(got)
+        if left:
+            self.close_connection = True
+            self._send(400, {"error": "Se cortó el trozo"})
+            return
+        data = b"".join(parts)
+        if data.startswith(protocol.MAGIC) and self.headers.get("X-Seal") == "1":
+            try:
+                data = PAIRING.open(data)
+            except protocol.ProtocolError:
+                self._send(400, {"error": "Trozo dañado"})
+                return
+        elif self.remote:
+            self._send(400, {"error": "hace falta cifrado"})
+            return
+        try:
+            self._send(200, UPLOADS.write(up_id, index, data))
+        except puente.BridgeError as exc:
+            self._send(400, {"error": str(exc)})
+
+    def _get_target(self, kind: str, item: str) -> tuple[Path, str, dict]:
+        if kind == "dl":
+            target = descargas.QUEUE.file(item)
+            return target, target.name, {}
+        row, target = control.file_path(item)
+        return target, row["name"], row
+
+    def _get_chunk(self, kind: str, item: str, step: str) -> None:
+        """PC -> móvil por trozos: `info` da tamaño, trozos y SHA-256; luego cada trozo sellado."""
+        if not self._authed():
+            self._unauth()
+            return
+        sealed = self.headers.get("X-Seal") == "1"
+        if self.remote and not sealed:
+            self._send(400, {"error": "hace falta cifrado"})
+            return
+        try:
+            target, name, row = self._get_target(kind, item)
+            small = bool(row) and not row.get("raw")
+            if small:
+                data = control.read_file(item)[1]
+                size = len(data)
+            else:
+                size = target.stat().st_size
+            if step == "info":
+                digest = _sha_cached(target, size, data if small else None)
+                total = max(1, (size + puente.CHUNK - 1) // puente.CHUNK)
+                self._send(200, {"name": name, "size": size, "chunk": puente.CHUNK, "total": total, "sha256": digest})
+                return
+            index = int(step)
+            if small:
+                if not 0 <= index < max(1, (size + puente.CHUNK - 1) // puente.CHUNK):
+                    raise puente.BridgeError("Trozo fuera de rango")
+                piece = data[index * puente.CHUNK : (index + 1) * puente.CHUNK]
+            else:
+                piece = puente.read_chunk(target, index)
+        except (control.ControlError, puente.BridgeError) as exc:
+            self._send(404, {"error": str(exc)})
+            return
+        except OSError:
+            self._send(404, {"error": "ese archivo ya no está"})
+            return
+        body = PAIRING.seal(piece) if sealed else piece
+        self._send(200, body=body, content_type="application/octet-stream")
 
     def _photo_check(self) -> None:
         if not self._authed():
@@ -726,6 +861,21 @@ class Handler(BaseHTTPRequestHandler):
             self._unauth()
             return
         try:
+            row, target = control.file_path(file_id)
+            if row.get("raw"):
+                if self.headers.get("X-Seal") == "1":
+                    self._send(400, {"error": "Archivo grande: actualiza la página del móvil"})
+                    return
+                size = target.stat().st_size
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(size))
+                self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(row['name'])}")
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                with target.open("rb") as src:
+                    shutil.copyfileobj(src, self.wfile, 1024 * 1024)
+                return
             name, data = control.read_file(file_id)
         except control.ControlError as exc:
             self._send(404, {"error": str(exc)})
@@ -788,6 +938,44 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, control.delete_file(path.rsplit("/", 1)[-1]))
 
 
+_STATIC_CACHE: dict[str, tuple[float, int, bytes, str]] = {}
+
+
+def _static(path: Path) -> tuple[bytes, str]:
+    stat = path.stat()
+    hit = _STATIC_CACHE.get(str(path))
+    if hit and hit[0] == stat.st_mtime and hit[1] == stat.st_size:
+        return hit[2], hit[3]
+    import hashlib
+
+    data = path.read_bytes()
+    tag = '"' + hashlib.sha256(data).hexdigest()[:20] + '"'
+    _STATIC_CACHE[str(path)] = (stat.st_mtime, stat.st_size, data, tag)
+    return data, tag
+
+
+_SHA_CACHE: dict[tuple[str, int, float], str] = {}
+_SHA_LOCK = threading.Lock()
+
+
+def _sha_cached(path: Path, size: int, data: bytes | None = None) -> str:
+    try:
+        key = (str(path), size, path.stat().st_mtime)
+    except OSError:
+        key = (str(path), size, 0.0)
+    with _SHA_LOCK:
+        if key in _SHA_CACHE:
+            return _SHA_CACHE[key]
+    import hashlib
+
+    digest = hashlib.sha256(data).hexdigest() if data is not None else puente.file_sha256(path)
+    with _SHA_LOCK:
+        if len(_SHA_CACHE) > 64:
+            _SHA_CACHE.clear()
+        _SHA_CACHE[key] = digest
+    return digest
+
+
 def maybe_open_mesa() -> None:
     global MESA_OPENED
     if MESA_OPENED:
@@ -828,7 +1016,14 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--pin", default="")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--max-gb", type=float, default=0, help="Tope por archivo del puente (8 por defecto)")
     args = parser.parse_args()
+    if args.max_gb > 0:
+        puente.set_max_gb(args.max_gb)
+    try:
+        UPLOADS.cleanup(force=True)
+    except OSError:
+        pass
     PAIRING.pin = protocol.Pairing(args.pin).pin
     PORT = args.port
     try:

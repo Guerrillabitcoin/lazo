@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.38</title>
-    <link rel="stylesheet" href="/app.css" />
+    <title>LaZoo 0.39</title>
+    <link rel="stylesheet" href="/app.css?v=0.39" />
   </head>
   <body>
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.38</p>
+          <p class="ver">0.39</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -140,15 +140,20 @@
         <div id="view-bridge" class="view" hidden>
           <article class="deck">
             <div class="photo-actions">
-              <label class="file-label">Fotos y vídeos<input id="photo-input" type="file" accept="image/*,video/*" multiple hidden /></label>
-              <label class="file-label">Carpeta del móvil<input id="photo-dir" type="file" accept="image/*,video/*" webkitdirectory multiple hidden /></label>
-              <label class="file-label">Enviar archivo<input id="file-input" type="file" hidden /></label>
+              <label class="file-label">Enviar archivos al PC<input id="send-input" type="file" multiple hidden /></label>
+              <label class="file-label">Enviar una carpeta<input id="send-dir" type="file" webkitdirectory multiple hidden /></label>
             </div>
+            <p class="hint">Cualquier tipo y tamaño. Va a trozos cifrados y se comprueba al final.</p>
             <div id="xfer" class="xfer" hidden>
-              <div class="xfer-track"><div id="xfer-bar"></div></div>
-              <p id="xfer-stat" class="hint"></p>
+              <div class="xfer-track" role="progressbar" aria-label="Progreso total" aria-valuemin="0" aria-valuemax="100"><div id="xfer-bar"></div></div>
+              <div class="xfer-head">
+                <p id="xfer-stat" class="hint" aria-live="polite"></p>
+                <button id="xfer-cancel" type="button" class="xfer-x">Cancelar todo</button>
+              </div>
             </div>
-            <p id="photo-progress" class="hint"></p>
+            <ul id="xfers" class="list xfer-list"></ul>
+            <p id="photo-progress" class="hint" aria-live="polite"></p>
+            <p class="sys-title">Del PC al móvil</p>
             <ul id="files" class="list"></ul>
           </article>
         </div>
@@ -271,7 +276,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.38</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.39</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -307,7 +312,7 @@
         <nav id="dock" class="dock" hidden aria-label="Herramientas"></nav>
       </section>
     </main>
-    <script src="/seal.js"></script>
-    <script src="/app.js"></script>
+    <script src="/seal.js?v=0.39"></script>
+    <script src="/app.js?v=0.39"></script>
   </body>
 </html>

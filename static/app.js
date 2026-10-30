@@ -210,6 +210,7 @@ function showApp() {
 }
 
 async function refreshStatus() {
+  if (document.hidden) return;
   try {
     const data = await api("/api/status", null, "GET");
     document.querySelectorAll("[data-cursor]").forEach((button) => {
@@ -265,7 +266,12 @@ async function copyToPhone(text) {
   say(ok ? "Nota copiada" : "Mantén pulsado el texto para copiarlo");
 }
 
+let clipsShown = "";
+
 function renderClips(items) {
+  const sig = JSON.stringify(items);
+  if (sig === clipsShown) return;
+  clipsShown = sig;
   const list = document.querySelector("#clips");
   if (!list) return;
   list.replaceChildren();
@@ -298,10 +304,22 @@ function renderClips(items) {
   }
 }
 
+let filesShown = "";
+
 function renderFiles(items) {
   const list = document.querySelector("#files");
   if (!list) return;
+  const sig = JSON.stringify(items);
+  if (sig === filesShown && list.childElementCount) return;
+  if (list.querySelector("[data-busy]")) return;
+  filesShown = sig;
   list.replaceChildren();
+  if (!items.length) {
+    const empty = document.createElement("li");
+    empty.className = "hint";
+    empty.textContent = "Nada todavía. Desde el PC, abre el puente y suelta archivos.";
+    list.append(empty);
+  }
   for (const item of items) {
     const row = document.createElement("li");
     row.className = "file-row";
@@ -309,23 +327,21 @@ function renderFiles(items) {
     link.href = "#";
     link.addEventListener("click", async (event) => {
       event.preventDefault();
+      if (link.dataset.busy) return;
+      link.dataset.busy = "1";
       try {
-        const res = await lzFetch("/api/files/" + item.id);
-        if (!res.ok) throw new Error("No se pudo bajar");
-        const blob = new Uint8Array(await res.arrayBuffer());
-        const plain = wireKey ? openSeal(blob, wireKey) : blob;
-        const url = URL.createObjectURL(new Blob([plain]));
-        const temp = document.createElement("a");
-        temp.href = url;
-        temp.download = item.name;
-        temp.click();
-        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        await receiveChunked("nube", item.id, item.name, (got, size) => {
+          link.textContent = `${item.name} · ${Math.round((got / Math.max(1, size)) * 100)}%`;
+        });
+        say("Guardado en el móvil");
       } catch (err) {
         say(err.message);
+      } finally {
+        delete link.dataset.busy;
+        link.textContent = item.name + " · " + formatSize(item.size);
       }
     });
-    const kb = item.size < 1024 ? item.size + " B" : Math.max(1, Math.round(item.size / 1024)) + " KB";
-    link.textContent = item.name + " · " + kb;
+    link.textContent = item.name + " · " + formatSize(item.size);
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "Quitar";
@@ -339,6 +355,7 @@ function renderFiles(items) {
 }
 
 async function syncClipboard() {
+  if (document.hidden || (tab !== "notes" && tab !== "bridge")) return;
   try {
     const res = await lzFetch("/api/clipboard");
     if (res.status === 401) return;
@@ -368,160 +385,390 @@ document.querySelector("#clip-form").addEventListener("submit", async (event) =>
 
 function formatSpeed(bytesPerSecond) {
   if (bytesPerSecond < 1024) return Math.max(0, Math.round(bytesPerSecond)) + " B/s";
-  if (bytesPerSecond < 1024 * 1024) return (bytesPerSecond / 1024).toFixed(1) + " KB/s";
-  return (bytesPerSecond / (1024 * 1024)).toFixed(1) + " MB/s";
+  if (bytesPerSecond < 1024 * 1024) return (bytesPerSecond / 1024).toFixed(1).replace(".", ",") + " KB/s";
+  return (bytesPerSecond / (1024 * 1024)).toFixed(1).replace(".", ",") + " MB/s";
 }
 
-function showXfer(loaded, total, pending) {
-  const box = document.querySelector("#xfer");
-  const bar = document.querySelector("#xfer-bar");
-  const stat = document.querySelector("#xfer-stat");
-  box.hidden = false;
-  const ratio = total ? Math.min(1, loaded / total) : 0;
-  bar.style.width = Math.round(ratio * 100) + "%";
-  const seconds = (performance.now() - xferStarted) / 1000;
-  const speed = seconds > 0.2 ? xferBytes / seconds : 0;
-  stat.textContent = `${formatSpeed(speed)} · pendientes ${pending} · ${Math.round(ratio * 100)}%`;
+function formatSize(bytes) {
+  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(2).replace(".", ",") + " GB";
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1).replace(".", ",") + " MB";
+  if (bytes >= 1024) return Math.round(bytes / 1024) + " KB";
+  return bytes + " B";
 }
 
-function uploadTracked(url, body, headers, pending) {
+/* --- Puente por trozos ---------------------------------------------------
+   Cada archivo va en trozos de 4 MB leídos con File.slice(): sellados (LZ2), firmados y con
+   índice en la ruta. Si un trozo falla se reintenta; si el PC ya tenía trozos (corte, PC
+   reiniciado), se sigue desde ahí. Al final el PC comprueba el SHA-256 de todo el archivo. */
+const XFER_PARALLEL = 2;
+const XFER_RETRIES = 8;
+const xferJobs = [];
+let xferSeq = 0;
+let cryptoWorker = null;
+let cryptoBroken = false;
+const cryptoWaits = new Map();
+const localHashes = new Map();
+
+function cryptoCall(msg, transfer) {
+  if (!cryptoWorker && !cryptoBroken) {
+    try {
+      cryptoWorker = new Worker("/puente-worker.js?v=0.39");
+      cryptoWorker.onmessage = (event) => {
+        const wait = cryptoWaits.get(event.data.seq);
+        if (!wait) return;
+        cryptoWaits.delete(event.data.seq);
+        if (event.data.error) wait.reject(new Error(event.data.error));
+        else wait.resolve(event.data);
+      };
+      cryptoWorker.onerror = () => {
+        cryptoBroken = true;
+        cryptoWorker = null;
+        cryptoWaits.forEach((wait) => wait.reject(new Error("worker")));
+        cryptoWaits.clear();
+      };
+    } catch (_err) {
+      cryptoBroken = true;
+    }
+  }
+  if (cryptoBroken || !cryptoWorker) return Promise.resolve(cryptoLocal(msg));
+  xferSeq += 1;
+  const seq = xferSeq;
+  return new Promise((resolve, reject) => {
+    cryptoWaits.set(seq, { resolve, reject });
+    cryptoWorker.postMessage({ ...msg, seq }, transfer || []);
+  });
+}
+
+function cryptoLocal(msg) {
+  const { op, tid, buf, key } = msg;
+  if (!localHashes.has(tid)) localHashes.set(tid, new Sha256());
+  const hash = localHashes.get(tid);
+  if (op === "seal") {
+    const plain = new Uint8Array(buf);
+    hash.update(plain);
+    return { buf: (key ? sealBytes(plain, key) : plain).buffer };
+  }
+  if (op === "hash") {
+    hash.update(new Uint8Array(buf));
+    return {};
+  }
+  if (op === "open") {
+    const plain = key ? openSeal(new Uint8Array(buf), key) : new Uint8Array(buf);
+    hash.update(plain);
+    return { buf: plain.buffer };
+  }
+  localHashes.delete(tid);
+  return op === "digest" ? { hex: toHex(hash.digest()) } : {};
+}
+
+const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+function xferStop(job) {
+  if (job.cancelled) throw new Error("Cancelado");
+}
+
+function postChunk(job, url, body) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
+    job.xhr = xhr;
     xhr.open("POST", url);
     xhr.responseType = "arraybuffer";
-    const signed = { ...headers, ...signHeaders("POST", url, bodyLength(body)) };
-    Object.entries(signed).forEach(([name, value]) => xhr.setRequestHeader(name, value));
+    xhr.timeout = 120000;
+    const headers = { ...authHeaders({ "Content-Type": "application/octet-stream" }), ...signHeaders("POST", url, body.length) };
+    Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
     xhr.upload.onprogress = (event) => {
-      if (!event.lengthComputable) return;
-      xferBytes += Math.max(0, event.loaded - xferFileLoaded);
-      xferFileLoaded = event.loaded;
-      showXfer(event.loaded, event.total, pending);
+      job.inFlight = event.loaded;
+      paintXfers();
     };
-    xhr.onload = () => resolve(xhr);
-    xhr.onerror = () => reject(new Error("Se cortó el envío"));
-    xferFileLoaded = 0;
+    const fail = (text) => {
+      const err = new Error(text);
+      err.retry = true;
+      reject(err);
+    };
+    xhr.onload = () => {
+      job.xhr = null;
+      job.inFlight = 0;
+      const blob = new Uint8Array(xhr.response || []);
+      let data = {};
+      try {
+        const text = blob[0] === 76 && wireKey ? openText(blob, wireKey) : new TextDecoder().decode(blob);
+        data = JSON.parse(text || "{}");
+      } catch (_err) {}
+      if (xhr.status === 200) resolve(data);
+      else if (xhr.status === 401) {
+        const err = new Error(data.error || "Entra con el QR");
+        err.auth = true;
+        err.retry = true;
+        reject(err);
+      } else if (xhr.status >= 500 || xhr.status === 0) fail(data.error || "El PC no contestó");
+      else reject(new Error(data.error || "No se pudo enviar"));
+    };
+    xhr.onerror = () => fail("Se cortó la red");
+    xhr.ontimeout = () => fail("La red va muy lenta");
+    xhr.onabort = () => reject(new Error("Cancelado"));
     xhr.send(body);
   });
 }
 
-async function sendBody(file) {
-  const raw = new Uint8Array(await file.arrayBuffer());
-  if (!wireKey) return { body: file, size: file.size, headers: {} };
-  const sealed = sealBytes(raw, wireKey);
-  return {
-    body: sealed,
-    size: raw.length,
-    headers: { "X-Seal": "1", "X-Plain-Size": String(raw.length) },
-  };
-}
-let xferStarted = 0;
-let xferBytes = 0;
-let xferFileLoaded = 0;
-
-document.querySelector("#photo-input").addEventListener("change", (event) => sendPhotos(event.target));
-document.querySelector("#photo-dir").addEventListener("change", (event) => sendPhotos(event.target));
-
-const PHOTO_NAME = /\.(jpe?g|png|gif|webp|heic|heif|bmp|avif|mp4|mov|m4v|webm|3gp|mkv)$/i;
-
-function isPhoto(file) {
-  const type = file.type || "";
-  return type.startsWith("image/") || type.startsWith("video/") || PHOTO_NAME.test(file.name);
-}
-
-async function sendPhotos(input) {
-  const files = [...(input.files || [])].filter(isPhoto);
-  input.value = "";
-  const progress = document.querySelector("#photo-progress");
-  if (!files.length) {
-    progress.textContent = "No hay fotos ni vídeos";
-    return;
-  }
-  xferStarted = performance.now();
-  xferBytes = 0;
-  let sent = 0;
-  let skipped = 0;
-  for (let index = 0; index < files.length; index += 1) {
-    const file = files[index];
-    const pending = files.length - index;
-    progress.textContent = `${index + 1} de ${files.length} · ${file.name}`;
+async function withRetry(job, label, fn) {
+  for (let attempt = 1; ; attempt += 1) {
+    xferStop(job);
     try {
-      const known = await api("/api/photos/check", { name: file.name, size: file.size });
-      if (known.skip) {
-        skipped += 1;
-        continue;
-      }
-      const packed = await sendBody(file);
-      const xhr = await uploadTracked("/api/photos", packed.body, authHeaders({
-        "Content-Type": "application/octet-stream",
-        "X-Filename": encodeURIComponent(file.name),
-        ...packed.headers,
-      }), pending - 1);
-      const blob = new Uint8Array(xhr.response || []);
-      let data = {};
-      try {
-        const text = blob[0] === 76 ? openText(blob, wireKey) : new TextDecoder().decode(blob);
-        data = JSON.parse(text || "{}");
-      } catch (_err) {
-        data = {};
-      }
-      if (xhr.status === 401) {
-        showPin();
-        return;
-      }
-      if (xhr.status < 200 || xhr.status >= 300) throw new Error(data.error || "No se pudo enviar");
-      if (data.skipped) skipped += 1;
-      else sent += 1;
+      return await fn();
     } catch (err) {
-      progress.textContent = err.message;
-      return;
+      xferStop(job);
+      if (!err.retry || attempt >= XFER_RETRIES) throw err;
+      if (err.auth) await syncClock();
+      const wait = Math.min(15000, 800 * 2 ** (attempt - 1));
+      job.state = `${err.message}. Reintento ${attempt} de ${XFER_RETRIES - 1}…`;
+      paintXfers();
+      await sleep(wait);
     }
   }
-  document.querySelector("#xfer").hidden = true;
-  progress.textContent = `En el PC: ${sent} nuevas, ${skipped} ya estaban · pendientes 0`;
-  say(progress.textContent);
 }
 
-document.querySelector("#file-input").addEventListener("change", async (event) => {
-  const file = event.target.files && event.target.files[0];
-  event.target.value = "";
-  if (!file) return;
-  if (file.size > 80 * 1024 * 1024) {
-    say(`«${file.name}» pesa ${Math.round(file.size / 1048576)} MB. El puente admite hasta 80 MB por archivo; para vídeos usa «Fotos».`);
-    return;
-  }
-  if (!file.size) {
-    say("Ese archivo está vacío");
-    return;
-  }
-  xferStarted = performance.now();
-  xferBytes = 0;
-  try {
-    const packed = await sendBody(file);
-    const xhr = await uploadTracked("/api/files", packed.body, authHeaders({
-      "Content-Type": "application/octet-stream",
-      "X-Filename": encodeURIComponent(file.name),
-      ...packed.headers,
-    }), 0);
-    const blob = new Uint8Array(xhr.response || []);
-    let data = {};
+async function apiRetry(job, path, body) {
+  return withRetry(job, path, async () => {
     try {
-      const text = blob[0] === 76 ? openText(blob, wireKey) : new TextDecoder().decode(blob);
-      data = JSON.parse(text || "{}");
-    } catch (_err) {
-      data = {};
+      return await api(path, body);
+    } catch (err) {
+      if (/Sin conexión|tarda demasiado/.test(err.message)) err.retry = true;
+      throw err;
     }
-    if (xhr.status === 401) {
-      showPin();
-      return;
-    }
-    if (xhr.status < 200 || xhr.status >= 300) throw new Error(data.error || "No se pudo enviar");
-    document.querySelector("#xfer").hidden = true;
-    say("Archivo en el puente del PC");
-    syncClipboard();
-  } catch (err) {
-    say(err.message);
+  });
+}
+
+async function sendFile(job) {
+  const file = job.file;
+  const start = await apiRetry(job, "/api/up/start", {
+    name: file.webkitRelativePath && file.webkitRelativePath.includes("/") ? file.name : file.name,
+    size: file.size,
+    key: `${file.name}|${file.size}|${file.lastModified || 0}`,
+  });
+  if (start.skip) {
+    job.state = "Ya estaba en el PC";
+    job.done = file.size;
+    job.status = "skip";
+    return;
   }
+  job.upId = start.id;
+  const have = new Set(start.have || []);
+  if (have.size) job.state = `Retomo: ya había ${have.size} de ${start.total} trozos`;
+  const tid = "up-" + start.id + "-" + job.n;
+  try {
+    // Mientras sube un trozo, el worker ya prepara (lee, resume y cifra) el siguiente.
+    const prepare = async (index) => {
+      const from = index * start.chunk;
+      const buf = await file.slice(from, Math.min(file.size, from + start.chunk)).arrayBuffer();
+      if (have.has(index)) {
+        await cryptoCall({ op: "hash", tid, buf }, [buf]);
+        return null;
+      }
+      return new Uint8Array((await cryptoCall({ op: "seal", tid, buf, key: wireKey }, [buf])).buf);
+    };
+    let next = start.total ? prepare(0) : null;
+    for (let index = 0; index < start.total; index += 1) {
+      xferStop(job);
+      const sealed = await next;
+      next = index + 1 < start.total ? prepare(index + 1) : null;
+      if (next) next.catch(() => {});
+      if (sealed) {
+        await withRetry(job, "trozo", () => postChunk(job, `/api/up/${start.id}/${index}`, sealed));
+        if (!job.state.startsWith("Retomo")) job.state = "";
+      }
+      job.done = Math.min(file.size, (index + 1) * start.chunk);
+      job.inFlight = 0;
+      paintXfers();
+    }
+    if (next) await next;
+    const { hex } = await cryptoCall({ op: "digest", tid });
+    job.state = "Comprobando…";
+    paintXfers();
+    const end = await apiRetry(job, `/api/up/${start.id}/done`, { sha256: hex });
+    job.status = "ok";
+    job.state = end.name && end.name !== file.name ? `En el PC como «${end.name}» ✓` : "En el PC ✓";
+  } catch (err) {
+    cryptoCall({ op: "drop", tid }).catch(() => {});
+    throw err;
+  }
+}
+
+async function xferWorker() {
+  for (;;) {
+    const job = xferJobs.find((item) => item.status === "wait");
+    if (!job) return;
+    job.status = "run";
+    job.started = performance.now();
+    paintXfers();
+    try {
+      await sendFile(job);
+    } catch (err) {
+      job.status = job.cancelled ? "cancel" : "error";
+      job.state = job.cancelled ? "Cancelado" : err.message;
+      if (job.upId && job.cancelled) api(`/api/up/${job.upId}/cancel`, {}).catch(() => {});
+      if (err.auth) job.state = "El PC se reinició: vuelve a escanear el QR y elige el archivo otra vez; seguirá donde se quedó";
+    }
+    paintXfers();
+  }
+}
+
+let xferRunners = 0;
+
+function queueFiles(input) {
+  const files = [...(input.files || [])];
+  input.value = "";
+  if (!files.length) return;
+  xferJobs.splice(0, xferJobs.length, ...xferJobs.filter((job) => job.status === "wait" || job.status === "run"));
+  for (const file of files) {
+    xferJobs.push({ n: xferJobs.length + Math.random(), file, status: "wait", state: "", done: 0, inFlight: 0, cancelled: false });
+  }
+  xferStarted = xferStarted && xferJobs.some((job) => job.status === "run") ? xferStarted : performance.now();
+  paintXfers(true);
+  while (xferRunners < XFER_PARALLEL) {
+    xferRunners += 1;
+    xferWorker().finally(() => {
+      xferRunners -= 1;
+      paintXfers(true);
+      if (!xferRunners) finishXfers();
+    });
+  }
+}
+
+function finishXfers() {
+  const ok = xferJobs.filter((job) => job.status === "ok").length;
+  const skip = xferJobs.filter((job) => job.status === "skip").length;
+  const bad = xferJobs.filter((job) => job.status === "error").length;
+  const text = `En el PC: ${ok} nuevos, ${skip} ya estaban${bad ? `, ${bad} con fallo` : ""}`;
+  document.querySelector("#photo-progress").textContent = text;
+  say(text);
+  document.querySelector("#xfer-cancel").hidden = true;
+}
+
+function cancelJob(job) {
+  job.cancelled = true;
+  if (job.status === "wait") {
+    job.status = "cancel";
+    job.state = "Cancelado";
+  }
+  if (job.xhr) job.xhr.abort();
+  paintXfers(true);
+}
+
+let xferStarted = 0;
+let xferPaint = 0;
+const xferRows = new WeakMap();
+
+function paintXfers(force) {
+  const now = performance.now();
+  if (!force && now - xferPaint < 150) return;
+  xferPaint = now;
+  const box = document.querySelector("#xfer");
+  const list = document.querySelector("#xfers");
+  if (!xferJobs.length) {
+    box.hidden = true;
+    list.replaceChildren();
+    return;
+  }
+  box.hidden = false;
+  let total = 0;
+  let done = 0;
+  for (const job of xferJobs) {
+    total += job.file.size;
+    done += job.status === "ok" || job.status === "skip" ? job.file.size : Math.min(job.file.size, job.done + job.inFlight);
+  }
+  const ratio = total ? done / total : 1;
+  document.querySelector("#xfer-bar").style.width = Math.round(ratio * 100) + "%";
+  document.querySelector(".xfer-track").setAttribute("aria-valuenow", String(Math.round(ratio * 100)));
+  const running = xferJobs.filter((job) => job.status === "run" || job.status === "wait").length;
+  const seconds = (now - xferStarted) / 1000;
+  const speed = seconds > 0.5 ? done / seconds : 0;
+  document.querySelector("#xfer-stat").textContent = `${formatSize(done)} de ${formatSize(total)} · ${Math.round(ratio * 100)}% · ${formatSpeed(speed)} · pendientes ${running}`;
+  document.querySelector("#xfer-cancel").hidden = !running;
+  const wanted = new Set();
+  for (const job of xferJobs) {
+    let row = xferRows.get(job);
+    if (!row) {
+      row = document.createElement("li");
+      row.className = "xfer-row";
+      const name = document.createElement("b");
+      name.textContent = job.file.name || "archivo";
+      const track = document.createElement("div");
+      track.className = "xfer-track";
+      const bar = document.createElement("div");
+      bar.className = "xfer-fill";
+      track.append(bar);
+      const note = document.createElement("small");
+      const stop = document.createElement("button");
+      stop.type = "button";
+      stop.className = "xfer-x";
+      stop.textContent = "✕";
+      stop.setAttribute("aria-label", "Cancelar " + (job.file.name || "archivo"));
+      stop.addEventListener("click", () => cancelJob(job));
+      row.append(name, stop, track, note);
+      xferRows.set(job, row);
+    }
+    wanted.add(row);
+    const part = job.status === "ok" || job.status === "skip" ? 1 : job.file.size ? Math.min(1, (job.done + job.inFlight) / job.file.size) : 0;
+    row.querySelector(".xfer-fill").style.width = Math.round(part * 100) + "%";
+    row.dataset.state = job.status;
+    const label = { wait: "En cola", run: Math.round(part * 100) + "%", ok: "", skip: "", cancel: "", error: "" }[job.status];
+    row.querySelector("small").textContent = [formatSize(job.file.size), label, job.state].filter(Boolean).join(" · ");
+    row.querySelector(".xfer-x").hidden = !(job.status === "wait" || job.status === "run");
+  }
+  if (list.children.length !== wanted.size || [...list.children].some((row) => !wanted.has(row))) {
+    list.replaceChildren(...xferJobs.map((job) => xferRows.get(job)));
+  }
+}
+
+document.querySelector("#send-input").addEventListener("change", (event) => queueFiles(event.target));
+document.querySelector("#send-dir").addEventListener("change", (event) => queueFiles(event.target));
+document.querySelector("#xfer-cancel").addEventListener("click", () => {
+  xferJobs.forEach((job) => {
+    if (job.status === "wait" || job.status === "run") cancelJob(job);
+  });
 });
+
+/* PC -> móvil por trozos: el móvil pide cada trozo, lo abre y lo guarda como Blob. */
+async function receiveChunked(kind, id, fallbackName, onProgress) {
+  const info = await api(`/api/get/${kind}/${id}/info`, null, "GET");
+  const tid = `down-${kind}-${id}-${Date.now()}`;
+  const parts = [];
+  const job = { cancelled: false, state: "" };
+  for (let index = 0; index < info.total; index += 1) {
+    const buf = await withRetry(job, "trozo", async () => {
+      let res;
+      try {
+        res = await lzFetch(`/api/get/${kind}/${id}/${index}`);
+      } catch (_err) {
+        const err = new Error("Se cortó la red");
+        err.retry = true;
+        throw err;
+      }
+      if (!res.ok) {
+        const data = await readBody(res);
+        const err = new Error(data.error || "No se pudo recibir");
+        err.retry = res.status >= 500 || res.status === 401;
+        err.auth = res.status === 401;
+        throw err;
+      }
+      return res.arrayBuffer();
+    });
+    const plain = (await cryptoCall({ op: "open", tid, buf, key: wireKey }, [buf])).buf;
+    parts.push(new Blob([plain]));
+    if (onProgress) onProgress(Math.min(info.size, (index + 1) * info.chunk), info.size);
+  }
+  const { hex } = await cryptoCall({ op: "digest", tid });
+  if (info.sha256 && hex !== info.sha256) throw new Error("El archivo llegó dañado. Vuelve a intentarlo.");
+  const url = URL.createObjectURL(new Blob(parts));
+  const temp = document.createElement("a");
+  temp.href = url;
+  temp.download = info.name || fallbackName || "archivo";
+  document.body.append(temp);
+  temp.click();
+  temp.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 120000);
+  return info;
+}
 
 async function login() {
   const pin = document.querySelector("#pin-input").value.trim();
@@ -1005,6 +1252,7 @@ nativeType.addEventListener("blur", () => {
 });
 
 async function watchCaret() {
+  if (document.hidden || tab !== "mouse") return;
   try {
     const res = await lzFetch("/api/caret");
     if (res.status === 401) return;
@@ -1763,6 +2011,7 @@ function dlShowInstall(inst) {
 var dlWasInstalling = false;
 
 async function dlPoll() {
+  if (document.hidden) return;
   try {
     const data = await api("/api/dl/status", null, "GET");
     const inst = data.install || {};
@@ -1841,21 +2090,9 @@ async function dlReceive(job, button) {
   button.disabled = true;
   button.textContent = "Recibiendo…";
   try {
-    const res = await lzFetch("/api/dl/file/" + job.id);
-    if (!res.ok) {
-      const data = await readBody(res);
-      throw new Error(data.error || "No se pudo recibir");
-    }
-    const blob = new Uint8Array(await res.arrayBuffer());
-    const plain = wireKey ? openSeal(blob, wireKey) : blob;
-    const url = URL.createObjectURL(new Blob([plain]));
-    const temp = document.createElement("a");
-    temp.href = url;
-    temp.download = job.name || "descarga";
-    document.body.append(temp);
-    temp.click();
-    temp.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    await receiveChunked("dl", job.id, job.name || "descarga", (got, size) => {
+      button.textContent = `Recibiendo… ${Math.round((got / Math.max(1, size)) * 100)}%`;
+    });
     dlSent[job.id] = true;
     button.textContent = "Enviado ✓";
     say("Guardado en el móvil");
@@ -2077,4 +2314,12 @@ document.querySelector("#about-check").addEventListener("click", async (ev) => {
   } finally {
     button.disabled = false;
   }
+});
+
+/* Con la pestaña oculta no se consulta al PC (batería). Al volver, se pone al día. */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden || app.hidden) return;
+  refreshStatus();
+  syncClipboard();
+  if (tab === "dl") dlPoll();
 });

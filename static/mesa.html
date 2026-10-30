@@ -114,7 +114,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.38</p>
+          <p class="ver">0.39</p>
         </div>
         <p id="link-label">Sin conexión</p>
       </header>
@@ -129,14 +129,15 @@
         </section>
         <section>
           <h2>Archivos</h2>
-          <div id="drop" class="drop">Suelta archivos aquí</div>
-          <input id="file" type="file" multiple />
+          <div id="drop" class="drop" role="button" tabindex="0" aria-label="Suelta archivos o pulsa para elegir">Suelta archivos aquí (cualquier tipo y tamaño)</div>
+          <input id="file" type="file" multiple aria-label="Elegir archivos para el móvil" />
+          <p id="up-stat" aria-live="polite"><small></small></p>
           <ul id="files"></ul>
         </section>
       </div>
       <section class="fotos">
-        <h2>Fotos del móvil</h2>
-        <p id="fotos-path">Todavía no ha llegado ninguna.</p>
+        <h2>Recibido del móvil</h2>
+        <p id="fotos-path">Todavía no ha llegado nada.</p>
         <button id="open-fotos" type="button">Abrir carpeta</button>
         <ul id="fotos"></ul>
       </section>
@@ -227,7 +228,8 @@
       function size(bytes) {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
-        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+        if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1).replace(".", ",") + " MB";
+        return (bytes / (1024 * 1024 * 1024)).toFixed(2).replace(".", ",") + " GB";
       }
 
       async function load() {
@@ -275,8 +277,8 @@
         const path = document.querySelector("#fotos-path");
         const list = document.querySelector("#fotos");
         path.textContent = photos.count
-          ? photos.count + " en " + photos.folder
-          : "Todavía no ha llegado ninguna. La carpeta es " + (photos.folder || "Fotos");
+          ? photos.count + " archivos (" + size(photos.bytes || 0) + ") en " + photos.folder
+          : "Todavía no ha llegado nada. La carpeta es " + (photos.folder || "Fotos");
         list.replaceChildren();
         for (const item of photos.photos || []) {
           const row = document.createElement("li");
@@ -287,20 +289,55 @@
         }
       }
 
-      async function upload(file) {
-        await fetch("/api/files", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/octet-stream",
-            "X-Filename": encodeURIComponent(file.name),
-          },
-          body: file,
-        });
-        load();
+      const upQueue = [];
+      let upBusy = false;
+      const upStat = document.querySelector("#up-stat small");
+
+      function upload(file) {
+        upQueue.push(file);
+        if (!upBusy) nextUpload();
+      }
+
+      function nextUpload() {
+        const file = upQueue.shift();
+        if (!file) {
+          upBusy = false;
+          return;
+        }
+        upBusy = true;
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", "/api/files");
+        xhr.setRequestHeader("X-Lazo-Local", "1");
+        xhr.setRequestHeader("Content-Type", "application/octet-stream");
+        xhr.setRequestHeader("X-Filename", encodeURIComponent(file.name));
+        xhr.upload.onprogress = (event) => {
+          const pct = event.total ? Math.round((event.loaded / event.total) * 100) : 0;
+          upStat.textContent = `${file.name} · ${pct}% · pendientes ${upQueue.length}`;
+        };
+        const done = (text) => {
+          upStat.textContent = text;
+          load();
+          nextUpload();
+        };
+        xhr.onload = () => {
+          let data = {};
+          try { data = JSON.parse(xhr.responseText || "{}"); } catch (_err) {}
+          done(xhr.status === 200 ? `«${file.name}» listo para el móvil` : `«${file.name}»: ${data.error || "no se pudo guardar"}`);
+        };
+        xhr.onerror = () => done(`«${file.name}»: se cortó el envío`);
+        if (!file.size) {
+          done(`«${file.name}» está vacío`);
+          return;
+        }
+        xhr.send(file);
       }
 
       const drop = document.querySelector("#drop");
       drop.addEventListener("dragover", (event) => event.preventDefault());
+      drop.addEventListener("click", () => document.querySelector("#file").click());
+      drop.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") document.querySelector("#file").click();
+      });
       drop.addEventListener("drop", (event) => {
         event.preventDefault();
         for (const file of event.dataTransfer.files) upload(file);
@@ -440,12 +477,12 @@
       $("#dl-open").addEventListener("click", () => dlCall("/api/dl/open", {}).catch((err) => dlSay(err.message)));
       dlTools();
       dlJobs();
-      setInterval(dlJobs, 1500);
+      setInterval(() => { if (!document.hidden) dlJobs(); }, 1500);
       load();
       watchLink();
-      setInterval(load, 2000);
-      setInterval(watchLink, 2000);
-      setInterval(watchClipboard, 2000);
+      setInterval(() => { if (!document.hidden) load(); }, 2000);
+      setInterval(() => { if (!document.hidden) watchLink(); }, 2000);
+      setInterval(() => { if (!document.hidden) watchClipboard(); }, 2000);
     </script>
   </body>
 </html>
