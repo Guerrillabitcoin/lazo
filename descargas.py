@@ -15,10 +15,12 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -134,6 +136,43 @@ def tools_status() -> dict[str, Any]:
 def _fetch(url: str, cap: int, what: str) -> bytes:
     if not url.startswith("https://"):
         raise DlError("solo se descarga por HTTPS")
+    try:
+        return _fetch_python(url, cap, what)
+    except urllib.error.URLError as exc:
+        # Python en Windows solo ve las raíces que el sistema ya cargó; curl.exe usa el
+        # almacén de Windows completo. Sigue siendo HTTPS y la huella se comprueba igual.
+        if not isinstance(exc.reason, ssl.SSLError) or not shutil.which("curl"):
+            raise
+        return _fetch_curl(url, cap, what)
+
+
+def _fetch_curl(url: str, cap: int, what: str) -> bytes:
+    TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    temp = TOOLS_DIR / ".bajando"
+    temp.unlink(missing_ok=True)
+    cmd = [shutil.which("curl") or "curl", "-fsSL", "--proto", "=https", "--proto-redir", "=https",
+           "--max-filesize", str(cap), "--max-time", "900", "-A", "LaZoo", "-o", str(temp), url]
+    INSTALL.update(what=what, done=0, total=0)
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, **_run_kwargs())
+    while proc.poll() is None:
+        time.sleep(0.5)
+        try:
+            INSTALL["done"] = temp.stat().st_size
+        except OSError:
+            pass
+    try:
+        if proc.returncode != 0 or not temp.is_file():
+            raise DlError(f"{what}: no se pudo descargar")
+        data = temp.read_bytes()
+    finally:
+        temp.unlink(missing_ok=True)
+    if len(data) > cap:
+        raise DlError(f"{what}: demasiado grande")
+    INSTALL["done"] = len(data)
+    return data
+
+
+def _fetch_python(url: str, cap: int, what: str) -> bytes:
     req = urllib.request.Request(url, headers={"User-Agent": "LaZoo"})
     with urllib.request.urlopen(req, timeout=60) as res:  # noqa: S310 (solo https)
         if not res.geturl().startswith("https://"):
