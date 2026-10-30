@@ -1,5 +1,5 @@
 @echo off
-title LaZoo 0.31
+title LaZoo 0.32 beta 1
 cd /d "%~dp0"
 where py >nul 2>&1 && (set "PY=py") || (set "PY=python")
 %PY% -c "import sys; raise SystemExit(0 if sys.version_info>=(3,10) else 1)"

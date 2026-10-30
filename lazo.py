@@ -4,14 +4,9 @@
 from __future__ import annotations
 
 import argparse
-import base64
-import hashlib
-import hmac
 import json
 import re
-import secrets
 import socket
-import struct
 import subprocess
 import sys
 import threading
@@ -23,91 +18,18 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 import control
+import protocol
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.31"
-PIN = ""
+VERSION = "0.32-beta1"
+PAIRING = protocol.Pairing()
 PORT = 8787
-TOKEN = secrets.token_urlsafe(32)
-WIRE_KEY = secrets.token_bytes(32)
-FAILS = {"n": 0, "until": 0.0}
-FAILS_LOCK = threading.Lock()
 VISITS: list[str] = []
 VISITS_LOCK = threading.Lock()
 MESA_OPENED = False
-PAIRED = False
-LAST_PHONE = 0.0
-PHONE_LOCK = threading.Lock()
 SCHEME = "http"
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
-
-
-def wire_seal(data: bytes, key: bytes = WIRE_KEY) -> bytes:
-    nonce = secrets.token_bytes(12)
-    stream = bytearray()
-    counter = 0
-    while len(stream) < len(data):
-        stream += hmac.new(key, nonce + struct.pack(">I", counter), hashlib.sha256).digest()
-        counter += 1
-    cipher = bytes(left ^ right for left, right in zip(data, stream))
-    tag = hmac.new(key, b"LZ2" + nonce + cipher, hashlib.sha256).digest()[:16]
-    return b"LZ2" + nonce + cipher + tag
-
-
-def wire_open(blob: bytes, key: bytes = WIRE_KEY) -> bytes:
-    if len(blob) < 31 or not blob.startswith(b"LZ2"):
-        raise control.ControlError("cifrado no válido")
-    nonce, tag, cipher = blob[3:15], blob[-16:], blob[15:-16]
-    expect = hmac.new(key, b"LZ2" + nonce + cipher, hashlib.sha256).digest()[:16]
-    if not hmac.compare_digest(tag, expect):
-        raise control.ControlError("cifrado no válido")
-    stream = bytearray()
-    counter = 0
-    while len(stream) < len(cipher):
-        stream += hmac.new(key, nonce + struct.pack(">I", counter), hashlib.sha256).digest()
-        counter += 1
-    return bytes(left ^ right for left, right in zip(cipher, stream))
-
-
-def _wire_xor(key: bytes, nonce: bytes, data: bytes, offset: int) -> bytes:
-    out = bytearray(len(data))
-    pos = 0
-    while pos < len(data):
-        block_index = (offset + pos) // 32
-        skip = (offset + pos) % 32
-        block = hmac.new(key, nonce + struct.pack(">I", block_index), hashlib.sha256).digest()
-        take = min(32 - skip, len(data) - pos)
-        for index in range(take):
-            out[pos + index] = data[pos + index] ^ block[skip + index]
-        pos += take
-    return bytes(out)
-
-
-def wire_open_to(source, length: int, dest: Path, key: bytes = WIRE_KEY) -> None:
-    head = source.read(15)
-    if len(head) < 15 or not head.startswith(b"LZ2"):
-        raise control.ControlError("cifrado no válido")
-    nonce = head[3:15]
-    cipher_len = length - 31
-    if cipher_len < 0:
-        raise control.ControlError("cifrado no válido")
-    mac = hmac.new(key, b"LZ2" + nonce, hashlib.sha256)
-    offset = 0
-    remaining = cipher_len
-    with dest.open("wb") as out:
-        while remaining:
-            chunk = source.read(min(256 * 1024, remaining))
-            if not chunk:
-                break
-            mac.update(chunk)
-            out.write(_wire_xor(key, nonce, chunk, offset))
-            offset += len(chunk)
-            remaining -= len(chunk)
-    tag = source.read(16)
-    if remaining or not hmac.compare_digest(mac.digest()[:16], tag):
-        dest.unlink(missing_ok=True)
-        raise control.ControlError("cifrado no válido")
 
 
 ACTIONS = {
@@ -248,8 +170,7 @@ def lan_targets() -> list[tuple[str, str]]:
 
 
 def phone_url(ip: str) -> str:
-    key = base64.urlsafe_b64encode(WIRE_KEY).decode().rstrip("=")
-    return f"{SCHEME}://{ip}:{PORT}/#p={PIN}&k={key}"
+    return PAIRING.phone_url(SCHEME, ip, PORT)
 
 
 def plain_url(ip: str) -> str:
@@ -265,25 +186,6 @@ def qr_svg(url: str) -> str:
         width, height = match.group(1), match.group(2)
         svg = svg.replace("<svg ", f'<svg viewBox="0 0 {width} {height}" ', 1)
     return svg
-
-
-def note_phone() -> None:
-    global LAST_PHONE, PAIRED
-    with PHONE_LOCK:
-        LAST_PHONE = time.time()
-        PAIRED = True
-
-
-def phone_gone() -> None:
-    global LAST_PHONE, PAIRED
-    with PHONE_LOCK:
-        LAST_PHONE = 0.0
-        PAIRED = False
-
-
-def phone_online() -> bool:
-    with PHONE_LOCK:
-        return LAST_PHONE > 0 and (time.time() - LAST_PHONE) < 5
 
 
 def note_visit(ip: str) -> None:
@@ -306,7 +208,7 @@ def connect_page() -> bytes:
             svg = ""
         blocks.append(
             f"""<section class="card">
-              <p class="hint pin-line">PIN {escape(PIN)}</p>
+              <p class="hint pin-line">PIN {escape(PAIRING.pin)}</p>
               <div class="qr">{svg if index == 0 else ""}</div>
               <h2>{escape(label)}</h2>
               <p class="url">{escape(url)}</p>
@@ -379,7 +281,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.31</p>
+      <p class="ver">0.32 beta 1</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -407,51 +309,6 @@ def connect_page() -> bytes:
     return page.encode()
 
 
-def cookies(header: str | None) -> dict[str, str]:
-    found: dict[str, str] = {}
-    if not header:
-        return found
-    for part in header.split(";"):
-        if "=" not in part:
-            continue
-        key, value = part.strip().split("=", 1)
-        found[key] = value
-    return found
-
-
-def _ws_read(sock: socket.socket) -> tuple[int, bytes]:
-    head = _ws_exact(sock, 2)
-    opcode = head[0] & 0x0F
-    masked = head[1] & 0x80
-    length = head[1] & 0x7F
-    if length == 126:
-        length = int.from_bytes(_ws_exact(sock, 2), "big")
-    elif length == 127:
-        length = int.from_bytes(_ws_exact(sock, 8), "big")
-    if length > 64:
-        raise ValueError("trama larga")
-    mask = _ws_exact(sock, 4) if masked else b""
-    data = _ws_exact(sock, length) if length else b""
-    if mask:
-        data = bytes(byte ^ mask[i % 4] for i, byte in enumerate(data))
-    return opcode, data
-
-
-def _ws_exact(sock: socket.socket, size: int) -> bytes:
-    buf = b""
-    while len(buf) < size:
-        chunk = sock.recv(size - len(buf))
-        if not chunk:
-            raise EOFError
-        buf += chunk
-    return buf
-
-
-def _ws_send(sock: socket.socket, opcode: int, payload: bytes) -> None:
-    frame = bytes([0x80 | opcode, len(payload)]) + payload
-    sock.sendall(frame)
-
-
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -461,20 +318,12 @@ class Handler(BaseHTTPRequestHandler):
     def _authed(self) -> bool:
         if self.client_address[0] in ("127.0.0.1", "::1"):
             return True
-        header = self.headers.get("X-Lazo", "")
-        if header and len(header) == len(TOKEN) and hmac.compare_digest(header, TOKEN):
-            note_phone()
-            return True
-        got = cookies(self.headers.get("Cookie")).get("lazo", "")
-        if got and len(got) == len(TOKEN) and hmac.compare_digest(got, TOKEN):
-            note_phone()
-            return True
-        return False
+        return PAIRING.authed(self.headers.get("X-Lazo"), self.headers.get("Cookie"))
 
     def _send(self, code: int, payload: dict | None = None, body: bytes | None = None, content_type: str = "application/json") -> None:
         data = body if body is not None else json.dumps(payload or {}, ensure_ascii=False).encode()
         if body is None and self.headers.get("X-Seal") == "1":
-            data = wire_seal(data)
+            data = PAIRING.seal(data)
             content_type = "application/octet-stream"
         self.send_response(code)
         self.send_header("Content-Type", content_type)
@@ -488,8 +337,11 @@ class Handler(BaseHTTPRequestHandler):
         if length > 120000:
             raise control.ControlError("petición demasiado grande")
         raw = self.rfile.read(length) if length else b"{}"
-        if raw.startswith(b"LZ2"):
-            raw = wire_open(raw)
+        if raw.startswith(protocol.MAGIC):
+            try:
+                raw = PAIRING.open(raw)
+            except protocol.ProtocolError as exc:
+                raise control.ControlError(str(exc)) from exc
         try:
             data = json.loads(raw.decode() or "{}")
         except json.JSONDecodeError as exc:
@@ -530,7 +382,7 @@ class Handler(BaseHTTPRequestHandler):
             if not _local_pc(self.client_address[0]):
                 self._send(404, {"error": "no está"})
                 return
-            self._send(200, {"visits": list(VISITS), "paired": phone_online()})
+            self._send(200, {"visits": list(VISITS), "paired": PAIRING.phone_online()})
             return
         if path == "/api/windows":
             self._guard(lambda _body: {"windows": control.list_windows()})
@@ -562,10 +414,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authed():
             self._send(401, {"error": "Entra con el PIN"})
             return
-        key = self.headers.get("Sec-WebSocket-Key", "")
-        accept = base64.b64encode(
-            hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
-        ).decode()
+        accept = protocol.ws_accept(self.headers.get("Sec-WebSocket-Key", ""))
         self.send_response(101, "Switching Protocols")
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
@@ -573,26 +422,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         sock = self.connection
         sock.settimeout(None)
-        note_phone()
+        PAIRING.note_phone()
         try:
-            while True:
-                opcode, payload = _ws_read(sock)
-                note_phone()
-                if opcode == 0x8:
-                    break
-                if opcode == 0x9:
-                    _ws_send(sock, 0xA, payload)
-                    continue
-                if opcode == 0x2 and payload.startswith(b"LZ2"):
-                    payload = wire_open(payload)
-                if opcode == 0x2 and len(payload) >= 8:
-                    dx, dy = struct.unpack_from("<ii", payload)
-                    control.move_mouse(dx, dy)
-                elif opcode == 0x1:
-                    parts = payload.decode("ascii", "ignore").split()
-                    if len(parts) == 2:
-                        control.move_mouse(int(parts[0]), int(parts[1]))
-        except (OSError, ValueError, EOFError, control.ControlError):
+            protocol.pointer_loop(sock, PAIRING, control.move_mouse)
+        except control.ControlError:
             pass
         finally:
             self.close_connection = True
@@ -623,7 +456,7 @@ class Handler(BaseHTTPRequestHandler):
             self._photo_open()
             return
         if path == "/api/bye":
-            phone_gone()
+            PAIRING.phone_gone()
             self._send(200, {"ok": True})
             return
         action = path.removeprefix("/api/")
@@ -644,32 +477,24 @@ class Handler(BaseHTTPRequestHandler):
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)})
             return
-        now = time.time()
-        with FAILS_LOCK:
-            if now < FAILS["until"]:
-                self._send(429, {"error": "Demasiados intentos. Espera un momento."})
-                return
-            pin = str(body.get("pin", ""))
-            if len(pin) != len(PIN) or not hmac.compare_digest(pin, PIN):
-                FAILS["n"] += 1
-                if FAILS["n"] >= 8:
-                    FAILS["until"] = now + 30
-                    FAILS["n"] = 0
-                self._send(401, {"error": "PIN incorrecto"})
-                return
-            FAILS["n"] = 0
-        note_phone()
+        result = PAIRING.login(str(body.get("pin", "")))
+        if result == "espera":
+            self._send(429, {"error": "Demasiados intentos. Espera un momento."})
+            return
+        if result == "mal":
+            self._send(401, {"error": "PIN incorrecto"})
+            return
         if self.client_address[0] not in ("127.0.0.1", "::1"):
             maybe_open_mesa()
-        payload = json.dumps({"ok": True, "token": TOKEN}).encode()
+        payload = json.dumps({"ok": True, "token": PAIRING.token}).encode()
         content_type = "application/json"
         if self.headers.get("X-Seal") == "1":
-            payload = wire_seal(payload)
+            payload = PAIRING.seal(payload)
             content_type = "application/octet-stream"
         self.send_response(200)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Set-Cookie", f"lazo={TOKEN}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000")
+        self.send_header("Set-Cookie", PAIRING.cookie())
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(payload)
@@ -716,10 +541,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": "El archivo pasa de 80 MB o está vacío"})
             return
         data = self.rfile.read(length)
-        if data.startswith(b"LZ2"):
+        if data.startswith(protocol.MAGIC):
             try:
-                data = wire_open(data)
-            except control.ControlError as exc:
+                data = PAIRING.open(data)
+            except protocol.ProtocolError as exc:
                 self._send(400, {"error": str(exc)})
                 return
         name = unquote(self.headers.get("X-Filename", "archivo"))
@@ -768,7 +593,7 @@ class Handler(BaseHTTPRequestHandler):
         part, final = started
         try:
             if sealed:
-                wire_open_to(self.rfile, length, part)
+                PAIRING.open_to(self.rfile, length, part)
             else:
                 remaining = length
                 with part.open("wb") as out:
@@ -779,7 +604,7 @@ class Handler(BaseHTTPRequestHandler):
                         out.write(chunk)
                         remaining -= len(chunk)
             self._send(200, control.finish_photo(part, final, plain_size))
-        except control.ControlError as exc:
+        except (control.ControlError, protocol.ProtocolError) as exc:
             self._send(400, {"error": str(exc)})
         except OSError:
             part.unlink(missing_ok=True)
@@ -850,14 +675,14 @@ def listen(host: str, port: int) -> tuple[ThreadingHTTPServer, int]:
 
 
 def main() -> None:
-    global PIN, PORT, SCHEME
+    global PORT
     parser = argparse.ArgumentParser(description="Mando Lazo para este PC")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8787)
     parser.add_argument("--pin", default="")
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
-    PIN = args.pin if args.pin.isdigit() and len(args.pin) == 4 else f"{secrets.randbelow(9000) + 1000}"
+    PAIRING.pin = protocol.Pairing(args.pin).pin
     PORT = args.port
     try:
         server, PORT = listen(args.host, args.port)
@@ -870,7 +695,7 @@ def main() -> None:
     home = f"http://127.0.0.1:{PORT}/conectar"
     print()
     print(f"  LaZoo {VERSION}")
-    print(f"  PIN: {PIN}")
+    print(f"  PIN: {PAIRING.pin}")
     print("  En este PC abre, con http y no con https:")
     print(f"    {home}")
     print("  Misma Wi-Fi de casa. No hace falta VPN.")

@@ -13,6 +13,7 @@ import urllib.request
 
 import control
 import lazo
+import protocol
 
 
 def test_backends() -> None:
@@ -180,7 +181,7 @@ def test_hook_speed() -> None:
 def _login(port: int) -> str:
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/api/login",
-        data=json.dumps({"pin": lazo.PIN}).encode(),
+        data=json.dumps({"pin": lazo.PAIRING.pin}).encode(),
         headers={"Content-Type": "application/json"},
     )
     with urllib.request.urlopen(req, timeout=3) as res:
@@ -218,7 +219,7 @@ def _ws(port: int, cookie: str, frames: list[tuple[int, int]]) -> float:
 def test_live_channel() -> None:
     seen: list[tuple[int, int]] = []
     control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
-    lazo.PIN = "123456"
+    lazo.PAIRING.pin = "123456"
     server = lazo.ThreadingHTTPServer(("127.0.0.1", 0), lazo.Handler)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -249,6 +250,102 @@ def test_live_channel() -> None:
         control.set_move_hook(None)
 
 
+def test_protocol() -> None:
+    import tempfile
+    from pathlib import Path
+
+    key = bytes(range(32))
+    plain = b'{"dx":3,"dy":-2} ni\xc3\xb1o' * 5
+    # Sello producido por la 0.31: no puede cambiar de formato.
+    old = bytes.fromhex(
+        "4c5a326465666768696a6b6c6d6e6f44cf21cdeb07bb378e33246f022a4c311625fc7fd96166d08fea90f32ca3b9947"
+        "43f94ae8df319259f092cecc40c7d784fe27ddd7a30f49cc0343f5d3e1cf093466c64979139b678aa960aef01d84c6f6"
+        "bbcdfa41ba1c5627a9e977fe7ff14fed26341b28ef8440449d63f54e2896df50dd976e1825cdfad9190f7cf9935"
+    )
+    if protocol.open_sealed(old, key) != plain:
+        raise SystemExit("el sello LZ2 ya no coincide con la 0.31")
+    for size in (0, 1, 31, 32, 33, 1000):
+        data = os.urandom(size)
+        if protocol.open_sealed(protocol.seal(data, key), key) != data:
+            raise SystemExit(f"sello de {size} bytes")
+    bad = bytearray(old)
+    bad[20] ^= 1
+    try:
+        protocol.open_sealed(bytes(bad), key)
+        raise SystemExit("aceptó un sello roto")
+    except protocol.ProtocolError:
+        pass
+    folder = Path(tempfile.mkdtemp())
+    big = os.urandom(600 * 1024)
+    blob = protocol.seal(big, key)
+    import io
+
+    protocol.open_sealed_to(io.BytesIO(blob), len(blob), folder / "x", key)
+    if (folder / "x").read_bytes() != big:
+        raise SystemExit("sello en trozos")
+
+    pairing = protocol.Pairing("4321")
+    if pairing.pin != "4321" or len(protocol.Pairing("12").pin) != 4:
+        raise SystemExit("PIN")
+    for _ in range(protocol.MAX_FAILS - 1):
+        if pairing.login("0000") != "mal":
+            raise SystemExit("PIN malo aceptado")
+    if pairing.login("0000") != "mal" or pairing.login("4321") != "espera":
+        raise SystemExit("no bloqueó tras ocho fallos")
+    pairing = protocol.Pairing("4321")
+    if pairing.phone_online() or pairing.login("4321") != "ok" or not pairing.phone_online():
+        raise SystemExit("señal de vida")
+    pairing.phone_gone()
+    if pairing.phone_online():
+        raise SystemExit("el móvil no se fue")
+    if not pairing.authed(None, f"a=b; lazo={pairing.token}") or not pairing.authed(pairing.token, None):
+        raise SystemExit("no aceptó el token")
+    if pairing.authed("x" * len(pairing.token), "lazo=") or pairing.authed(None, None):
+        raise SystemExit("aceptó un token falso")
+    if not pairing.phone_url("http", "192.168.1.2", 8787).startswith("http://192.168.1.2:8787/#p=4321&k="):
+        raise SystemExit("dirección del QR")
+    if protocol.ws_accept("dGhlIHNhbXBsZSBub25jZQ==") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=":
+        raise SystemExit("saludo del websocket")
+    print("protocolo: sello LZ2 de la 0.31, PIN, token y websocket")
+
+
+def test_sealed_channel() -> None:
+    seen: list[tuple[int, int]] = []
+    control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
+    lazo.PAIRING.pin = "123456"
+    server = lazo.ThreadingHTTPServer(("127.0.0.1", 0), lazo.Handler)
+    port = server.server_address[1]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        cookie = _login(port)
+        sock = socket.create_connection(("127.0.0.1", port), timeout=3)
+        key = base64.b64encode(b"lazo-test-key-0002").decode()
+        sock.sendall(
+            (
+                f"GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n"
+                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+                f"Sec-WebSocket-Version: 13\r\nCookie: {cookie}\r\n\r\n"
+            ).encode()
+        )
+        head = b""
+        while b"\r\n\r\n" not in head:
+            head += sock.recv(256)
+        mask = b"\x01\x02\x03\x04"
+        for payload, opcode in ((lazo.PAIRING.seal(struct.pack("<ii", 7, -9)), 0x2), (b"2 3", 0x1)):
+            masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+            sock.sendall(bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + masked)
+        deadline = time.perf_counter() + 1
+        while len(seen) < 2 and time.perf_counter() < deadline:
+            time.sleep(0.01)
+        sock.close()
+        if seen != [(7, -9), (2, 3)]:
+            raise SystemExit(f"websocket sellado: {seen}")
+        print("websocket sellado y de texto")
+    finally:
+        server.shutdown()
+        control.set_move_hook(None)
+
+
 if __name__ == "__main__":
     os.environ.setdefault("LAZO_TEST", "1")
     test_backends()
@@ -262,4 +359,6 @@ if __name__ == "__main__":
     test_youtube_speeds()
     test_hook_speed()
     test_live_channel()
+    test_protocol()
+    test_sealed_channel()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")
