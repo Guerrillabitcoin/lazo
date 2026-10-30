@@ -1,0 +1,15 @@
+{
+  "_ayuda": "Copia este archivo como about.json (en la misma carpeta que lazo.py) y rellena lo que quieras. Lo vacío no se muestra. Los enlaces deben empezar por https:// o http://. Donaciones solo en Bitcoin: lightning (usuario@dominio o LNURL), bolt12 (oferta lno1...), silent_payment (sp1...), onchain (bc1... o descriptor). Si un valor no tiene buen formato, no se enseña. about.json no se sube al repositorio.",
+  "repo": "https://github.com/Guerrillabitcoin/lazo",
+  "web": "",
+  "x": "",
+  "nostr": "",
+  "contacto": "",
+  "otros": [
+    { "etiqueta": "", "url": "" }
+  ],
+  "lightning": "",
+  "bolt12": "",
+  "silent_payment": "",
+  "onchain": ""
+}

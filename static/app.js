@@ -70,6 +70,7 @@ const views = {
   system: document.querySelector("#view-system"),
   dl: document.querySelector("#view-dl"),
   lab: document.querySelector("#view-lab"),
+  about: document.querySelector("#view-about"),
 };
 
 const TOOLS = [
@@ -82,6 +83,7 @@ const TOOLS = [
   { id: "system", name: "Sistema" },
   { id: "dl", name: "Descargatodo" },
   { id: "lab", name: "Pruebas" },
+  { id: "about", name: "Sobre LaZoo" },
 ];
 const PINNED = ["mouse"];
 
@@ -172,6 +174,7 @@ function openCube(id) {
   if (id === "system") loadSystem();
   if (id === "spotify") refreshStatus();
   if (id === "notes" || id === "bridge") syncClipboard();
+  if (id === "about") aboutOpen();
   if (id === "dl") dlOpen();
   else dlStop();
 }
@@ -555,6 +558,11 @@ function loadOrder() {
       localStorage.setItem("lazo-order", JSON.stringify(saved));
     }
     localStorage.setItem("lazo-order-dl", "1");
+    if (!localStorage.getItem("lazo-order-about") && saved.includes("about")) {
+      saved = [...saved.filter((id) => id !== "about"), "about"];
+      localStorage.setItem("lazo-order", JSON.stringify(saved));
+    }
+    localStorage.setItem("lazo-order-about", "1");
   } catch (_err) {
     /* sin almacenamiento */
   }
@@ -1807,5 +1815,104 @@ dlEl("#dl-update").addEventListener("click", async () => {
     dlWasInstalling = true;
   } catch (err) {
     say(err.message);
+  }
+});
+
+/* Sobre LaZoo */
+function aboutSafeUrl(url) {
+  return typeof url === "string" && /^https?:\/\/[^\s<>"'`\\]+$/i.test(url) ? url : "";
+}
+
+function aboutLink(url, text) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.textContent = text;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  return a;
+}
+
+async function aboutOpen() {
+  try {
+    const data = await api("/api/about", null, "GET");
+    document.querySelector("#about-version").textContent = data.version || "";
+    document.querySelector("#about-license").textContent = data.license || "";
+    const list = document.querySelector("#about-links");
+    list.replaceChildren();
+    let links = (data.links || []).filter((item) => aboutSafeUrl(item.url));
+    if (!links.length) links = [{ label: "Código (GitHub)", url: "https://github.com/Guerrillabitcoin/lazo" }];
+    links.forEach((item) => {
+      const li = document.createElement("li");
+      li.append(aboutLink(item.url, String(item.label || item.url)));
+      list.append(li);
+    });
+    aboutDonations(data.donations || []);
+  } catch (_err) {
+    say("No se pudo leer Sobre LaZoo");
+  }
+}
+
+function aboutDonations(items) {
+  const box = document.querySelector("#about-donate");
+  box.replaceChildren();
+  if (!items.length) {
+    const p = document.createElement("p");
+    p.className = "about-soon";
+    p.textContent = "Próximamente. LaZoo es de código abierto, sin premium, y se financia con donaciones en Bitcoin.";
+    box.append(p);
+    return;
+  }
+  const warn = document.createElement("p");
+  warn.className = "dl-notice";
+  warn.textContent = "Comprueba la dirección en el repo oficial antes de enviar.";
+  box.append(warn);
+  items.forEach((item) => {
+    const card = document.createElement("div");
+    card.className = "about-pay";
+    const title = document.createElement("p");
+    title.className = "about-pay-title";
+    title.textContent = String(item.label || "");
+    const code = document.createElement("code");
+    code.className = "about-addr";
+    code.textContent = String(item.value || "");
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.textContent = "Copiar";
+    copy.addEventListener("click", () => copyToPhone(String(item.value || "")));
+    card.append(title);
+    if (typeof item.qr === "string" && item.qr.startsWith("<svg")) {
+      const qr = document.createElement("div");
+      qr.className = "about-qr";
+      const doc = new DOMParser().parseFromString(item.qr, "text/html");
+      const svg = doc.body.firstElementChild;
+      if (svg && svg.nodeName.toLowerCase() === "svg" && !svg.querySelector("script,foreignObject")) qr.append(document.importNode(svg, true));
+      card.append(qr);
+    }
+    card.append(code, copy);
+    if (item.kind === "onchain") {
+      const note = document.createElement("p");
+      note.className = "hint";
+      note.textContent = "No reutilices esta dirección para otras cosas.";
+      card.append(note);
+    }
+    box.append(card);
+  });
+}
+
+document.querySelector("#about-check").addEventListener("click", async (ev) => {
+  const button = ev.currentTarget;
+  const out = document.querySelector("#about-update");
+  button.disabled = true;
+  out.replaceChildren(document.createTextNode("Comprobando…"));
+  try {
+    const res = await api("/api/about/check", {});
+    out.replaceChildren(document.createTextNode(res.message || "No se pudo comprobar"));
+    if (res.state === "nueva") {
+      out.append(document.createTextNode(" · "), aboutLink("https://github.com/Guerrillabitcoin/lazo", "Ver en GitHub"));
+    }
+  } catch (_err) {
+    out.replaceChildren(document.createTextNode("No se pudo comprobar"));
+  } finally {
+    button.disabled = false;
   }
 });

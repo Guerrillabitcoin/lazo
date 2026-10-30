@@ -1,4 +1,4 @@
-# LaZoo 0.36
+# LaZoo 0.37
 
 Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -60,6 +60,12 @@ Pastilla «Descargatodo» en el móvil y sección del mismo nombre en la ventana
 - Usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) y ffmpeg, que no van dentro de LaZoo. «Instalar herramientas (una vez)» los baja a la carpeta `herramientas/` del programa: yt-dlp del release oficial de GitHub y, en Windows, ffmpeg del release de BtbN/FFmpeg-Builds (unos 200 MB). Solo HTTPS y con la huella SHA-256 oficial comprobada. En Linux y macOS, ffmpeg se instala con el gestor del sistema (`sudo apt install ffmpeg`, `brew install ffmpeg`). «Actualizar yt-dlp» cuando una web deje de funcionar.
 - Privacidad: no usa cookies del navegador ni tu cuenta; el enlace solo lo ve el PC y la web de origen. Algunas webs piden iniciar sesión o bloquean descargas: entonces no funcionará.
 - **Solo para uso personal. Respeta los derechos de autor y las normas de cada web.**
+
+## Sobre LaZoo
+
+La última pastilla enseña el logo, la versión, la licencia (MIT), cómo protege LaZoo la conexión y tus enlaces. «Buscar actualización» solo consulta internet cuando lo pulsas: el PC pide `VERSION.txt` de la rama `main` en GitHub y lo compara con el tuyo.
+
+Los enlaces y las direcciones de donación (solo Bitcoin: Lightning, BOLT12, pagos silenciosos `sp1...` y on-chain) salen de `about.json`. Copia `about.example.json` como `about.json` y rellénalo. Lo vacío o con formato raro no se muestra. Los QR se hacen en el PC, sin servicios externos. `about.json` no se sube al repositorio.
 
 ## Seguridad
 

@@ -531,3 +531,26 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 .dl-job-name { margin: 0; word-break: break-word; }
 .dl-job .hint { margin: 0; }
 .dl-fill { height: 100%; background: var(--copper); transition: width 0.4s ease; }
+
+.about-deck { display: grid; gap: 10px; align-content: start; flex: none; overflow-wrap: anywhere; }
+.about-head { display: flex; gap: 12px; align-items: center; }
+.about-logo { font-size: 34px; flex: none; white-space: nowrap; }
+.about-name { margin: 0; font-weight: 700; font-size: 18px; }
+.about-row { display: flex; }
+.about-row > button { flex: 1; min-height: 46px; }
+.about-update { min-height: 18px; margin: 0; }
+.about-update a, .about-links a { color: var(--copper); }
+.about-box { padding: 10px; border-radius: 14px; background: var(--pad); }
+.about-box h3 { margin: 0 0 6px; font-size: 14px; color: var(--copper); }
+.about-box p { margin: 0; font-size: 14px; line-height: 1.4; }
+.about-facts, .about-links { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.45; }
+.about-links li { margin: 4px 0; }
+.about-soon { color: var(--fog); }
+#about-donate { display: grid; gap: 10px; }
+.about-pay { display: grid; gap: 8px; padding: 10px; border-radius: 12px; border: 1px solid var(--line); }
+.about-pay-title { font-weight: 650; }
+.about-qr { background: #fff; border-radius: 10px; padding: 6px; width: min(220px, 100%); justify-self: center; }
+.about-qr svg { display: block; width: 100%; height: auto; }
+.about-addr { font-size: 12px; word-break: break-all; color: #f3eee6; }
+.about-pay button { min-height: 44px; }
+.about-logo { color: var(--copper); }

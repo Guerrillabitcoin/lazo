@@ -21,10 +21,11 @@ from urllib.parse import parse_qs, quote, unquote, urlsplit
 import control
 import descargas
 import protocol
+import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.36"
+VERSION = "0.37"
 PAIRING = protocol.Pairing()
 PORT = 8787
 VISITS: list[str] = []
@@ -294,7 +295,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.36</p>
+      <p class="ver">0.37</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -496,7 +497,10 @@ class Handler(BaseHTTPRequestHandler):
             self._download(path.rsplit("/", 1)[-1])
             return
         if path == "/api/status":
-            self._guard(lambda _body: control.status())
+            self._guard(lambda _body: {**control.status(), "version": VERSION})
+            return
+        if path == "/api/about":
+            self._guard(lambda _body: sobre.about(ROOT, VERSION, qr_svg))
             return
         if path == "/api/caret":
             self._guard(lambda _body: {"typing": control.typing_focus()})
@@ -554,6 +558,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/bye":
             PAIRING.phone_gone(parse_qs(urlsplit(self.path).query).get("i", [self._who()])[0])
             self._send(200, {"ok": True})
+            return
+        if path == "/api/about/check":
+            self._guard(lambda _body: sobre.check_update(VERSION))
             return
         if path in DL_ACTIONS:
             self._guard(DL_ACTIONS[path])

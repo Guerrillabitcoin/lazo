@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.36</title>
+    <title>LaZoo 0.37</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.36</p>
+          <p class="ver">0.37</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -255,6 +255,43 @@
               <input id="lab-url" maxlength="200" placeholder="Abrir en el PC" />
               <button type="submit">Abrir</button>
             </form>
+          </article>
+        </div>
+        <div id="view-about" class="view" hidden>
+          <article class="deck about-deck">
+            <div class="about-head">
+              <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
+              <div>
+                <p class="about-name">LaZoo <span id="about-version">0.37</span></p>
+                <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
+              </div>
+            </div>
+            <div class="about-row">
+              <button id="about-check" type="button" class="primary">Buscar actualización</button>
+            </div>
+            <p id="about-update" class="hint about-update"></p>
+            <section class="about-box">
+              <h3>Qué es</h3>
+              <p>LaZoo convierte el móvil en mando del PC: ratón, ventanas, YouTube, Spotify, notas, puente de archivos y descargas. Funciona solo en tu red local, sin cuentas, sin nube y sin rastreadores.</p>
+            </section>
+            <section class="about-box">
+              <h3>Datos técnicos</h3>
+              <ul class="about-facts">
+                <li>Va por HTTP en tu Wi-Fi, sin certificado. Por eso el navegador dice «no seguro».</li>
+                <li>La protección es un cifrado y una firma propios (LZ2) con una clave que solo viaja en el QR.</li>
+                <li>Ese cifrado no lo ha auditado nadie externo.</li>
+                <li>Sin cámara, entras con un PIN de 6 dígitos. Tras varios fallos se bloquea un rato.</li>
+                <li>La clave cambia cada vez que reinicias LaZoo en el PC.</li>
+              </ul>
+            </section>
+            <section class="about-box">
+              <h3>Enlaces</h3>
+              <ul id="about-links" class="about-links"></ul>
+            </section>
+            <section class="about-box">
+              <h3>Apoya LaZoo</h3>
+              <div id="about-donate"></div>
+            </section>
           </article>
         </div>
         </div>
