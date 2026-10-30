@@ -204,7 +204,10 @@ button:focus-visible, input:focus-visible {
 
 .dock-fixed { border-right: 1px solid rgba(255, 255, 255, 0.12); padding-right: 6px; }
 
-.dock button.dragging { background: var(--copper); color: var(--ink); transform: scale(1.08); box-shadow: 0 4px 14px rgba(0,0,0,0.5); position: relative; z-index: 2; }
+.dock button.lifting { transform: translateY(-6px) scale(1.12); background: #3b332d !important; color: #fff !important; outline: 2px dashed rgba(255,255,255,0.75); outline-offset: 2px; box-shadow: 0 8px 18px rgba(0,0,0,0.6); position: relative; z-index: 3; transition: transform 0.12s ease; }
+.dock.arranging button:not(.lifting) { opacity: 0.45; }
+.dock-banner { position: fixed; left: 50%; transform: translateX(-50%); z-index: 40; padding: 8px 14px; border-radius: 99px; background: #fff; color: #141210; font-weight: 650; font-size: 13px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); pointer-events: none; white-space: nowrap; }
+.dock-banner[hidden] { display: none; }
 
 .dock button.on { background: var(--copper); color: var(--ink); }
 
@@ -594,3 +597,47 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 /* Toques cómodos: al menos 44 px */
 button[data-cursor] { min-height: 44px; }
 .about-links a { display: inline-block; padding: 13px 0; }
+
+.xfer-track.busy .dl-fill { width: 30% !important; animation: dlbusy 1.4s ease-in-out infinite; }
+@keyframes dlbusy { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
+
+/* 0.40: reproductores con iconos, título en una línea fija que no mueve el mando */
+.now.now-line { font-size: 16px; line-height: 22px; height: 22px; margin: 0 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.transport .tp { display: flex; align-items: center; justify-content: center; min-height: 54px; padding: 0; }
+.transport .tp svg { display: block; }
+.mini-label { margin: 10px 0 4px; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: #a89c90; }
+
+/* 0.40: notas. Blanco solo para el texto; fecha y hora en naranja; Copiar en pastilla */
+.clip small { color: var(--copper); font-variant-numeric: tabular-nums; }
+.clip b { color: #fff; }
+.clip-row .copy.copy-pill { width: auto; min-width: 70px; align-self: center; padding: 6px 14px; min-height: 34px; border-radius: 99px; background: var(--copper); color: var(--ink); font-weight: 650; font-size: 13px; }
+.notes-info { margin: 10px 0 8px; padding: 8px 10px; border-left: 3px solid var(--copper); background: rgba(224,122,61,0.08); border-radius: 6px; font-size: 12px; line-height: 1.4; color: #c9bfb5; }
+.photo-actions { grid-template-columns: 1fr 1fr; }
+.photo-actions .file-label[hidden] { display: none; }
+.photo-actions #send-dir-label { grid-column: 1 / -1; }
+.photo-actions .file-any { background: var(--copper); color: var(--ink); font-weight: 650; }
+
+/* 0.40: sistema */
+.lock-red { background: #b3261e; color: #fff; font-weight: 650; }
+.lock-red:active { background: #8c1d17; }
+#sys-swap, #sys-lock { width: 100%; }
+#sys-swap:disabled { opacity: 0.55; }
+.confirm { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(0,0,0,0.65); }
+.confirm[hidden] { display: none; }
+.confirm-box { width: 100%; max-width: 340px; padding: 18px; border-radius: 14px; background: #1f1b18; border: 1px solid #b3261e; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
+.confirm-title { margin: 0 0 6px; font-size: 18px; font-weight: 650; color: #fff; }
+
+/* 0.40: ventanas con iconos, botón directo si la app tiene una sola, acciones visibles */
+.win-icon { flex: 0 0 28px; width: 28px; height: 28px; border-radius: 6px; object-fit: contain; }
+.win-single::after { content: none !important; }
+.win-single-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.win-single-text .win-app { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win-sub { color: var(--fog, #9a9089); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.win-group-head.picked, .win-row.picked { outline: 2px solid var(--copper); }
+.win-panel { list-style: none; margin: 4px 0 8px; padding: 8px; border-radius: 10px; background: #1a1613; border: 1px solid rgba(224,122,61,0.35); }
+.win-panel[hidden] { display: none; }
+.win-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.win-acts button { min-height: 42px; font-size: 14px; padding: 6px 8px; }
+.win-acts .win-close { background: #8f2a20; color: #fff; }
+.win-panel .win-move { margin-top: 8px; }
+.win-acts button { white-space: normal; line-height: 1.15; text-align: center; overflow: visible; text-overflow: clip; }

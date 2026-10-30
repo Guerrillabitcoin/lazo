@@ -1,4 +1,4 @@
-# LaZoo 0.39
+# LaZoo 0.40
 
 Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -6,11 +6,12 @@ Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada 
 
 - Ratón: trackpad, clic, clic derecho, arrastre y scroll
 - Teclado, incluida la ñ, y una frase entera
-- Ventanas: agrupadas por app (Chrome, Explorador, 7-Zip…) con buscador, grupos plegables y título completo al mantener pulsado. En Chrome/Edge, pestaña anterior/siguiente; en Windows además la lista de pestañas para tocar una (UI Automation, sin puertos ni extensiones). La activa resaltada; traer al frente, maximizar / restaurar, cerrar, mitad izquierda o derecha y mover a otra pantalla (hasta 3; Windows y Linux X11 con wmctrl)
-- YouTube: play, salto de 10 s, volumen del vídeo, pantalla completa, siguiente
-- Spotify: play, anterior, siguiente y volumen de la app
+- Ventanas: agrupadas por app con el icono real de cada programa (Windows; en Linux el del tema si lo hay). Si una app tiene una sola ventana sale como un botón directo. Tocar una ventana la trae delante maximizada; debajo salen Minimizar, Restaurar, Cambiar de pantalla y Cerrar. En Chrome/Edge en Windows, la lista de pestañas reales (solo la barra de pestañas, no el contenido de la página)
+- YouTube: iconos de anterior, play/pausa y siguiente. El título y el estado se actualizan solos mientras miras la pastilla (en Windows leyendo las sesiones multimedia del sistema; en Linux con playerctl). Anterior vuelve al 0:00 si el vídeo lleva más de 5 s y, si no, va al vídeo anterior
+- Spotify: los mismos iconos y la misma regla de 5 s en anterior, y volumen de la app
 - Cursor del sistema: normal, grande o enorme
-- Sistema: volumen (subir, bajar, silencio), brillo (Windows; Linux con brightnessctl), cambiar pantalla (Win+P) y bloquear el PC
+- Sistema: volumen de sistema, brillo del portátil (Windows; Linux con brightnessctl), intercambiar las ventanas entre dos pantallas y bloquear el PC (en rojo y con confirmación). El menú Win+P queda en Pruebas
+- Descargatodo: cola que no se atasca, sin duplicados (mismo vídeo y mismo formato), cancelar la quita de la lista y borra los restos, y si no avanza en 60 s se para y dice por qué
 
 No es una web suelta. El navegador del móvil no puede mover el ratón del ordenador. Lazo es un programa pequeño que arrancas **en el PC** y el móvil entra por la Wi-Fi.
 

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.39</title>
-    <link rel="stylesheet" href="/app.css?v=0.39" />
+    <title>LaZoo 0.40</title>
+    <link rel="stylesheet" href="/app.css?v=0.40" />
   </head>
   <body>
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.39</p>
+          <p class="ver">0.40</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -52,6 +52,7 @@
               <button id="win-refresh" type="button">Actualizar</button>
             </div>
             <input id="win-filter" class="win-filter" type="search" placeholder="Buscar ventana o app" autocomplete="off" enterkeyhint="search" />
+            <p class="mini-label">Toca una ventana para traerla delante maximizada</p>
             <ul id="windows" class="list win-list"></ul>
             <div id="win-tabs" class="win-tabs" hidden>
               <div class="win-tabs-bar">
@@ -61,35 +62,39 @@
               </div>
               <ul id="win-tabs-list" class="list win-tabs-list" hidden></ul>
             </div>
-            <div id="win-move" class="win-move" hidden>
-              <p id="screen-note" class="screen-note"></p>
-              <div id="screen-buttons" class="screen-buttons"></div>
-              <div class="split">
-                <button type="button" data-win="snap_left">Mitad izquierda</button>
-                <button type="button" data-win="snap_right">Mitad derecha</button>
+            <div id="win-panel" class="win-panel" hidden>
+              <div id="win-actions" class="win-acts">
+                <button type="button" data-win="minimize">Minimizar</button>
+                <button type="button" data-win="toggle_max">Restaurar</button>
+                <button type="button" id="win-move-open">Cambiar de pantalla</button>
+                <button type="button" data-win="close" class="danger win-close">Cerrar ✕</button>
               </div>
-            </div>
-            <div id="win-actions" class="win-grid">
-              <button type="button" data-win="focus">Traer al frente</button>
-              <button type="button" data-win="toggle_max">Maximizar / Minimizar</button>
-              <button type="button" data-win="close" class="danger">Cerrar</button>
-              <button type="button" id="win-move-open">Mover a pantalla…</button>
+              <div id="win-move" class="win-move" hidden>
+                <p id="screen-note" class="screen-note"></p>
+                <div id="screen-buttons" class="screen-buttons"></div>
+                <div class="split">
+                  <button type="button" data-win="snap_left">Mitad izquierda</button>
+                  <button type="button" data-win="snap_right">Mitad derecha</button>
+                </div>
+              </div>
             </div>
           </article>
         </div>
 
         <div id="view-youtube" class="view" hidden>
           <article class="deck">
-            <p id="yt-title" class="now">YouTube</p>
+            <p id="yt-title" class="now now-line" title="YouTube">YouTube</p>
             <div class="transport">
-              <button type="button" data-yt="prev">Anterior</button>
-              <button id="yt-play" type="button" data-yt="play" class="primary">Play</button>
-              <button type="button" data-yt="next">Siguiente</button>
+              <button type="button" data-yt="prev" class="tp" aria-label="Anterior (si lleva más de 5 s, vuelve al inicio)"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="5" y="5" width="2.6" height="14" rx="1" fill="currentColor"/><path d="M19 5.5v13L9 12z" fill="currentColor"/></svg></button>
+              <button id="yt-play" type="button" data-yt="play" class="primary tp" aria-label="Reproducir"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M7 4.5v15L20 12z" fill="currentColor"/></svg></button>
+              <button type="button" data-yt="next" class="tp" aria-label="Siguiente"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="16.4" y="5" width="2.6" height="14" rx="1" fill="currentColor"/><path d="M5 5.5v13L15 12z" fill="currentColor"/></svg></button>
             </div>
+            <p class="mini-label">Saltar en el vídeo</p>
             <div class="split">
               <button type="button" data-yt="back">−10 s</button>
               <button type="button" data-yt="forward">+10 s</button>
             </div>
+            <p class="mini-label">Volumen de YouTube (no el del PC)</p>
             <div class="vol-line">
               <input id="yt-vol" type="range" min="0" max="100" value="50" aria-label="Volumen de YouTube" />
               <span id="yt-level">50</span>
@@ -97,10 +102,12 @@
                 <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="wave" d="M16 9a5 5 0 0 1 0 6M18.5 7a8 8 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
               </button>
             </div>
+            <p class="mini-label">Velocidad de reproducción</p>
             <div class="vol-line">
               <input id="yt-speed" type="range" min="0" max="3" step="1" value="0" aria-label="Velocidad" />
               <span id="yt-speed-label">1.0</span>
             </div>
+            <p class="mini-label">Vista</p>
             <div class="tools">
               <button type="button" data-yt="home">Inicio</button>
               <button type="button" data-yt="full">Pantalla</button>
@@ -117,12 +124,13 @@
 
         <div id="view-spotify" class="view" hidden>
           <article class="deck">
-            <p id="sp-title" class="now">Spotify</p>
+            <p id="sp-title" class="now now-line" title="Spotify">Spotify</p>
             <div class="transport">
-              <button type="button" data-sp="prev">Anterior</button>
-              <button id="sp-play" type="button" data-sp="play" class="primary">Play</button>
-              <button type="button" data-sp="next">Siguiente</button>
+              <button type="button" data-sp="prev" class="tp" aria-label="Anterior (si lleva más de 5 s, vuelve al inicio)"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="5" y="5" width="2.6" height="14" rx="1" fill="currentColor"/><path d="M19 5.5v13L9 12z" fill="currentColor"/></svg></button>
+              <button id="sp-play" type="button" data-sp="play" class="primary tp" aria-label="Reproducir"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M7 4.5v15L20 12z" fill="currentColor"/></svg></button>
+              <button type="button" data-sp="next" class="tp" aria-label="Siguiente"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="16.4" y="5" width="2.6" height="14" rx="1" fill="currentColor"/><path d="M5 5.5v13L15 12z" fill="currentColor"/></svg></button>
             </div>
+            <p class="mini-label">Volumen de Spotify (no el del PC)</p>
             <div class="vol-line">
               <input id="sp-vol" type="range" min="0" max="100" value="50" aria-label="Volumen de Spotify" />
               <span id="sp-level">50</span>
@@ -140,10 +148,11 @@
         <div id="view-bridge" class="view" hidden>
           <article class="deck">
             <div class="photo-actions">
-              <label class="file-label">Enviar archivos al PC<input id="send-input" type="file" multiple hidden /></label>
-              <label class="file-label">Enviar una carpeta<input id="send-dir" type="file" webkitdirectory multiple hidden /></label>
+              <label class="file-label">Fotos y vídeos<input id="send-media" type="file" accept="image/*,video/*" multiple hidden /></label>
+              <label class="file-label file-any">Archivos<input id="send-input" type="file" accept="*/*,application/octet-stream" multiple hidden /></label>
+              <label id="send-dir-label" class="file-label">Una carpeta<input id="send-dir" type="file" webkitdirectory multiple hidden /></label>
             </div>
-            <p class="hint">Cualquier tipo y tamaño. Va a trozos cifrados y se comprueba al final.</p>
+            <p class="hint">«Archivos» abre el explorador del móvil: PDF, ZIP, APK, documentos… de cualquier tamaño. Va a trozos cifrados y se comprueba al final.</p>
             <div id="xfer" class="xfer" hidden>
               <div class="xfer-track" role="progressbar" aria-label="Progreso total" aria-valuemin="0" aria-valuemax="100"><div id="xfer-bar"></div></div>
               <div class="xfer-head">
@@ -164,29 +173,31 @@
               <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Nota"></textarea>
               <button type="submit">Guardar</button>
             </form>
+            <p class="notes-info">Estas notas no salen a internet: van solo por tu red local, cifradas entre el móvil y el PC. Sirven para pasar una clave o una contraseña de un dispositivo a otro en segundos y recuperarla después. En el PC se guardan las últimas en un archivo local: en Windows, cifrado con tu cuenta; en Linux y Mac, sin cifrar. Aquí también aparece lo que copies en el PC.</p>
             <ul id="clips" class="list"></ul>
           </article>
         </div>
 
         <div id="view-system" class="view" hidden>
           <article class="deck sys-deck">
-            <p class="sys-title">Volumen</p>
+            <p class="sys-title">VOLUMEN DE SISTEMA</p>
             <div class="vol" aria-label="Volumen del sistema">
               <button id="vol-down" type="button">Bajar</button>
               <button id="vol-mute" type="button">Silencio</button>
               <button id="vol-up" type="button">Subir</button>
             </div>
-            <p class="sys-title">Brillo</p>
+            <p class="sys-title">BRILLO PORTÁTIL</p>
             <div id="bright-row" class="split">
               <button type="button" data-sys="bright_down">Bajar brillo</button>
               <button type="button" data-sys="bright_up">Subir brillo</button>
             </div>
             <p id="bright-na" class="screen-note" hidden>Brillo: no disponible en este sistema</p>
-            <p class="sys-title">Pantalla</p>
-            <div class="split">
-              <button id="sys-project" type="button" data-sys="project">Cambiar pantalla</button>
-              <button id="sys-lock" type="button" data-sys="lock">Bloquear PC</button>
-            </div>
+            <p class="sys-title">PANTALLAS</p>
+            <button id="sys-swap" type="button">Intercambiar pantallas</button>
+            <div id="sys-swap-pick" class="screen-buttons" hidden></div>
+            <p id="sys-swap-note" class="screen-note"></p>
+            <p class="sys-title">SESIÓN</p>
+            <button id="sys-lock" type="button" class="lock-red">Bloquear PC</button>
             <p id="sys-na" class="screen-note" hidden></p>
           </article>
         </div>
@@ -263,6 +274,7 @@
               <button type="button" data-lab="bright_up">Brillo +</button>
               <button type="button" data-lab="battery">Batería</button>
               <button type="button" data-lab="front">Ventana activa</button>
+              <button type="button" data-sys="project">Menú proyectar (Win+P)</button>
               <button type="button" data-lab="sleep">Suspender</button>
             </div>
             <form id="lab-open" class="phrase">
@@ -276,7 +288,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.39</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.40</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -310,9 +322,20 @@
         </div>
         </div>
         <nav id="dock" class="dock" hidden aria-label="Herramientas"></nav>
+        <div id="dock-banner" class="dock-banner" hidden>Reordena: arrastra la pastilla</div>
+        <div id="confirm" class="confirm" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          <div class="confirm-box">
+            <p id="confirm-title" class="confirm-title"></p>
+            <p id="confirm-text" class="hint"></p>
+            <div class="split">
+              <button id="confirm-no" type="button">Cancelar</button>
+              <button id="confirm-yes" type="button" class="lock-red"></button>
+            </div>
+          </div>
+        </div>
       </section>
     </main>
-    <script src="/seal.js?v=0.39"></script>
-    <script src="/app.js?v=0.39"></script>
+    <script src="/seal.js?v=0.40"></script>
+    <script src="/app.js?v=0.40"></script>
   </body>
 </html>

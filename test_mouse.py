@@ -512,7 +512,7 @@ def test_move_window_linux() -> None:
         with _Patch(SYSTEM="Linux", _run=fake_run, _which=lambda name: True):
             assert control.window_to_screen("0x04000007", 2) == "A la pantalla 2"
             assert ["wmctrl", "-i", "-r", "0x04000007", "-e", "0,1960,40,-1,-1"] in calls
-            for bad in ("0", "4", "x"):
+            for bad in ("-1", "4", "x"):
                 try:
                     control.window_to_screen("0x04000007", bad)
                     raise AssertionError(bad)
@@ -698,8 +698,8 @@ def test_descargatodo() -> None:
         while time.time() < deadline and any(p.poll() is None for p in list(queue.procs.values())):
             time.sleep(0.05)
         time.sleep(0.2)
-        if {j["id"]: j for j in queue.status()["jobs"]}[slow]["state"] != "cancelada":
-            raise SystemExit("no canceló")
+        if slow in {j["id"] for j in queue.status()["jobs"]}:
+            raise SystemExit("cancelar debe quitarla del listado")
 
         # Endpoints: el móvil firma y sella; sin firma, nada.
         server = lazo.ThreadingHTTPServer(("127.0.0.1", 0), lazo.Handler)

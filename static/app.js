@@ -185,6 +185,7 @@ function openCube(id) {
   if (id === "spotify") refreshStatus();
   if (id === "notes" || id === "bridge") syncClipboard();
   if (id === "about") aboutOpen();
+  mediaWatch(id === "youtube" || id === "spotify");
   if (id === "dl") dlOpen();
   else dlStop();
 }
@@ -216,9 +217,7 @@ async function refreshStatus() {
     document.querySelectorAll("[data-cursor]").forEach((button) => {
       button.classList.toggle("on", button.dataset.cursor === data.cursor);
     });
-    if (tab === "spotify" && data.spotify) {
-      document.querySelector("#sp-title").textContent = data.spotify;
-    }
+    if (tab === "spotify" && data.spotify) setMediaTitle("sp", data.spotify);
     if (missedPolls >= 2) {
       setLink("on");
       say("LaZoo ha vuelto");
@@ -236,11 +235,9 @@ async function refreshStatus() {
 
 function clipTime(at) {
   if (!at) return "";
-  return new Date(at * 1000).toLocaleTimeString("es", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  const d = new Date(at * 1000);
+  const two = (n) => String(n).padStart(2, "0");
+  return `${two(d.getDate())}/${two(d.getMonth() + 1)}/${two(d.getFullYear() % 100)} · ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
 async function copyToPhone(text) {
@@ -295,7 +292,7 @@ function renderClips(items) {
     button.addEventListener("click", () => copyToPhone(item.text));
     const copy = document.createElement("button");
     copy.type = "button";
-    copy.className = "copy";
+    copy.className = "copy copy-pill";
     copy.textContent = "Copiar";
     copy.addEventListener("click", () => copyToPhone(item.text));
     row.className = "clip-row";
@@ -412,7 +409,7 @@ const localHashes = new Map();
 function cryptoCall(msg, transfer) {
   if (!cryptoWorker && !cryptoBroken) {
     try {
-      cryptoWorker = new Worker("/puente-worker.js?v=0.39");
+      cryptoWorker = new Worker("/puente-worker.js?v=0.40");
       cryptoWorker.onmessage = (event) => {
         const wait = cryptoWaits.get(event.data.seq);
         if (!wait) return;
@@ -721,6 +718,9 @@ function paintXfers(force) {
 }
 
 document.querySelector("#send-input").addEventListener("change", (event) => queueFiles(event.target));
+document.querySelector("#send-media").addEventListener("change", (event) => queueFiles(event.target));
+/* En el móvil elegir carpeta no funciona (Android/iOS no lo dejan): se oculta. */
+if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) document.querySelector("#send-dir-label").hidden = true;
 document.querySelector("#send-dir").addEventListener("change", (event) => queueFiles(event.target));
 document.querySelector("#xfer-cancel").addEventListener("click", () => {
   xferJobs.forEach((job) => {
@@ -838,86 +838,155 @@ function loadOrder() {
   return [...PINNED, ...rest];
 }
 
-let reordering = false;
-document.addEventListener(
-  "touchmove",
-  (ev) => {
-    if (reordering && ev.cancelable) ev.preventDefault();
-  },
-  { passive: false },
-);
+/* Reordenar el dock: un deslizamiento normal mueve la barra; solo tras mantener
+   pulsada una pastilla (~0,4 s) se entra en «modo reordenar». */
+const LONG_PRESS = 400;
+let arrange = null;
+let clickBlockUntil = 0;
 
-function dragTool(button, pointerId, originX) {
-  const scroller = button.parentElement;
-  reordering = true;
-  if (navigator.vibrate) navigator.vibrate(15);
-  let lastX = originX;
-  let dragged = false;
-  button.classList.add("dragging");
-  try {
-    button.setPointerCapture(pointerId);
-  } catch (_err) {
-    reordering = false;
-    button.classList.remove("dragging");
-    return;
+function arrangeBanner(show) {
+  const banner = document.querySelector("#dock-banner");
+  if (!banner) return;
+  if (show) {
+    const top = dock.getBoundingClientRect().top;
+    banner.style.bottom = `${Math.max(8, window.innerHeight - top + 8)}px`;
   }
-  function move(ev) {
-    if (ev.pointerId !== pointerId) return;
-    ev.preventDefault();
-    if (Math.abs(ev.clientX - originX) > 6) dragged = true;
-    const right = ev.clientX >= lastX;
-    lastX = ev.clientX;
-    const edge = scroller.getBoundingClientRect();
-    if (ev.clientX > edge.right - 28) scroller.scrollLeft += 16;
-    if (ev.clientX < edge.left + 28) scroller.scrollLeft -= 16;
-    const sibling = right ? button.nextElementSibling : button.previousElementSibling;
-    if (!sibling) return;
-    const box = sibling.getBoundingClientRect();
-    if (right && ev.clientX > box.left + box.width * 0.5) scroller.insertBefore(sibling, button);
-    else if (!right && ev.clientX < box.right - box.width * 0.5) scroller.insertBefore(button, sibling);
-  }
-  function stop(ev) {
-    if (ev.pointerId !== pointerId) return;
-    reordering = false;
-    button.classList.remove("dragging");
-    button.removeEventListener("pointermove", move);
-    button.removeEventListener("pointerup", stop);
-    button.removeEventListener("pointercancel", stop);
-    if (!dragged) return;
-    const fixed = dock.querySelector(".dock-fixed");
-    order = [...fixed.querySelectorAll("button"), ...scroller.querySelectorAll("button")].map((item) => item.dataset.cube);
-    localStorage.setItem("lazo-order", JSON.stringify(order));
-    button.dataset.moved = "1";
-  }
-  button.addEventListener("pointermove", move);
-  button.addEventListener("pointerup", stop);
-  button.addEventListener("pointercancel", stop);
+  banner.hidden = !show;
 }
 
-function armTool(event) {
-  const button = event.currentTarget;
-  const pointerId = event.pointerId;
-  const startX = event.clientX;
-  const startY = event.clientY;
-  let timer = window.setTimeout(() => {
-    timer = 0;
-    dragTool(button, pointerId, startX);
-  }, 350);
-  function moved(ev) {
-    if (!timer || ev.pointerId !== pointerId) return;
-    if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 12) end();
+function arrangeStart(button, x) {
+  const scroller = button.parentElement;
+  arrange = { button, scroller, x, lastX: x, moved: false, raf: 0 };
+  if (navigator.vibrate) navigator.vibrate(18);
+  button.classList.add("lifting");
+  dock.classList.add("arranging");
+  arrangeBanner(true);
+  const tick = () => {
+    if (!arrange) return;
+    const edge = scroller.getBoundingClientRect();
+    if (arrange.lastX > edge.right - 36) scroller.scrollLeft += 8;
+    else if (arrange.lastX < edge.left + 36) scroller.scrollLeft -= 8;
+    arrangeMove(arrange.lastX, true);
+    arrange.raf = window.requestAnimationFrame(tick);
+  };
+  arrange.raf = window.requestAnimationFrame(tick);
+}
+
+function arrangeMove(x, fromTick) {
+  if (!arrange) return;
+  const { button, scroller } = arrange;
+  if (!fromTick) {
+    if (Math.abs(x - arrange.x) > 6) arrange.moved = true;
+    arrange.lastX = x;
   }
-  function end(ev) {
-    if (ev && ev.pointerId !== pointerId) return;
-    if (timer) window.clearTimeout(timer);
-    timer = 0;
-    button.removeEventListener("pointermove", moved);
-    button.removeEventListener("pointerup", end);
-    button.removeEventListener("pointercancel", end);
+  const next = button.nextElementSibling;
+  const prev = button.previousElementSibling;
+  if (next) {
+    const box = next.getBoundingClientRect();
+    if (x > box.left + box.width / 2) {
+      scroller.insertBefore(next, button);
+      arrange.moved = true;
+      return;
+    }
   }
-  button.addEventListener("pointermove", moved);
-  button.addEventListener("pointerup", end);
-  button.addEventListener("pointercancel", end);
+  if (prev) {
+    const box = prev.getBoundingClientRect();
+    if (x < box.left + box.width / 2) {
+      scroller.insertBefore(button, prev);
+      arrange.moved = true;
+    }
+  }
+}
+
+function arrangeEnd() {
+  if (!arrange) return;
+  const { button, scroller, moved, raf } = arrange;
+  window.cancelAnimationFrame(raf);
+  arrange = null;
+  button.classList.remove("lifting");
+  dock.classList.remove("arranging");
+  arrangeBanner(false);
+  clickBlockUntil = Date.now() + 450; /* soltar no abre la pastilla */
+  if (!moved) return;
+  const fixed = dock.querySelector(".dock-fixed");
+  order = [...fixed.querySelectorAll("button"), ...scroller.querySelectorAll("button")].map((item) => item.dataset.cube);
+  try {
+    localStorage.setItem("lazo-order", JSON.stringify(order));
+  } catch (_err) {
+    /* sin almacenamiento: vale el orden de esta visita */
+  }
+  say("Orden guardado");
+}
+
+function armTouch(button) {
+  let timer = 0;
+  let startX = 0;
+  let startY = 0;
+  button.addEventListener("touchstart", (ev) => {
+    if (ev.touches.length !== 1) return;
+    startX = ev.touches[0].clientX;
+    startY = ev.touches[0].clientY;
+    window.clearTimeout(timer);
+    timer = window.setTimeout(() => {
+      timer = 0;
+      arrangeStart(button, startX);
+    }, LONG_PRESS);
+  }, { passive: true });
+  button.addEventListener("touchmove", (ev) => {
+    const t = ev.touches[0];
+    if (arrange && arrange.button === button) {
+      if (ev.cancelable) ev.preventDefault(); /* en modo reordenar la barra no se desplaza */
+      arrangeMove(t.clientX, false);
+      return;
+    }
+    if (timer && Math.hypot(t.clientX - startX, t.clientY - startY) > 10) {
+      window.clearTimeout(timer); /* era un deslizamiento: la barra se mueve sola */
+      timer = 0;
+    }
+  }, { passive: false });
+  const done = () => {
+    window.clearTimeout(timer);
+    timer = 0;
+    if (arrange && arrange.button === button) arrangeEnd();
+  };
+  button.addEventListener("touchend", done);
+  button.addEventListener("touchcancel", done);
+}
+
+function armMouse(button) {
+  button.addEventListener("pointerdown", (ev) => {
+    if (ev.pointerType === "touch" || ev.button !== 0) return;
+    const pointerId = ev.pointerId;
+    const x0 = ev.clientX;
+    let timer = window.setTimeout(() => {
+      timer = 0;
+      try {
+        button.setPointerCapture(pointerId);
+      } catch (_err) {
+        /* sin captura sigue valiendo */
+      }
+      arrangeStart(button, x0);
+    }, LONG_PRESS);
+    const move = (e) => {
+      if (e.pointerId !== pointerId) return;
+      if (arrange && arrange.button === button) arrangeMove(e.clientX, false);
+      else if (timer && Math.abs(e.clientX - x0) > 10) {
+        window.clearTimeout(timer);
+        timer = 0;
+      }
+    };
+    const up = (e) => {
+      if (e.pointerId !== pointerId) return;
+      window.clearTimeout(timer);
+      if (arrange && arrange.button === button) arrangeEnd();
+      button.removeEventListener("pointermove", move);
+      button.removeEventListener("pointerup", up);
+      button.removeEventListener("pointercancel", up);
+    };
+    button.addEventListener("pointermove", move);
+    button.addEventListener("pointerup", up);
+    button.addEventListener("pointercancel", up);
+  });
 }
 
 function renderDock() {
@@ -934,15 +1003,16 @@ function renderDock() {
     const label = document.createElement("span");
     label.textContent = tool.name;
     button.append(label);
-    button.addEventListener("click", () => {
-      if (button.dataset.moved === "1") {
-        button.dataset.moved = "";
+    button.addEventListener("click", (event) => {
+      if (Date.now() < clickBlockUntil) {
+        event.preventDefault();
         return;
       }
       openCube(id);
     });
     if (!PINNED.includes(id)) {
-      button.addEventListener("pointerdown", armTool);
+      armTouch(button);
+      armMouse(button);
       button.addEventListener("contextmenu", (event) => event.preventDefault());
     }
     (PINNED.includes(id) ? fixed : scroller).append(button);
@@ -1452,15 +1522,53 @@ function winHue(name) {
   return h;
 }
 
+let winIcons = {};
+
+function winBadge(app, key) {
+  const src = key && winIcons[key];
+  if (src) {
+    const img = document.createElement("img");
+    img.className = "win-icon";
+    img.alt = "";
+    img.src = src;
+    return img;
+  }
+  const badge = document.createElement("span");
+  badge.className = "win-badge";
+  badge.textContent = (app.match(/[\p{L}\p{N}]/u) || ["?"])[0].toUpperCase();
+  badge.style.background = `hsl(${winHue(app)} 45% 32%)`;
+  return badge;
+}
+
+/* Tocar una ventana: al frente y maximizada. Debajo salen sus acciones. */
 function pickWindow(win, button) {
   winId = win.id;
-  document.querySelectorAll("#windows .win-row").forEach((el) => el.classList.remove("picked"));
-  if (button) button.classList.add("picked");
+  document.querySelectorAll("#windows .picked").forEach((el) => el.classList.remove("picked"));
+  if (button) {
+    button.classList.add("picked");
+    const panel = document.querySelector("#win-panel");
+    const li = button.closest("li");
+    if (li) li.after(panel);
+    panel.hidden = false;
+    document.querySelector("#win-move").hidden = true;
+  }
   showTabs(win);
+  api("/api/window", { id: win.id, action: "open" })
+    .then((data) => say((data && data.detail) || "Ventana maximizada"))
+    .catch((err) => say(err.message));
+}
+
+function holdTitle(button, title) {
+  let held = 0;
+  button.addEventListener("pointerdown", () => {
+    held = window.setTimeout(() => say(title), 550);
+  });
+  ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => button.addEventListener(ev, () => window.clearTimeout(held)));
 }
 
 function renderWindows() {
   const list = document.querySelector("#windows");
+  const panel = document.querySelector("#win-panel");
   const query = document.querySelector("#win-filter").value.trim().toLowerCase();
   const folded = new Set(winFolded());
   const groups = new Map();
@@ -1471,18 +1579,48 @@ function renderWindows() {
     if (!groups.has(app)) groups.set(app, []);
     groups.get(app).push(win);
   });
+  panel.hidden = true;
+  list.after(panel);
   list.replaceChildren();
+  let pickedButton = null;
   [...groups.keys()].sort((x, y) => groups.get(y).length - groups.get(x).length || x.localeCompare(y)).forEach((app) => {
     const rows = groups.get(app);
+    if (rows.length === 1) {
+      /* Una sola ventana: un botón directo, sin desplegar. */
+      const win = rows[0];
+      const li = document.createElement("li");
+      li.className = "win-group";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "win-group-head win-single";
+      const text = document.createElement("span");
+      text.className = "win-single-text";
+      const name = document.createElement("span");
+      name.className = "win-app";
+      name.textContent = app;
+      const sub = document.createElement("small");
+      sub.className = "win-sub";
+      sub.textContent = win.short && win.short !== app ? win.short : "";
+      sub.dir = "auto";
+      text.append(name, sub);
+      button.append(winBadge(app, win.icon), text);
+      button.title = win.title;
+      if (win.active) button.classList.add("active");
+      if (win.id === winId) {
+        button.classList.add("picked");
+        pickedButton = button;
+      }
+      holdTitle(button, win.title);
+      button.addEventListener("click", () => pickWindow(win, button));
+      li.append(button);
+      list.append(li);
+      return;
+    }
     const head = document.createElement("li");
     head.className = "win-group";
     const toggle = document.createElement("button");
     toggle.type = "button";
     toggle.className = "win-group-head";
-    const badge = document.createElement("span");
-    badge.className = "win-badge";
-    badge.textContent = (app.match(/[\p{L}\p{N}]/u) || ["?"])[0].toUpperCase();
-    badge.style.background = `hsl(${winHue(app)} 45% 32%)`;
     const name = document.createElement("span");
     name.className = "win-app";
     name.textContent = app;
@@ -1491,7 +1629,7 @@ function renderWindows() {
     count.textContent = String(rows.length);
     const open = !folded.has(app) || !!query;
     toggle.setAttribute("aria-expanded", String(open));
-    toggle.append(badge, name, count);
+    toggle.append(winBadge(app, rows[0].icon), name, count);
     toggle.addEventListener("click", () => {
       const now = new Set(winFolded());
       if (now.has(app)) now.delete(app);
@@ -1511,17 +1649,20 @@ function renderWindows() {
       button.dir = "auto";
       button.title = win.title;
       if (win.active) button.classList.add("active");
-      if (win.id === winId) button.classList.add("picked");
-      let held = 0;
-      button.addEventListener("pointerdown", () => {
-        held = window.setTimeout(() => say(win.title), 550);
-      });
-      ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => button.addEventListener(ev, () => window.clearTimeout(held)));
+      if (win.id === winId) {
+        button.classList.add("picked");
+        pickedButton = button;
+      }
+      holdTitle(button, win.title);
       button.addEventListener("click", () => pickWindow(win, button));
       item.append(button);
       list.append(item);
     });
   });
+  if (pickedButton) {
+    pickedButton.closest("li").after(panel);
+    panel.hidden = false;
+  }
   if (!list.children.length) {
     const empty = document.createElement("li");
     empty.className = "win-empty";
@@ -1581,6 +1722,13 @@ async function loadWindows() {
   try {
     const data = await api("/api/windows", null, "GET");
     winRows = Array.isArray(data.windows) ? data.windows : [];
+    if (data.icons && typeof data.icons === "object") {
+      for (const [k, v] of Object.entries(data.icons)) if (/^data:image\/(png|svg\+xml);base64,/.test(v)) winIcons[k] = v;
+    }
+    if (data.icons_pending && !loadWindows.retried) {
+      loadWindows.retried = true; /* los iconos llegan en segundo plano: una vuelta más */
+      window.setTimeout(() => { if (tab === "windows") loadWindows(); }, 2500);
+    } else if (!data.icons_pending) loadWindows.retried = false;
     if (!winRows.some((w) => w.id === winId)) {
       const front = winRows.find((w) => w.active);
       winId = front ? front.id : "";
@@ -1614,6 +1762,16 @@ document.querySelectorAll("[data-tab]").forEach((button) => {
 document.querySelector("#win-refresh").addEventListener("click", loadWindows);
 
 document.querySelector("#win-move-open").addEventListener("click", () => {
+  if (!winId) {
+    say("Primero toca una ventana de la lista");
+    return;
+  }
+  const n = (screensInfo && screensInfo.count) || 0;
+  if (n === 2 && screensInfo.can_move) {
+    /* Con dos pantallas, a la otra directamente. */
+    api("/api/screen", { id: winId, screen: 0 }).then((data) => say(data.detail || "Pantalla cambiada")).catch((err) => say(err.message));
+    return;
+  }
   const panel = document.querySelector("#win-move");
   panel.hidden = !panel.hidden;
 });
@@ -1651,83 +1809,204 @@ async function loadSystem() {
   const bright = !!caps.brightness;
   document.querySelector("#bright-row").hidden = !bright;
   document.querySelector("#bright-na").hidden = bright;
-  document.querySelector("#sys-project").hidden = !caps.project;
   document.querySelector("#sys-lock").hidden = !caps.lock;
-  const na = document.querySelector("#sys-na");
-  const missing = [];
-  if (!caps.project) missing.push("Cambiar pantalla");
-  if (!caps.lock) missing.push("Bloquear");
-  na.hidden = !missing.length;
-  na.textContent = `${missing.join(" y ")}: no disponible en este sistema`;
+  const swap = document.querySelector("#sys-swap");
+  const note = document.querySelector("#sys-swap-note");
+  const pick = document.querySelector("#sys-swap-pick");
+  const count = Number(caps.count || 0);
+  pick.replaceChildren();
+  pick.hidden = true;
+  if (!caps.swap) {
+    swap.disabled = true;
+    note.textContent = "Intercambiar pantallas: no disponible en este sistema";
+  } else if (count < 2) {
+    swap.disabled = true;
+    swap.textContent = "Solo hay una pantalla";
+    note.textContent = "";
+  } else {
+    swap.disabled = false;
+    swap.textContent = count === 2 ? "Intercambiar pantallas 1 ⇄ 2" : "Intercambiar pantallas…";
+    note.textContent = "Las ventanas de una pantalla pasan a la otra, y al revés.";
+    if (count > 2) {
+      for (const [x, y] of [[1, 2], [1, 3], [2, 3]]) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = `${x} ⇄ ${y}`;
+        b.addEventListener("click", () => doSwap(x, y));
+        pick.append(b);
+      }
+    }
+  }
+  swap.dataset.count = String(count);
 }
+
+function doSwap(a, b) {
+  api("/api/system", { action: "swap_screens", a, b }).then((data) => say(data.detail || "Hecho")).catch((err) => say(err.message));
+}
+
+document.querySelector("#sys-swap").addEventListener("click", (event) => {
+  const count = Number(event.currentTarget.dataset.count || 0);
+  if (count > 2) {
+    const pick = document.querySelector("#sys-swap-pick");
+    pick.hidden = !pick.hidden;
+    return;
+  }
+  doSwap(1, 2);
+});
+
+/* Diálogo propio (confirm() del navegador falla o se ve mal en algunos móviles). */
+function askConfirm(title, text, yes) {
+  return new Promise((resolve) => {
+    const box = document.querySelector("#confirm");
+    document.querySelector("#confirm-title").textContent = title;
+    document.querySelector("#confirm-text").textContent = text;
+    const ok = document.querySelector("#confirm-yes");
+    const no = document.querySelector("#confirm-no");
+    ok.textContent = yes;
+    box.hidden = false;
+    const done = (value) => {
+      box.hidden = true;
+      ok.onclick = null;
+      no.onclick = null;
+      box.onclick = null;
+      resolve(value);
+    };
+    ok.onclick = () => done(true);
+    no.onclick = () => done(false);
+    box.onclick = (event) => { if (event.target === box) done(false); };
+  });
+}
+
+document.querySelector("#sys-lock").addEventListener("click", async () => {
+  const ok = await askConfirm("¿Bloquear el PC?", "Se bloqueará la sesión del PC; para volver tendrás que desbloquearlo allí.", "Bloquear");
+  if (!ok) return;
+  api("/api/system", { action: "lock" }).then((data) => say(data.detail || "Hecho")).catch((err) => say(err.message));
+});
 
 document.querySelectorAll("[data-sys]").forEach((button) => {
   button.addEventListener("click", () => {
     const action = button.dataset.sys;
-    if (action === "lock" && !window.confirm("¿Bloquear el PC?")) return;
     api("/api/system", { action }).then((data) => say(data.detail || "Hecho")).catch((err) => say(err.message));
   });
 });
 
-document.querySelectorAll("[data-yt]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    try {
-      const data = await api("/api/youtube", { action: button.dataset.yt });
-      if (data.title) document.querySelector("#yt-title").textContent = data.title;
-      if (typeof data.level === "number") setLevel("yt", data.level);
-      if (button.dataset.yt === "play") {
-        const started = button.textContent === "Play";
-        flipPlay(button);
-        say(started ? "YouTube en play" : "YouTube en pausa");
-      } else if (button.dataset.yt === "mute") {
-        button.classList.toggle("muted");
-        say(button.classList.contains("muted") ? "YouTube silencio" : "YouTube con sonido");
-      } else {
-        const names = {
-          prev: "YouTube anterior",
-          next: "YouTube siguiente",
-          back: "YouTube −10 s",
-          forward: "YouTube +10 s",
-          home: "YouTube inicio",
-          full: "YouTube pantalla",
-          theater: "YouTube cine",
-          captions: "YouTube subtítulos",
-        };
-        say(names[button.dataset.yt] || "YouTube");
-      }
-    } catch (err) {
-      say(err.message);
-    }
-  });
-});
+const ICON_PLAY = '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M7 4.5v15L20 12z" fill="currentColor"/></svg>';
+const ICON_PAUSE = '<svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><rect x="6" y="4.5" width="4.2" height="15" rx="1" fill="currentColor"/><rect x="13.8" y="4.5" width="4.2" height="15" rx="1" fill="currentColor"/></svg>';
+const mediaState = { yt: { playing: null, hold: 0, busy: false }, sp: { playing: null, hold: 0, busy: false } };
 
-document.querySelectorAll("[data-sp]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    try {
-      const data = await api("/api/spotify", { action: button.dataset.sp });
-      if (data.title) document.querySelector("#sp-title").textContent = data.title;
-      if (typeof data.level === "number") setLevel("sp", data.level);
-      if (button.dataset.sp === "play") {
-        const started = button.textContent === "Play";
-        flipPlay(button);
-        say(started ? "Spotify en play" : "Spotify en pausa");
-      } else if (button.dataset.sp === "mute") {
-        button.classList.toggle("muted");
-        say(button.classList.contains("muted") ? "Spotify silencio" : "Spotify con sonido");
-      } else {
-        const names = { prev: "Spotify anterior", next: "Spotify siguiente" };
-        say(names[button.dataset.sp] || "Spotify");
-      }
-    } catch (err) {
-      say(err.message);
-    }
-  });
-});
-
-function flipPlay(button) {
-  const pausing = button.textContent === "Play";
-  button.textContent = pausing ? "Pausa" : "Play";
+/* Si suena, el botón enseña pausa; si está en pausa, enseña play. */
+function setPlay(prefix, playing) {
+  const button = document.querySelector(`#${prefix}-play`);
+  mediaState[prefix].playing = playing;
+  button.innerHTML = playing ? ICON_PAUSE : ICON_PLAY;
+  button.setAttribute("aria-label", playing ? "Pausar" : "Reproducir");
+  button.dataset.playing = playing ? "1" : "0";
 }
+
+function cleanMediaTitle(text) {
+  return String(text || "")
+    .replace(/\s*[-–—]\s*(Google Chrome|Mozilla Firefox|Microsoft\u200b?\s*Edge|Brave|Opera|Chromium|Vivaldi)\s*$/i, "")
+    .replace(/\s*[-–—]\s*YouTube\s*$/i, "")
+    .replace(/^\(\d+\)\s*/, "")
+    .trim();
+}
+
+function setMediaTitle(prefix, text) {
+  const el = document.querySelector(`#${prefix}-title`);
+  const clean = prefix === "yt" ? cleanMediaTitle(text) : String(text || "");
+  if (!clean || el.textContent === clean) return;
+  el.textContent = clean;
+  el.title = clean;
+}
+
+function applyMedia(prefix, data) {
+  if (!data) return;
+  if (data.title) setMediaTitle(prefix, data.title);
+  if (typeof data.level === "number") setLevel(prefix, data.level);
+  if (typeof data.playing === "boolean" && Date.now() > mediaState[prefix].hold) setPlay(prefix, data.playing);
+}
+
+/* Sondeo ligero mientras YouTube o Spotify están a la vista: título y play/pausa solos. */
+let mediaTimer = 0;
+async function mediaPoll() {
+  if (document.hidden || app.hidden || (tab !== "youtube" && tab !== "spotify")) return;
+  const prefix = tab === "youtube" ? "yt" : "sp";
+  const st = mediaState[prefix];
+  if (st.busy || Date.now() < st.hold) return;
+  st.busy = true;
+  try {
+    const data = await api(prefix === "yt" ? "/api/youtube" : "/api/spotify", { action: "status" });
+    if (tab === (prefix === "yt" ? "youtube" : "spotify")) {
+      if (data.missing) setMediaTitle(prefix, "Abre YouTube en el PC");
+      applyMedia(prefix, data);
+    }
+  } catch (_err) {
+    /* sin ruido: el siguiente sondeo lo intenta otra vez */
+  } finally {
+    st.busy = false;
+  }
+}
+function mediaWatch(on) {
+  window.clearInterval(mediaTimer);
+  mediaTimer = 0;
+  if (on) {
+    mediaPoll();
+    mediaTimer = window.setInterval(mediaPoll, 2500);
+  }
+}
+
+function mediaButtons(attr, prefix, path, label) {
+  document.querySelectorAll(`[data-${attr}]`).forEach((button) => {
+    button.addEventListener("click", async () => {
+      const action = button.dataset[attr];
+      const st = mediaState[prefix];
+      let wanted = null;
+      if (action === "play") {
+        wanted = !st.playing;
+        setPlay(prefix, wanted); /* al momento, sin esperar al PC */
+        st.hold = Date.now() + 2500;
+      }
+      try {
+        const data = await api(path, { action });
+        if (action === "play") {
+          st.hold = Date.now() + 1200;
+          if (typeof data.playing === "boolean") {
+            setPlay(prefix, data.playing);
+          }
+          delete data.playing;
+        }
+        applyMedia(prefix, data);
+        if (action === "play") {
+          say(st.playing ? `${label} en play` : `${label} en pausa`);
+        } else if (action === "mute") {
+          button.classList.toggle("muted");
+          say(button.classList.contains("muted") ? `${label} silencio` : `${label} con sonido`);
+        } else {
+          const names = {
+            prev: data.detail && data.detail !== label ? data.detail : `${label} anterior`,
+            next: `${label} siguiente`,
+            back: "YouTube −10 s",
+            forward: "YouTube +10 s",
+            home: "YouTube inicio",
+            full: "YouTube pantalla",
+            theater: "YouTube cine",
+            captions: "YouTube subtítulos",
+          };
+          say(names[action] || label);
+          if (action === "prev" || action === "next") window.setTimeout(mediaPoll, 1500);
+        }
+      } catch (err) {
+        if (action === "play" && wanted !== null) setPlay(prefix, !wanted);
+        st.hold = 0;
+        say(err.message);
+      }
+    });
+  });
+}
+mediaButtons("yt", "yt", "/api/youtube", "YouTube");
+mediaButtons("sp", "sp", "/api/spotify", "Spotify");
+setPlay("yt", false);
+setPlay("sp", false);
 
 function setLevel(prefix, level) {
   document.querySelector(`#${prefix}-vol`).value = String(level);
@@ -1887,6 +2166,7 @@ document.querySelector("#lab-add").addEventListener("click", async () => {
 });
 
 document.querySelector("#lab-lock").addEventListener("click", async () => {
+  if (!(await askConfirm("¿Bloquear el PC?", "Se bloqueará la sesión del PC; para volver tendrás que desbloquearlo allí.", "Bloquear"))) return;
   try {
     await api("/api/lab", { action: "lock" });
     say("Windows bloqueado");
@@ -2038,9 +2318,9 @@ function dlRenderJobs(jobs) {
     name.textContent = job.name || job.title;
     const stat = document.createElement("p");
     stat.className = "hint";
-    let text = `${job.label} · ${job.state}`;
+    let text = `${job.label} · ${job.state === "preparando" ? "preparando…" : job.state}`;
     if (job.state === "descargando") {
-      text += ` ${job.pct || 0}%`;
+      text += job.pct ? ` ${job.pct}%` : job.got ? ` ${dlSize(job.got)}` : " (preparando…)";
       if (job.speed) text += ` · ${dlSize(job.speed)}/s`;
       if (job.eta) text += ` · quedan ${dlTime(job.eta)}`;
     }
@@ -2048,12 +2328,13 @@ function dlRenderJobs(jobs) {
     if (job.error) text += ` · ${job.error}`;
     stat.textContent = text;
     row.append(name, stat);
-    if (job.state === "descargando" || job.state === "procesando") {
+    if (job.state === "descargando" || job.state === "procesando" || job.state === "preparando") {
       const track = document.createElement("div");
       track.className = "xfer-track";
       const fill = document.createElement("div");
       fill.className = "dl-fill";
       fill.style.width = (job.state === "procesando" ? 100 : job.pct || 0) + "%";
+      if (!job.pct && job.state !== "procesando") track.classList.add("busy");
       track.append(fill);
       row.append(track);
     }
@@ -2067,11 +2348,13 @@ function dlRenderJobs(jobs) {
       send.addEventListener("click", () => dlReceive(job, send));
       actions.append(send);
     }
-    if (["en cola", "descargando", "procesando"].includes(job.state)) {
+    {
+      const active = ["en cola", "preparando", "descargando", "procesando"].includes(job.state);
       const cancel = document.createElement("button");
       cancel.type = "button";
-      cancel.textContent = "Cancelar";
+      cancel.textContent = active ? "Cancelar" : "Quitar";
       cancel.addEventListener("click", async () => {
+        row.remove();
         try {
           await api("/api/dl/cancel", { id: job.id });
           dlPoll();
@@ -2322,4 +2605,5 @@ document.addEventListener("visibilitychange", () => {
   refreshStatus();
   syncClipboard();
   if (tab === "dl") dlPoll();
+  if (tab === "youtube" || tab === "spotify") mediaPoll();
 });

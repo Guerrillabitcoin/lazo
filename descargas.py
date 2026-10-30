@@ -458,6 +458,18 @@ _ERROR_TEXT = (
     ("video unavailable", "Ese vídeo no está disponible"),
     ("sign in to confirm", "La web pide iniciar sesión para ese vídeo"),
     ("http error 404", "Ese enlace no existe (404)"),
+    ("requested format is not available", "Ese formato no existe para este enlace. Prueba «Mejor calidad»"),
+    ("ffmpeg is not installed", "Falta ffmpeg para juntar vídeo y audio"),
+    ("ffmpeg not found", "Falta ffmpeg para juntar vídeo y audio"),
+    ("no video could be found", "Ese post no tiene vídeo"),
+    ("nsfw tweet", "Ese post pide iniciar sesión en X"),
+    ("guest token", "X no deja descargar sin sesión ahora mismo. Prueba «Actualizar yt-dlp»"),
+    ("bad guest token", "X no deja descargar sin sesión ahora mismo. Prueba «Actualizar yt-dlp»"),
+    ("http error 403", "La web ha bloqueado la descarga (403). Prueba «Actualizar yt-dlp»"),
+    ("http error 429", "La web pide esperar (demasiadas peticiones)"),
+    ("login required", "La web pide iniciar sesión"),
+    ("rate-limit", "La web pide esperar (demasiadas peticiones)"),
+    ("unable to extract", "yt-dlp no entiende esta web ahora. Prueba «Actualizar yt-dlp»"),
 )
 
 
@@ -482,6 +494,70 @@ def _num(text: str) -> float:
         return 0.0
 
 
+IDLE_LIMIT = 60
+ACTIVE = ("en cola", "preparando", "descargando", "procesando")
+_TRACK = re.compile(r"^(utm_[a-z]+|si|feature|pp|t|start|s|ref|ref_src|ref_url|igsh|igshid|is_from_webapp|sender_device|fbclid|gclid|index|list)$", re.I)
+_YT_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+
+
+def norm_url(url: str, playlist: bool = False) -> str:
+    """Clave para comparar enlaces: sin rastreo, y en YouTube/X por el id."""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return url
+    host = (parts.hostname or "").lower()
+    host = host[4:] if host.startswith("www.") else host
+    host = host[2:] if host.startswith("m.") else host
+    path = parts.path.rstrip("/")
+    query = [q for q in parts.query.split("&") if q and "=" in q]
+    if host in ("youtube.com", "music.youtube.com", "youtube-nocookie.com", "youtu.be"):
+        vid = ""
+        if host == "youtu.be":
+            vid = path.lstrip("/")[:11]
+        else:
+            for q in query:
+                if q.startswith("v="):
+                    vid = q[2:13]
+            m = re.match(r"/(shorts|embed|live|v)/([A-Za-z0-9_-]{11})", path)
+            if m:
+                vid = m.group(2)
+        lst = next((q[5:] for q in query if q.startswith("list=")), "")
+        if vid and _YT_ID.fullmatch(vid) and not playlist:
+            return "yt:" + vid
+        if playlist and lst:
+            return "ytlist:" + lst
+    if host in ("x.com", "twitter.com", "mobile.twitter.com", "fxtwitter.com", "vxtwitter.com"):
+        m = re.search(r"/status(?:es)?/(\d+)", path)
+        if m:
+            return "x:" + m.group(1)
+    keep = sorted(q for q in query if not _TRACK.match(q.split("=", 1)[0]))
+    return host + path + ("?" + "&".join(keep) if keep else "")
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Para yt-dlp y sus hijos (ffmpeg). En Windows terminate() deja vivos a los hijos."""
+    if proc.poll() is not None:
+        return
+    try:
+        if SYSTEM == "Windows":
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True, timeout=15, **_run_kwargs())
+        else:
+            try:
+                os.killpg(proc.pid, 15)
+            except (OSError, AttributeError):
+                proc.terminate()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        proc.wait(5)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
 class Queue:
     def __init__(self) -> None:
         self.jobs: list[dict[str, Any]] = []
@@ -491,20 +567,29 @@ class Queue:
         self.counter = 0
         self.worker: threading.Thread | None = None
         self.out_dir = OUT_DIR
+        self.idle_limit = IDLE_LIMIT
 
     def start(self, url: str, choice: str, title: str = "", playlist: bool = False) -> dict[str, Any]:
         url = check_url(url)
         ffmpeg = find_ffmpeg()
         _sel, label = selector(str(choice), bool(ffmpeg))
         ytdlp_cmd()
+        key = norm_url(url, bool(playlist)) + "|" + str(choice) + ("|lista" if playlist else "")
         with self.lock:
-            waiting = [j for j in self.jobs if j["state"] in ("en cola", "descargando", "procesando")]
+            for j in self.jobs:
+                if j.get("key") != key:
+                    continue
+                if j["state"] in ACTIVE:
+                    raise DlError("Ya está en la cola")
+                if j["state"] == "hecha" and time.time() - j["at"] < 3600:
+                    raise DlError("Ya lo descargaste en ese formato")
+            waiting = [j for j in self.jobs if j["state"] in ACTIVE]
             if len(waiting) >= MAX_QUEUE:
                 raise DlError("La cola está llena")
             self.counter += 1
             job = {
                 "id": f"{int(time.time())}{self.counter:03d}",
-                "url": url, "choice": str(choice), "label": label, "playlist": bool(playlist),
+                "url": url, "key": key, "choice": str(choice), "label": label, "playlist": bool(playlist),
                 "title": str(title or url)[:200], "state": "en cola", "pct": 0.0, "speed": 0.0,
                 "eta": 0, "name": "", "size": 0, "error": "", "at": time.time(),
             }
@@ -515,26 +600,27 @@ class Queue:
         return {"ok": True, "detail": "En cola: " + job["title"][:40], "job": self.public(job)}
 
     def public(self, job: dict[str, Any]) -> dict[str, Any]:
-        return {k: v for k, v in job.items() if k not in ("url", "path")}
+        return {k: v for k, v in job.items() if k not in ("url", "path", "key", "started", "last")}
 
     def status(self) -> dict[str, Any]:
+        self._ensure_worker()
         with self.lock:
             return {"jobs": [self.public(j) for j in self.jobs], "folder": str(self.out_dir), "notice": NOTICE, "install": dict(INSTALL)}
 
     def cancel(self, job_id: str) -> dict[str, Any]:
+        """Cancelar quita la fila del listado. Si estaba bajando, mata el proceso y borra los .part."""
         with self.lock:
             job = next((j for j in self.jobs if j["id"] == job_id), None)
             if not job:
-                raise DlError("Esa descarga ya no está")
-            if job["state"] in ("en cola", "descargando", "procesando"):
-                job["state"] = "cancelada"
+                return {"ok": True, "detail": "Quitada"}
+            was = job["state"]
+            job["state"] = "cancelada"
+            self.jobs.remove(job)
             proc = self.procs.get(job_id)
-        if proc and proc.poll() is None:
-            try:
-                proc.terminate()
-            except OSError:
-                pass
-        return {"ok": True, "detail": "Cancelada"}
+        if proc:
+            _kill_tree(proc)
+        self.wake.set()
+        return {"ok": True, "detail": "Cancelada" if was in ACTIVE else "Quitada"}
 
     def file(self, job_id: str) -> Path:
         with self.lock:
@@ -547,76 +633,151 @@ class Queue:
         return path
 
     def _ensure_worker(self) -> None:
-        if self.worker and self.worker.is_alive():
-            return
-        self.worker = threading.Thread(target=self._loop, daemon=True)
-        self.worker.start()
+        with self.lock:
+            if self.worker and self.worker.is_alive():
+                return
+            self.worker = threading.Thread(target=self._loop, daemon=True, name="descargas")
+            self.worker.start()
 
     def _next(self) -> dict[str, Any] | None:
         with self.lock:
             for job in reversed(self.jobs):
                 if job["state"] == "en cola":
-                    job["state"] = "descargando"
+                    job["state"] = "preparando"
                     return job
         return None
 
     def _loop(self) -> None:
+        # Hilo fijo: nunca sale (antes salía tras 30 s parado y una descarga podía
+        # quedarse «en cola» para siempre si llegaba justo en ese momento).
         while True:
-            job = self._next()
-            if not job:
-                self.wake.clear()
-                if not self.wake.wait(30):
-                    return
-                continue
             try:
-                self._run(job)
-            except Exception as exc:  # noqa: BLE001
-                job["state"] = "error"
-                job["error"] = str(exc)[:180] or "No se pudo"
+                job = self._next()
+                if not job:
+                    self.wake.wait(5)
+                    self.wake.clear()
+                    continue
+                try:
+                    self._run(job)
+                except Exception as exc:  # noqa: BLE001
+                    if job["state"] != "cancelada":
+                        job["state"] = "error"
+                        job["error"] = (str(exc) or "No se pudo descargar")[:180]
+            except Exception:  # noqa: BLE001 (el hilo de la cola no debe morir)
+                time.sleep(1)
+
+    def _clean_parts(self, job: dict[str, Any]) -> None:
+        tag = job.get("vid") or ""
+        if not tag:
+            return
+        try:
+            for item in self.out_dir.iterdir():
+                name = item.name
+                if f"[{tag}]" not in name:
+                    continue
+                if name.endswith((".part", ".ytdl", ".temp")) or ".part-Frag" in name or re.search(r"\.f[0-9A-Za-z-]+\.\w+$", name) or ".temp." in name:
+                    item.unlink(missing_ok=True)
+        except (OSError, IndexError):
+            pass
 
     def _run(self, job: dict[str, Any]) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         cmd = download_cmd(job["url"], job["choice"], self.out_dir, find_ffmpeg(), job["playlist"])
+        kwargs = _run_kwargs()
+        if SYSTEM == "Windows":
+            kwargs["creationflags"] = kwargs.get("creationflags", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            encoding="utf-8", errors="replace", bufsize=1, **_run_kwargs(),
+            encoding="utf-8", errors="replace", bufsize=1, **kwargs,
         )
         with self.lock:
             self.procs[job["id"]] = proc
-            if job["state"] == "cancelada":
-                proc.terminate()
+            cancelled = job["state"] == "cancelada"
+        if cancelled:
+            _kill_tree(proc)
         tail: list[str] = []
         files: list[Path] = []
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            line = line.rstrip("\r\n")
-            if line.startswith("LZP "):
-                got, total, guess, speed, eta = (line[4:].split("|") + ["", "", "", "", ""])[:5]
-                full = _num(total) or _num(guess)
-                if full:
-                    job["pct"] = round(min(100.0, _num(got) * 100 / full), 1)
-                job["speed"] = _num(speed)
-                job["eta"] = int(_num(eta))
-            elif line.startswith("LZF "):
-                found = safe_output(line[4:], self.out_dir)
-                if found:
-                    files.append(found)
-            elif "[Merger]" in line or "[ExtractAudio]" in line or "[VideoConvertor]" in line:
-                job["state"] = "procesando" if job["state"] != "cancelada" else job["state"]
-            elif line.strip():
-                tail.append(line)
-                del tail[:-8]
-        code = proc.wait()
+        state = {"last": time.time()}
+
+        def reader() -> None:
+            assert proc.stdout is not None
+            for raw_line in proc.stdout:
+                state["last"] = time.time()
+                for line in raw_line.replace("\r", "\n").split("\n"):
+                    self._line(job, line.strip(), tail, files)
+
+        thread = threading.Thread(target=reader, daemon=True)
+        thread.start()
+        stalled = False
+        while thread.is_alive():
+            thread.join(1)
+            if job["state"] == "cancelada":
+                _kill_tree(proc)
+                break
+            if time.time() - state["last"] > self.idle_limit:
+                stalled = True
+                _kill_tree(proc)
+                break
+        thread.join(5)
+        try:
+            code = proc.wait(10)
+        except subprocess.TimeoutExpired:
+            _kill_tree(proc)
+            code = -1
         with self.lock:
             self.procs.pop(job["id"], None)
         if job["state"] == "cancelada":
+            self._clean_parts(job)
+            return
+        if stalled:
+            job["state"] = "error"
+            why = _clean_error("\n".join(tail)) if tail else ""
+            job["error"] = (f"Sin avance en {self.idle_limit} s. " + (why or "La web no responde o el formato no existe.") + "")[:180]
+            self._clean_parts(job)
             return
         if code != 0 or not files:
             job["state"] = "error"
             job["error"] = _clean_error("\n".join(tail)) if code != 0 else "No salió ningún archivo"
+            self._clean_parts(job)
             return
         last = files[-1]
         job.update(state="hecha", pct=100.0, path=str(last), name=last.name, size=last.stat().st_size, count=len(files))
+
+    def _line(self, job: dict[str, Any], line: str, tail: list[str], files: list[Path]) -> None:
+        if not line:
+            return
+        if line.startswith("LZP "):
+            got, total, guess, speed, eta = (line[4:].split("|") + ["", "", "", "", ""])[:5]
+            full = _num(total) or _num(guess)
+            if job["state"] == "preparando":
+                job["state"] = "descargando"
+            if full:
+                job["pct"] = round(min(100.0, _num(got) * 100 / full), 1)
+            job["got"] = int(_num(got))
+            job["speed"] = _num(speed)
+            job["eta"] = int(_num(eta))
+            return
+        if line.startswith("LZF "):
+            found = safe_output(line[4:], self.out_dir)
+            if found:
+                files.append(found)
+            return
+        m = re.match(r"\[[^\]]+\] ([A-Za-z0-9_-]{4,40}): ", line)
+        if m and not job.get("vid"):
+            job["vid"] = m.group(1)
+        if "[Merger]" in line or "[ExtractAudio]" in line or "[VideoConvertor]" in line or "[FixupM3u8]" in line:
+            if job["state"] != "cancelada":
+                job["state"] = "procesando"
+        elif line.startswith("[download]") and "Destination" in line and job["state"] == "preparando":
+            job["state"] = "descargando"
+        elif line.startswith("[hlsnative]") or line.startswith("[dashsegments]"):
+            if job["state"] == "preparando":
+                job["state"] = "descargando"
+        if not line.startswith("[download]"):
+            tail.append(line)
+            del tail[:-12]
 
 
 QUEUE = Queue()

@@ -114,7 +114,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.39</p>
+          <p class="ver">0.40</p>
         </div>
         <p id="link-label">Sin conexión</p>
       </header>
@@ -431,9 +431,9 @@
             const name = document.createElement("div");
             name.textContent = job.name || job.title;
             const stat = document.createElement("small");
-            stat.textContent = job.label + " · " + job.state + (job.state === "descargando" ? " " + job.pct + "%" + (job.speed ? " · " + size(job.speed) + "/s" : "") : "") + (job.size ? " · " + size(job.size) : "") + (job.error ? " · " + job.error : "");
+            stat.textContent = job.label + " · " + (job.state === "preparando" ? "preparando…" : job.state) + (job.state === "descargando" ? " " + (job.pct ? job.pct + "%" : job.got ? size(job.got) : "(preparando…)") + (job.speed ? " · " + size(job.speed) + "/s" : "") : "") + (job.size ? " · " + size(job.size) : "") + (job.error ? " · " + job.error : "");
             li.append(name, stat);
-            if (job.state === "descargando" || job.state === "procesando") {
+            if (job.state === "descargando" || job.state === "procesando" || job.state === "preparando") {
               const track = document.createElement("div");
               track.className = "track";
               const fill = document.createElement("div");
@@ -460,11 +460,11 @@
               });
               row.append(a);
             }
-            if (["en cola", "descargando", "procesando"].includes(job.state)) {
+            {
               const c = document.createElement("button");
               c.type = "button";
-              c.textContent = "Cancelar";
-              c.addEventListener("click", () => dlCall("/api/dl/cancel", { id: job.id }).then(dlJobs).catch((err) => dlSay(err.message)));
+              c.textContent = ["en cola", "preparando", "descargando", "procesando"].includes(job.state) ? "Cancelar" : "Quitar";
+              c.addEventListener("click", () => li.remove() || dlCall("/api/dl/cancel", { id: job.id }).then(dlJobs).catch((err) => dlSay(err.message)));
               row.append(c);
             }
             if (row.childElementCount) li.append(row);

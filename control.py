@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
+import os
 import json
 import platform
 import secrets
@@ -314,9 +316,14 @@ def _chord(parts: list[str]) -> None:
             if part == "shift":
                 keyboard.press(Key.shift)
                 held.append(Key.shift)
-            elif part == "ctrl":
-                keyboard.press(Key.ctrl)
-                held.append(Key.ctrl)
+            elif part in ("ctrl", "alt", "cmd"):
+                key = getattr(Key, part)
+                keyboard.press(key)
+                held.append(key)
+            elif part in ("left", "right"):
+                key = getattr(Key, part)
+                keyboard.press(key)
+                keyboard.release(key)
             elif part == "up":
                 keyboard.press(Key.up)
                 keyboard.release(Key.up)
@@ -735,13 +742,30 @@ def tab_action(window_id: str, action: str, index: Any = None) -> str:
 _UIA_PS = r"""
 $ErrorActionPreference='Stop'
 Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+$A=[System.Windows.Automation.AutomationElement]
+$CT=[System.Windows.Automation.ControlType]
 $h=[IntPtr]::new([long]$env:LAZO_HWND)
-$w=[System.Windows.Automation.AutomationElement]::FromHandle($h)
-$c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::TabItem)
-$items=$w.FindAll([System.Windows.Automation.TreeScope]::Descendants,$c)
+$w=$A::FromHandle($h)
+$walker=[System.Windows.Automation.TreeWalker]::ControlViewWalker
+$found=New-Object System.Collections.ArrayList
+# Solo la barra del navegador: no entra en la página web (Document ni su panel),
+# que es de donde salían «pestañas» falsas como las secciones de YouTube.
+function Walk($e,$d){
+  if($d -gt 16 -or $found.Count -ge 120){return}
+  $ch=$walker.GetFirstChild($e)
+  while($ch -ne $null){
+    $ct=$ch.Current.ControlType
+    $cls=$ch.Current.ClassName
+    if($ct -eq $CT::Document -or $cls -eq 'Chrome_RenderWidgetHostHWND' -or $cls -eq 'MozillaContentWindowClass'){}
+    elseif($ct -eq $CT::TabItem){[void]$found.Add($ch)}
+    else{Walk $ch ($d+1)}
+    $ch=$walker.GetNextSibling($ch)
+  }
+}
+Walk $w 0
 $pick=[int]$env:LAZO_PICK
 $i=0
-foreach($t in $items){
+foreach($t in $found){
   $sel=$false
   try{$sel=$t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected}catch{}
   if($i -eq $pick){$t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()}
@@ -783,14 +807,139 @@ def parse_uia_tabs(text: str) -> list[dict[str, Any]]:
 def list_windows() -> list[dict[str, str]]:
     with _lock:
         if SYSTEM == "Windows":
-            return _decorate(_windows_list())
-        if SYSTEM == "Darwin":
-            return _decorate(_mac_windows())
-        return _decorate(_linux_windows())
+            rows = _decorate(_windows_list())
+        elif SYSTEM == "Darwin":
+            rows = _decorate(_mac_windows())
+        else:
+            rows = _decorate(_linux_windows())
+    for row in rows:
+        row.pop("_exe", None)  # la ruta del programa no sale del PC
+    return rows
+
+
+def windows_with_icons() -> dict[str, Any]:
+    """Lista de ventanas y los iconos de sus apps (los que ya estén listos)."""
+    with _lock:
+        if SYSTEM == "Windows":
+            rows = _decorate(_windows_list())
+        elif SYSTEM == "Darwin":
+            rows = _decorate(_mac_windows())
+        else:
+            rows = _decorate(_linux_windows())
+    icons: dict[str, str] = {}
+    wanted: list[str] = []
+    for row in rows:
+        source = str(row.pop("_exe", "") or "") if SYSTEM == "Windows" else str(row.get("process") or "")
+        if not source:
+            continue
+        key = hashlib.sha1(source.lower().encode("utf-8", "replace")).hexdigest()[:12]
+        row["icon"] = key
+        if key in _icon_cache:
+            if _icon_cache[key]:
+                icons[key] = _icon_cache[key]
+        elif source not in wanted:
+            wanted.append(source)
+            _icon_keys[source] = key
+    if wanted:
+        _icons_async(wanted)
+    return {"windows": rows, "icons": icons, "icons_pending": bool(wanted) or bool(_icon_busy)}
+
+
+_icon_cache: dict[str, str] = {}
+_icon_keys: dict[str, str] = {}
+_icon_busy: set[str] = set()
+_icon_lock = threading.Lock()
+_ICON_MAX = 300
+
+_ICON_PS = r"""
+$ErrorActionPreference='Stop'
+Add-Type -AssemblyName System.Drawing
+[Console]::OutputEncoding=[Text.Encoding]::UTF8
+$i=0
+foreach($p in ($env:LAZO_EXES -split "\|")){
+  $b64=''
+  try{
+    $ic=[System.Drawing.Icon]::ExtractAssociatedIcon($p)
+    $src=$ic.ToBitmap()
+    $bmp=New-Object System.Drawing.Bitmap 32,32
+    $g=[System.Drawing.Graphics]::FromImage($bmp)
+    $g.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $g.DrawImage($src,0,0,32,32)
+    $g.Dispose()
+    $ms=New-Object System.IO.MemoryStream
+    $bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png)
+    $b64=[Convert]::ToBase64String($ms.ToArray())
+  }catch{}
+  [Console]::Out.WriteLine($i.ToString()+"`t"+$b64)
+  $i++
+}
+"""
+
+
+def _icons_async(sources: list[str]) -> None:
+    with _icon_lock:
+        todo = [src for src in sources if src not in _icon_busy][:40]
+        if not todo:
+            return
+        _icon_busy.update(todo)
+    threading.Thread(target=_load_icons, args=(todo,), daemon=True).start()
+
+
+def _load_icons(todo: list[str]) -> None:
+    try:
+        found = _windows_icons(todo) if SYSTEM == "Windows" else [_linux_icon(src) for src in todo]
+    except Exception:  # noqa: BLE001 (sin icono: la inicial de color vale)
+        found = [""] * len(todo)
+    with _icon_lock:
+        if len(_icon_cache) > _ICON_MAX:
+            _icon_cache.clear()
+        for src, data in zip(todo, found):
+            _icon_cache[_icon_keys.get(src, "")] = data
+            _icon_busy.discard(src)
+
+
+def _windows_icons(paths: list[str]) -> list[str]:
+    paths = [p for p in paths if "|" not in p]
+    env = dict(os.environ, LAZO_EXES="|".join(paths))
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", _ICON_PS],
+            capture_output=True, timeout=20, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return [""] * len(paths)
+    out = [""] * len(paths)
+    for line in result.stdout.decode("utf-8", "replace").splitlines():
+        idx, _, b64 = line.lstrip("\ufeff").partition("\t")
+        if idx.isdigit() and int(idx) < len(out) and re.fullmatch(r"[A-Za-z0-9+/=]{20,20000}", b64.strip()):
+            out[int(idx)] = "data:image/png;base64," + b64.strip()
+    return out
+
+
+def _linux_icon(cls: str) -> str:
+    """Icono del tema por la clase de la ventana (p. ej. «firefox», «code»)."""
+    import base64
+
+    names = {cls, cls.lower(), cls.lower().replace(" ", "-")}
+    bases = [Path.home() / ".local/share/icons/hicolor", Path("/usr/share/icons/hicolor")]
+    for name in names:
+        if not re.fullmatch(r"[A-Za-z0-9_.+-]{1,60}", name):
+            continue
+        cands = [b / size / "apps" / f"{name}.png" for b in bases for size in ("32x32", "48x48", "64x64", "24x24", "128x128")]
+        cands += [Path("/usr/share/pixmaps") / f"{name}.png"]
+        cands += [b / "scalable" / "apps" / f"{name}.svg" for b in bases] + [Path("/usr/share/pixmaps") / f"{name}.svg"]
+        for path in cands:
+            try:
+                if path.is_file() and path.stat().st_size <= 64 * 1024:
+                    mime = "image/svg+xml" if path.suffix == ".svg" else "image/png"
+                    return f"data:{mime};base64," + base64.b64encode(path.read_bytes()).decode()
+            except OSError:
+                continue
+    return ""
 
 
 def window_action(window_id: str, action: str) -> str:
-    allowed = {"focus", "minimize", "maximize", "toggle_max", "close", "snap_left", "snap_right"}
+    allowed = {"open", "focus", "minimize", "maximize", "toggle_max", "close", "snap_left", "snap_right"}
     if action not in allowed:
         raise ControlError("acción de ventana no válida")
     if not window_id:
@@ -801,7 +950,7 @@ def window_action(window_id: str, action: str) -> str:
                 raise ControlError("ventana no válida")
             return _windows_action(int(window_id), action)
         if SYSTEM == "Darwin":
-            return _mac_window_action(window_id, "maximize" if action == "toggle_max" else action)
+            return _mac_window_action(window_id, "maximize" if action in ("toggle_max", "open") else action)
         return _linux_window_action(window_id, action)
 
 
@@ -832,8 +981,9 @@ def _windows_list() -> list[dict[str, str]]:
             return True
         pid = ctypes.c_ulong()
         user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        process = _process_name(pid.value)
-        rows.append({"id": str(int(hwnd)), "title": title[:180], "process": process})
+        path = _process_path(pid.value)
+        process = path.rsplit("\\", 1)[-1]
+        rows.append({"id": str(int(hwnd)), "title": title[:180], "process": process, "_exe": path})
         return True
 
     user32.EnumWindows(callback, 0)
@@ -947,6 +1097,10 @@ def _win_hotkey(*vks: int) -> None:
 
 
 def _process_name(pid: int) -> str:
+    return _process_path(pid).rsplit("\\", 1)[-1]
+
+
+def _process_path(pid: int) -> str:
     if not pid:
         return ""
     kernel32 = ctypes.windll.kernel32
@@ -958,7 +1112,7 @@ def _process_name(pid: int) -> str:
         size = ctypes.c_ulong(260)
         if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
             return ""
-        return buf.value.rsplit("\\", 1)[-1]
+        return buf.value
     finally:
         kernel32.CloseHandle(handle)
 
@@ -1002,6 +1156,13 @@ def _windows_action(hwnd: int, action: str) -> str:
     if action == "focus":
         _force_foreground(hwnd)
         return "Ventana al frente"
+    if action == "open":
+        # Tocar una ventana: delante y maximizada (si estaba minimizada, primero se restaura).
+        if user32.IsIconic(handle):
+            user32.ShowWindow(handle, 9)
+        user32.ShowWindow(handle, 3)
+        _force_foreground(hwnd)
+        return "Ventana maximizada"
     if action == "minimize":
         user32.ShowWindow(handle, 6)
         return "Minimizada"
@@ -1106,6 +1267,10 @@ def _linux_window_action(window_id: str, action: str) -> str:
     if action == "focus":
         cmd = ["wmctrl", "-i", "-a", window_id]
         label = "Ventana al frente"
+    elif action == "open":
+        _run(["wmctrl", "-i", "-a", window_id])
+        cmd = ["wmctrl", "-i", "-r", window_id, "-b", "add,maximized_vert,maximized_horz"]
+        label = "Ventana maximizada"
     elif action == "minimize":
         cmd = ["wmctrl", "-i", "-r", window_id, "-b", "add,hidden"]
         label = "Minimizada"
@@ -1282,27 +1447,104 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         "forward": ["l"],
         "volup": ["up"],
         "voldown": ["down"],
-        "next": ["shift", "N"],
-        "prev": ["shift", "P"],
+        "next": ["shift", "n"],
+        "prev": ["shift", "p"],
+        "restart": ["0"],
+        "history_back": ["alt", "left"],
         "captions": ["c"],
         "theater": ["t"],
     }
-    if action not in actions:
+    if action != "status" and action not in actions:
         raise ControlError("acción de YouTube no válida")
     with _lock:
         row = _find_youtube_unlocked()
         if row is None:
+            if action == "status":
+                return {"detail": "", "title": "", "level": _levels["youtube"], "playing": None, "missing": True}
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
+    state = _yt_state(row)
+    if action == "status":
+        return {"detail": "", "title": row["title"], "level": _levels["youtube"], **state}
+    detail = "YouTube"
+    if action == "prev":
+        # Como un reproductor: si ya lleva más de 5 s, vuelve al 0:00; si no, al anterior.
+        pos = state.get("pos")
+        now = time.time()
+        if pos is None:
+            pos = now - _yt["since"] if _yt["since"] else 99
+            if now - _yt["restart"] < 5:
+                pos = 0
+        if pos > 5:
+            keys, detail = actions["restart"], "Al inicio del vídeo"
+            _yt["restart"] = now
+        else:
+            # Shift+P solo vale en listas; «atrás» del navegador vale siempre.
+            keys, detail = actions["history_back"], "Vídeo anterior"
+            _yt["restart"] = 0.0
+    else:
+        keys = actions[action]
+        if action == "next":
+            detail = "Siguiente vídeo"
     if not _focus_for_keys(row["id"]):
         raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
     time.sleep(0.18)
     with _lock:
-        _chord(actions[action])
+        _yt_keys(keys)
+    if action == "play":
+        if state.get("playing") is not None:
+            state["playing"] = not state["playing"]
+        elif _yt["playing"] is not None:
+            state["playing"] = _yt["playing"] = not _yt["playing"]
+    if action in ("next", "prev") and detail != "Al inicio del vídeo":
+        _yt["since"] = time.time()
+        _yt["playing"] = True
     if action == "volup":
         _levels["youtube"] = min(100, _levels["youtube"] + 5)
     elif action == "voldown":
         _levels["youtube"] = max(0, _levels["youtube"] - 5)
-    return {"detail": "YouTube", "title": row["title"], "level": _levels["youtube"]}
+    return {"detail": detail, "title": row["title"], "level": _levels["youtube"], **state}
+
+
+_yt: dict[str, Any] = {"title": "", "since": 0.0, "restart": 0.0, "playing": None}
+
+
+def _yt_state(row: dict[str, str]) -> dict[str, Any]:
+    """Estado real si el sistema lo da (play/pausa, posición); si no, lo que sabemos."""
+    if row["title"] != _yt["title"]:
+        if _yt["title"]:
+            _yt["playing"] = True
+        _yt["title"], _yt["since"] = row["title"], time.time()
+    try:
+        import medios
+
+        info = medios.summary(medios.browser_session(row["title"]))
+    except Exception:  # noqa: BLE001 (sin datos del sistema: seguimos sin ellos)
+        info = {}
+    if info.get("playing") is not None:
+        _yt["playing"] = info["playing"]
+        return {"playing": info["playing"], "pos": info["pos"], "len": info["len"], "real": True}
+    return {"playing": _yt["playing"], "pos": None, "len": 0, "real": False}
+
+
+_WIN_VK = {"shift": 0x10, "ctrl": 0x11, "alt": 0x12, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28}
+
+
+def _yt_keys(keys: list[str]) -> None:
+    """Atajos con teclas reales. En Windows, pynput mandaba «N» como carácter suelto y
+    YouTube no veía Mayús: por eso Siguiente no hacía nada."""
+    if SYSTEM == "Windows":
+        vks = []
+        for k in keys:
+            if k in _WIN_VK:
+                vks.append(_WIN_VK[k])
+            elif len(k) == 1 and k.isalnum():
+                vks.append(ord(k.upper()))
+        if len(vks) > 1 or (vks and keys[0] not in ("k", "m", "f", "j", "l", "c", "t")):
+            _win_hotkey(*vks)
+            return
+    if SYSTEM == "Darwin" and keys == ["alt", "left"]:
+        keys = ["cmd", "["]
+    _chord(keys)
 
 
 def _youtube_speed(raw: object) -> dict[str, Any]:
@@ -1598,13 +1840,24 @@ def _linux_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
             "voldown": ["volume", "0.08-"],
             "status": [],
         }[action]
+    if action == "prev" and _num_out(_run(["playerctl", "-p", player, "position"]).stdout) > 5:
+        verbs = ["position", "0"]
     if verbs:
         result = _run(["playerctl", "-p", player, *verbs])
         if result.returncode != 0:
             raise ControlError("Spotify no respondió")
     meta = _run(["playerctl", "-p", player, "metadata", "--format", "{{artist}} — {{title}}"])
     title = meta.stdout.strip() or "Spotify"
-    return {"detail": "Spotify", "title": title[:180], "level": _levels["spotify"]}
+    st = _run(["playerctl", "-p", player, "status"]).stdout.strip().lower()
+    playing = True if st == "playing" else False if st in ("paused", "stopped") else None
+    return {"detail": "Spotify", "title": title[:180], "level": _levels["spotify"], "playing": playing}
+
+
+def _num_out(text: str) -> float:
+    try:
+        return float((text or "").strip() or 0)
+    except ValueError:
+        return 0.0
 
 
 def _windows_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
@@ -1619,8 +1872,15 @@ def _windows_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
             _launch_spotify_app()
         raise ControlError("Abro la app de Spotify del PC, no la web. Espera un segundo y pulsa otra vez.")
     title = _spotify_title(row)
+    try:
+        import medios
+
+        sinfo = medios.summary(medios.spotify_session())
+    except Exception:  # noqa: BLE001
+        sinfo = {}
+    extra_state = {"playing": sinfo.get("playing")}
     if action == "status":
-        return {"detail": "Spotify", "title": title, "level": _levels["spotify"]}
+        return {"detail": "Spotify", "title": title, "level": _levels["spotify"], **extra_state}
     if action == "volume":
         return _windows_spotify_volume(int(row["id"]), int(extra.get("level", _levels["spotify"])), title)
     if action == "mute":
@@ -1635,7 +1895,13 @@ def _windows_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     elif action == "next":
         _win_hotkey(0x11, 0x27)
     elif action == "prev":
+        # Spotify reinicia la canción si lleva más de ~3 s. Queremos la regla de 5 s:
+        # entre 3 y 5 s pulsamos dos veces para que pase de verdad a la anterior.
+        pos = sinfo.get("pos")
         _win_hotkey(0x11, 0x25)
+        if pos is not None and 2.5 < pos <= 5:
+            time.sleep(0.15)
+            _win_hotkey(0x11, 0x25)
     elif action == "volup":
         return _windows_spotify_volume(int(row["id"]), _levels["spotify"] + 10, title)
     elif action == "voldown":
@@ -1644,7 +1910,9 @@ def _windows_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     fresh = pick_spotify_window(_windows_list())
     if fresh is not None:
         title = _spotify_title(fresh)
-    return {"detail": "Spotify", "title": title, "level": _levels["spotify"]}
+    if action == "play" and extra_state["playing"] is not None:
+        extra_state["playing"] = not extra_state["playing"]
+    return {"detail": "Spotify", "title": title, "level": _levels["spotify"], **extra_state}
 
 
 def _spotify_now() -> str:
@@ -2552,13 +2820,20 @@ def window_to_screen(window_id: str, target: int) -> str:
         target = int(target)
     except (TypeError, ValueError):
         raise ControlError("pantalla no válida") from None
-    if not 1 <= target <= MAX_SCREENS:
+    if not 0 <= target <= MAX_SCREENS:
         raise ControlError("pantalla no válida")
     if not window_id:
         raise ControlError("falta la ventana")
     screens = list_screens()
     if len(screens) < 2:
-        raise ControlError("Solo veo una pantalla")
+        raise ControlError("Solo hay una pantalla")
+    if target == 0:
+        # «Cambiar de pantalla» con dos pantallas: a la otra.
+        if len(screens) != 2:
+            raise ControlError("Elige la pantalla de destino")
+        rect = _window_rect(window_id)
+        here = screen_of(rect, screens) if rect else 0
+        target = 2 if here == 1 else 1
     with _lock:
         if SYSTEM == "Windows":
             return _windows_to_screen(int(window_id), screens, target)
@@ -2567,7 +2842,122 @@ def window_to_screen(window_id: str, target: int) -> str:
     raise ControlError("No disponible en este sistema")
 
 
-def _windows_to_screen(hwnd: int, screens: list[dict[str, Any]], target: int) -> str:
+def _window_rect(window_id: str) -> tuple[int, int, int, int] | None:
+    if _swap_hook is not None:
+        return dict(_swap_hook("list")).get(window_id)
+    if SYSTEM == "Windows":
+        from ctypes import wintypes
+
+        user32 = _user32()
+        user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        rect = wintypes.RECT()
+        if user32.GetWindowRect(_hwnd(int(window_id)), ctypes.byref(rect)):
+            return (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+        return None
+    if SYSTEM == "Linux" and _which("wmctrl"):
+        return dict(_linux_rects()).get(window_id)
+    return None
+
+
+def screen_of(rect: tuple[int, int, int, int], screens: list[dict[str, Any]]) -> int:
+    """Número de la pantalla donde cae el centro de la ventana (0 si ninguna)."""
+    x, y, w, h = rect
+    cx, cy = x + w // 2, y + h // 2
+    for scr in screens:
+        if scr["x"] <= cx < scr["x"] + scr["w"] and scr["y"] <= cy < scr["y"] + scr["h"]:
+            return scr["n"]
+    return 0
+
+
+def plan_swap(wins: list[tuple[str, tuple[int, int, int, int]]], screens: list[dict[str, Any]], a: int, b: int) -> list[tuple[str, int]]:
+    """Qué ventana va a qué pantalla para intercambiar las pantallas a y b."""
+    plan = []
+    for win_id, rect in wins:
+        n = screen_of(rect, screens)
+        if n == a:
+            plan.append((win_id, b))
+        elif n == b:
+            plan.append((win_id, a))
+    return plan
+
+
+def swap_screens(a: Any = 1, b: Any = 2) -> dict[str, Any]:
+    try:
+        a, b = int(a), int(b)
+    except (TypeError, ValueError):
+        raise ControlError("pantalla no válida") from None
+    screens = list_screens()
+    if len(screens) < 2:
+        raise ControlError("Solo hay una pantalla")
+    nums = {s["n"] for s in screens}
+    if a == b or a not in nums or b not in nums:
+        raise ControlError("Elige dos pantallas distintas")
+    with _lock:
+        if _swap_hook is not None:
+            wins = _swap_hook("list")
+        elif SYSTEM == "Windows":
+            wins = _windows_rects()
+        elif SYSTEM == "Linux" and _which("wmctrl"):
+            wins = _linux_rects()
+        else:
+            raise ControlError("No disponible en este sistema")
+        plan = plan_swap(wins, screens, a, b)
+        moved = 0
+        for win_id, target in plan:
+            try:
+                if _swap_hook is not None:
+                    _swap_hook("move", win_id, target)
+                elif SYSTEM == "Windows":
+                    _windows_to_screen(int(win_id), screens, target, focus=False)
+                else:
+                    _linux_to_screen(win_id, screens, target, focus=False)
+                moved += 1
+            except (ControlError, OSError, ValueError):
+                continue
+    if not plan:
+        return {"detail": f"No hay ventanas abiertas en las pantallas {a} y {b}", "moved": 0}
+    return {"detail": f"Pantallas {a} y {b} intercambiadas ({moved} ventanas)", "moved": moved}
+
+
+_swap_hook = None
+
+
+def set_swap_hook(fn) -> None:
+    global _swap_hook
+    _swap_hook = fn
+
+
+def _windows_rects() -> list[tuple[str, tuple[int, int, int, int]]]:
+    from ctypes import wintypes
+
+    user32 = _user32()
+    user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    out = []
+    for row in _windows_list():
+        handle = _hwnd(int(row["id"]))
+        if user32.IsIconic(handle):
+            continue
+        rect = wintypes.RECT()
+        if user32.GetWindowRect(handle, ctypes.byref(rect)):
+            out.append((row["id"], (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)))
+    return out
+
+
+def _linux_rects() -> list[tuple[str, tuple[int, int, int, int]]]:
+    result = _run(["wmctrl", "-lG"])
+    out = []
+    for line in result.stdout.splitlines():
+        parts = line.split(None, 7)
+        if len(parts) < 7 or not parts[0].startswith("0x") or parts[1] == "-1":
+            continue
+        try:
+            out.append((parts[0], (int(parts[2]), int(parts[3]), int(parts[4]), int(parts[5]))))
+        except ValueError:
+            continue
+    return out
+
+
+def _windows_to_screen(hwnd: int, screens: list[dict[str, Any]], target: int, focus: bool = True) -> str:
     from ctypes import wintypes
 
     user32 = _user32()
@@ -2587,11 +2977,12 @@ def _windows_to_screen(hwnd: int, screens: list[dict[str, Any]], target: int) ->
     user32.MoveWindow(handle, x, y, w, h, True)
     if zoomed:
         user32.ShowWindow(handle, 3)
-    _force_foreground(hwnd)
+    if focus:
+        _force_foreground(hwnd)
     return f"A la pantalla {target}"
 
 
-def _linux_to_screen(window_id: str, screens: list[dict[str, Any]], target: int) -> str:
+def _linux_to_screen(window_id: str, screens: list[dict[str, Any]], target: int, focus: bool = True) -> str:
     if not window_id.startswith("0x") or not _which("wmctrl"):
         raise ControlError("No disponible en este sistema")
     dst = next((s for s in screens if s["n"] == target), None)
@@ -2601,16 +2992,20 @@ def _linux_to_screen(window_id: str, screens: list[dict[str, Any]], target: int)
     result = _run(["wmctrl", "-i", "-r", window_id, "-e", f"0,{dst['x'] + 40},{dst['y'] + 40},-1,-1"])
     if result.returncode != 0:
         raise ControlError("No pude mover esa ventana")
-    _run(["wmctrl", "-i", "-a", window_id])
+    if focus:
+        _run(["wmctrl", "-i", "-a", window_id])
     return f"A la pantalla {target}"
 
 
-SYSTEM_ACTIONS = {"vol_up", "vol_down", "vol_mute", "bright_up", "bright_down", "project", "lock"}
+SYSTEM_ACTIONS = {"vol_up", "vol_down", "vol_mute", "bright_up", "bright_down", "project", "lock", "swap_screens"}
 
 
-def system_action(action: str) -> dict[str, Any]:
+def system_action(action: str, extra: dict | None = None) -> dict[str, Any]:
     if action not in SYSTEM_ACTIONS:
         raise ControlError("acción de sistema no válida")
+    if action == "swap_screens":
+        extra = extra or {}
+        return swap_screens(extra.get("a", 1), extra.get("b", 2))
     if action.startswith("vol_"):
         delta = {"vol_up": 1, "vol_down": -1, "vol_mute": 0}[action]
         return {"detail": system_volume(delta)}
@@ -2658,5 +3053,6 @@ def system_caps() -> dict[str, Any]:
         "system": SYSTEM,
         "brightness": SYSTEM == "Windows" or (SYSTEM == "Linux" and _which("brightnessctl")),
         "project": SYSTEM == "Windows",
+        "swap": SYSTEM == "Windows" or (SYSTEM == "Linux" and _which("wmctrl")) or _swap_hook is not None,
         "lock": SYSTEM in {"Windows", "Darwin"} or (SYSTEM == "Linux" and (_which("loginctl") or _which("xdg-screensaver"))),
     }
