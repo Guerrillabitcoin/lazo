@@ -57,7 +57,7 @@ YouTube se controla con los atajos del reproductor (`k`, `j`, `l`, flechas). Laz
 
 Pastilla «Descargatodo» en el móvil y sección del mismo nombre en la ventana del PC. Pegas un enlace (YouTube, Instagram, TikTok, X y casi cualquier web), pulsas «Buscar formatos» y eliges: mejor calidad, 1080p, 720p, 480p, solo audio MP3, solo audio original o, en «Avanzado», un formato concreto. Se descarga **en el PC**, en `Descargas/LaZoo`; desde el móvil, «Enviar al móvil» lo recibe cifrado como el puente (hasta 400 MB).
 
-- Usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) y ffmpeg, que no van dentro de LaZoo. «Instalar herramientas (una vez)» los baja a la carpeta `herramientas/` del programa: yt-dlp del release oficial de GitHub y, en Windows, ffmpeg de gyan.dev. Solo HTTPS y con la huella SHA-256 oficial comprobada. En Linux y macOS, ffmpeg se instala con el gestor del sistema (`sudo apt install ffmpeg`, `brew install ffmpeg`). «Actualizar yt-dlp» cuando una web deje de funcionar.
+- Usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) y ffmpeg, que no van dentro de LaZoo. «Instalar herramientas (una vez)» los baja a la carpeta `herramientas/` del programa: yt-dlp del release oficial de GitHub y, en Windows, ffmpeg del release de BtbN/FFmpeg-Builds (unos 200 MB). Solo HTTPS y con la huella SHA-256 oficial comprobada. En Linux y macOS, ffmpeg se instala con el gestor del sistema (`sudo apt install ffmpeg`, `brew install ffmpeg`). «Actualizar yt-dlp» cuando una web deje de funcionar.
 - Privacidad: no usa cookies del navegador ni tu cuenta; el enlace solo lo ve el PC y la web de origen. Algunas webs piden iniciar sesión o bloquean descargas: entonces no funcionará.
 - **Solo para uso personal. Respeta los derechos de autor y las normas de cada web.**
 

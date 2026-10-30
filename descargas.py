@@ -41,7 +41,8 @@ TEMPLATE = "%(title).150B [%(id)s].%(ext)s"
 PROGRESS = "download:LZP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s"
 
 YTDLP_BASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/"
-FFMPEG_ZIP = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+FFMPEG_BASE = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
+FFMPEG_ZIP = "ffmpeg-master-latest-win64-gpl.zip"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if SYSTEM == "Windows" else 0
 EXE = ".exe" if SYSTEM == "Windows" else ""
 
@@ -222,11 +223,10 @@ def _install_ytdlp() -> None:
 def _install_ffmpeg() -> None:
     if SYSTEM != "Windows":
         raise DlError(ffmpeg_hint())
-    want = _fetch(FFMPEG_ZIP + ".sha256", 4096, "huella de ffmpeg").decode("ascii", "replace").split()
-    if not want or not re.fullmatch(r"[0-9a-fA-F]{64}", want[0]):
-        raise DlError("no encontré la huella oficial de ffmpeg")
-    data = _fetch(FFMPEG_ZIP, 300 * 1024 * 1024, "ffmpeg")
-    if hashlib.sha256(data).hexdigest() != want[0].lower():
+    sums = _fetch(FFMPEG_BASE + "checksums.sha256", 1024 * 1024, "huellas de ffmpeg").decode("utf-8", "replace")
+    want = _sha_from_sums(sums, FFMPEG_ZIP)
+    data = _fetch(FFMPEG_BASE + FFMPEG_ZIP, 400 * 1024 * 1024, "ffmpeg")
+    if hashlib.sha256(data).hexdigest() != want:
         raise DlError("ffmpeg: la huella no coincide, no lo instalo")
     TOOLS_DIR.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
