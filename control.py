@@ -2094,6 +2094,8 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
     crypt32.CryptUnprotectData.argtypes = crypt32.CryptProtectData.argtypes
     crypt32.CryptProtectData.restype = ctypes.c_bool
     crypt32.CryptUnprotectData.restype = ctypes.c_bool
+    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    kernel32.LocalFree.restype = ctypes.c_void_p
     fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
     if not fn(ctypes.byref(incoming), None, None, None, None, 0, ctypes.byref(outgoing)):
         return b""

@@ -363,8 +363,24 @@ class Handler(BaseHTTPRequestHandler):
         maybe_open_mesa()
         return True
 
+    def _drain(self) -> None:
+        """Lee el cuerpo que no vamos a usar; en Windows, cerrar con datos sin leer corta la respuesta."""
+        try:
+            left = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return
+        if left > 4 * 1024 * 1024:
+            return
+        self.connection.settimeout(2)
+        while left > 0:
+            chunk = self.rfile.read(min(left, 65536))
+            if not chunk:
+                break
+            left -= len(chunk)
+
     def _unauth(self) -> None:
         self.close_connection = True
+        self._drain()
         if self.denied == "hora":
             self._send(401, {"error": "El reloj del móvil no coincide con el del PC", "clock": True})
         else:
