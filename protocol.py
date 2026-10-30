@@ -4,22 +4,34 @@ Es el único sitio donde vive. El anfitrión (bandeja de Windows, Linux o macOS)
 y cualquier mando (navegador, APK) hablan esto y nada más. No importa
 `control.py` ni nada del sistema: solo biblioteca estándar.
 
-Emparejamiento
-    El PC muestra un QR con `http://IP:PUERTO/#p=PIN&k=CLAVE`. El móvil manda el
-    PIN a `POST /api/login` y recibe la cookie `lazo` y el mismo valor como
-    `token`. Después usa la cookie o la cabecera `X-Lazo`. Ocho PIN malos
-    bloquean el login 30 s. La clave `k` solo viaja en el QR.
+Emparejamiento y firma de peticiones
+    El PC muestra un QR con `http://IP:PUERTO/#k=CLAVE`. La clave maestra solo
+    viaja en el QR (el fragmento nunca sale del móvil). De ella salen dos claves
+    con HMAC-SHA256: `auth = HMAC(k, "lazo/auth/1")` y `seal = HMAC(k, "lazo/seal/1")`.
+    Cada petición del móvil lleva `X-Lazo-Id` (id del mando), `X-Lazo-T`
+    (milisegundos), `X-Lazo-N` (nonce de 16 bytes en hex) y `X-Lazo-S`:
+    HMAC-SHA256(auth, "MÉTODO\nRUTA\nT\nN\nLONGITUD") en hex. La ruta va sin
+    consulta y la longitud es la de `Content-Length`. El PC acepta una firma una
+    sola vez y solo si la hora está a menos de 60 s. No hay cookie ni token: copiar
+    lo que viaja por la Wi-Fi no sirve para controlar el PC. Los cuerpos de las
+    peticiones van sellados (LZ2), que además los autentica. En `/ws` los
+    mismos cuatro valores van en la consulta: `?i=&t=&n=&s=`.
+    Sin cámara se puede emparejar con el PIN de 6 dígitos en `POST /api/login`,
+    que devuelve la clave. Es más cómodo y menos seguro: en ese momento la clave
+    viaja sin cifrar. Seis fallos seguidos bloquean el login y cada bloqueo dura
+    el doble que el anterior (30 s, 1 min, 2 min... hasta 1 h).
 
 Sello LZ2
     `b"LZ2" + nonce(12) + cifrado + etiqueta(16)`. El flujo es
     HMAC-SHA256(clave, nonce + contador_u32_be) por bloques de 32 bytes, y la
     etiqueta son los primeros 16 bytes de HMAC-SHA256(clave, b"LZ2" + nonce +
-    cifrado). Con `X-Seal: 1` las respuestas JSON salen selladas; las
-    peticiones selladas empiezan por `LZ2`.
+    cifrado), con la clave `seal`. Con `X-Seal: 1` las respuestas salen selladas;
+    las peticiones del móvil siempre van selladas y empiezan por `LZ2`.
 
 WebSocket del ratón (`GET /ws`)
     Tramas de hasta 64 bytes. Binaria: dos enteros de 32 bits con signo,
-    little-endian, `dx dy`, tal cual o selladas. Texto: `"dx dy"`.
+    little-endian, `dx dy`, selladas. Solo el propio PC (127.0.0.1) puede mandarlas
+    sin sellar, o en texto `"dx dy"`.
     Cada trama cuenta como señal de vida del móvil.
 """
 
@@ -42,8 +54,13 @@ TAG = 16
 MIN_SEALED = len(MAGIC) + NONCE + TAG
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WS_MAX_FRAME = 64
-MAX_FAILS = 8
+MAX_FAILS = 6
 LOCK_SECONDS = 30
+MAX_LOCK_SECONDS = 3600
+PIN_LEN = 6
+CLOCK_SECONDS = 60
+MAX_NONCES = 4096
+H_ID, H_T, H_N, H_S = "X-Lazo-Id", "X-Lazo-T", "X-Lazo-N", "X-Lazo-S"
 ALIVE_SECONDS = 5
 CHUNK = 256 * 1024
 
@@ -115,31 +132,34 @@ def open_sealed_to(source, length: int, dest: Path, key: bytes) -> None:
 
 
 def new_pin() -> str:
-    return f"{secrets.randbelow(9000) + 1000}"
+    return f"{secrets.randbelow(9 * 10 ** (PIN_LEN - 1)) + 10 ** (PIN_LEN - 1)}"
 
 
-def cookies(header: str | None) -> dict[str, str]:
-    found: dict[str, str] = {}
-    for part in (header or "").split(";"):
-        if "=" in part:
-            name, value = part.strip().split("=", 1)
-            found[name] = value
-    return found
+def derive(master: bytes, label: str) -> bytes:
+    return hmac.new(master, label.encode(), hashlib.sha256).digest()
+
+
+def sign_request(auth_key: bytes, method: str, path: str, stamp: int, nonce: str, length: int) -> str:
+    text = f"{method}\n{path}\n{stamp}\n{nonce}\n{length}"
+    return hmac.new(auth_key, text.encode(), hashlib.sha256).hexdigest()
 
 
 class Pairing:
-    """PIN, token, clave del sello y señal de vida del móvil de un anfitrión."""
+    """PIN, clave, firma de peticiones y presencia de los mandos de un anfitrión."""
 
     def __init__(self, pin: str = "") -> None:
-        self.pin = pin if pin.isdigit() and len(pin) == 4 else new_pin()
-        self.token = secrets.token_urlsafe(32)
+        self.pin = pin if pin.isdigit() and len(pin) == PIN_LEN else new_pin()
         self.key = secrets.token_bytes(32)
+        self.auth_key = derive(self.key, "lazo/auth/1")
+        self.seal_key = derive(self.key, "lazo/seal/1")
         self._lock = threading.Lock()
         self._fails = 0
+        self._locks = 0
         self._locked_until = 0.0
-        self._last_phone = 0.0
+        self._seen: dict[str, float] = {}
+        self._nonces: dict[str, float] = {}
 
-    # PIN y token
+    # PIN (emparejamiento sin cámara)
 
     def login(self, pin: str) -> str:
         """Devuelve "ok", "mal" o "espera"."""
@@ -150,51 +170,86 @@ class Pairing:
             if len(pin) != len(self.pin) or not hmac.compare_digest(pin, self.pin):
                 self._fails += 1
                 if self._fails >= MAX_FAILS:
-                    self._locked_until = now + LOCK_SECONDS
+                    wait = min(LOCK_SECONDS * 2 ** self._locks, MAX_LOCK_SECONDS)
+                    self._locked_until = now + wait
+                    self._locks += 1
                     self._fails = 0
                 return "mal"
             self._fails = 0
-        self.note_phone()
+            self._locks = 0
         return "ok"
 
-    def authed(self, header: str | None, cookie_header: str | None) -> bool:
-        for got in (header or "", cookies(cookie_header).get("lazo", "")):
-            if got and len(got) == len(self.token) and hmac.compare_digest(got, self.token):
-                self.note_phone()
-                return True
-        return False
-
-    def cookie(self) -> str:
-        return f"lazo={self.token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000"
+    def key_text(self) -> str:
+        return base64.urlsafe_b64encode(self.key).decode().rstrip("=")
 
     def phone_url(self, scheme: str, ip: str, port: int) -> str:
-        key = base64.urlsafe_b64encode(self.key).decode().rstrip("=")
-        return f"{scheme}://{ip}:{port}/#p={self.pin}&k={key}"
+        return f"{scheme}://{ip}:{port}/#k={self.key_text()}"
 
-    # Señal de vida del móvil
+    # Firma de peticiones
 
-    def note_phone(self) -> None:
+    def sign(self, method: str, path: str, length: int = 0, now: float | None = None) -> dict[str, str]:
+        """Cabeceras de firma, como las pone un mando. Sirve para pruebas y para el cliente en Python."""
+        stamp = int((time.time() if now is None else now) * 1000)
+        nonce = secrets.token_hex(16)
+        return {
+            H_T: str(stamp),
+            H_N: nonce,
+            H_S: sign_request(self.auth_key, method, path, stamp, nonce, length),
+        }
+
+    def verify(self, method: str, path: str, length: int, stamp: str, nonce: str, sig: str) -> str:
+        """Devuelve "ok", "firma", "hora" o "repetida". Una firma buena solo vale una vez."""
+        try:
+            when = int(stamp)
+        except ValueError:
+            return "firma"
+        if not (8 <= len(nonce) <= 64 and all(c in "0123456789abcdef" for c in nonce)):
+            return "firma"
+        expect = sign_request(self.auth_key, method, path, when, nonce, length)
+        if not hmac.compare_digest(sig.lower(), expect):
+            return "firma"
+        now = time.time()
+        if abs(now * 1000 - when) > CLOCK_SECONDS * 1000:
+            return "hora"
         with self._lock:
-            self._last_phone = time.time()
+            for old in [n for n, until in self._nonces.items() if until < now]:
+                del self._nonces[old]
+            if nonce in self._nonces or len(self._nonces) >= MAX_NONCES:
+                return "repetida"
+            self._nonces[nonce] = now + 2 * CLOCK_SECONDS
+        return "ok"
 
-    def phone_gone(self) -> None:
+    # Señal de vida de cada mando. `who` es su `X-Lazo-Id` o, si no manda uno,
+    # su IP. Hay alguien conectado mientras algún mando dé señal.
+
+    def note_phone(self, who: str = "") -> None:
         with self._lock:
-            self._last_phone = 0.0
+            self._seen[who] = time.time()
+
+    def phone_gone(self, who: str = "") -> None:
+        with self._lock:
+            self._seen.pop(who, None)
+
+    def phone_count(self) -> int:
+        with self._lock:
+            now = time.time()
+            for who in [who for who, last in self._seen.items() if now - last >= ALIVE_SECONDS]:
+                del self._seen[who]
+            return len(self._seen)
 
     def phone_online(self) -> bool:
-        with self._lock:
-            return self._last_phone > 0 and time.time() - self._last_phone < ALIVE_SECONDS
+        return self.phone_count() > 0
 
     # Sello con la clave de este emparejamiento
 
     def seal(self, data: bytes) -> bytes:
-        return seal(data, self.key)
+        return seal(data, self.seal_key)
 
     def open(self, blob: bytes) -> bytes:
-        return open_sealed(blob, self.key)
+        return open_sealed(blob, self.seal_key)
 
     def open_to(self, source, length: int, dest: Path) -> None:
-        open_sealed_to(source, length, dest, self.key)
+        open_sealed_to(source, length, dest, self.seal_key)
 
 
 # --- WebSocket del ratón -----------------------------------------------------
@@ -238,17 +293,24 @@ def pointer_loop(
     sock: socket.socket,
     pairing: Pairing,
     move: Callable[[int, int], object],
+    who: str = "",
+    require_seal: bool = True,
 ) -> None:
-    """Lee tramas del mando hasta que cierra. Cada una llama a `move(dx, dy)`."""
+    """Lee tramas del mando hasta que cierra. Cada una llama a `move(dx, dy)`.
+
+    Con `require_seal` solo vale lo sellado: cualquier otra trama corta la conexión.
+    """
     try:
         while True:
             opcode, payload = ws_read(sock)
-            pairing.note_phone()
+            pairing.note_phone(who)
             if opcode == 0x8:
                 break
             if opcode == 0x9:
                 ws_send(sock, 0xA, payload)
                 continue
+            if opcode in (0x1, 0x2) and require_seal and not (opcode == 0x2 and payload.startswith(MAGIC)):
+                raise ProtocolError("trama sin sellar")
             if opcode == 0x2 and payload.startswith(MAGIC):
                 payload = pairing.open(payload)
             if opcode == 0x2 and len(payload) >= 8:

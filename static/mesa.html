@@ -103,7 +103,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.32 beta 1</p>
+          <p class="ver">0.32 beta 2</p>
         </div>
         <p id="link-label">Sin conexión</p>
       </header>
@@ -131,6 +131,8 @@
       </section>
     </main>
     <script>
+      const nativeFetch = window.fetch.bind(window);
+      window.fetch = (url, opts = {}) => nativeFetch(url, { ...opts, headers: { "X-Lazo-Local": "1", ...(opts.headers || {}) } });
       const paste = document.querySelector("#paste");
       const clips = document.querySelector("#clips");
       const files = document.querySelector("#files");

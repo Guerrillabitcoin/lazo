@@ -6,7 +6,59 @@ const statusBar = document.querySelector("#status");
 const linkLabel = document.querySelector("#link-label");
 
 let wireKey = null;
-let sessionToken = localStorage.getItem("lazo-token") || "";
+let authKey = null;
+let clockOffset = 0;
+localStorage.removeItem("lazo-token");
+const deviceId = localStorage.getItem("lazo-id") || (() => {
+  const fresh = toHex(crypto.getRandomValues(new Uint8Array(16)));
+  localStorage.setItem("lazo-id", fresh);
+  return fresh;
+})();
+
+function setMasterKey(text) {
+  const master = b64urlToBytes(text);
+  wireKey = deriveKey(master, "lazo/seal/1");
+  authKey = deriveKey(master, "lazo/auth/1");
+}
+
+function signHeaders(method, path, length) {
+  if (!authKey) return {};
+  const stamp = Math.round(Date.now() + clockOffset);
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(16)));
+  return {
+    "X-Lazo-Id": deviceId,
+    "X-Lazo-T": String(stamp),
+    "X-Lazo-N": nonce,
+    "X-Lazo-S": signRequest(authKey, method, path.split("?")[0], stamp, nonce, length),
+  };
+}
+
+async function syncClock() {
+  try {
+    const before = Date.now();
+    const data = await fetch("/api/time").then((res) => res.json());
+    clockOffset = data.t - (before + Date.now()) / 2;
+  } catch (_err) {}
+}
+
+function bodyLength(body) {
+  if (!body) return 0;
+  return typeof body === "string" ? new TextEncoder().encode(body).length : body.length ?? body.size ?? 0;
+}
+
+async function lzFetch(path, opts = {}) {
+  const method = opts.method || "GET";
+  const send = () => fetch(path, {
+    ...opts,
+    headers: { ...authHeaders(opts.headers), ...signHeaders(method, path, bodyLength(opts.body)) },
+  });
+  let res = await send();
+  if (res.status === 401 && authKey) {
+    await syncClock();
+    res = await send();
+  }
+  return res;
+}
 
 const views = {
   mouse: document.querySelector("#view-mouse"),
@@ -45,7 +97,7 @@ function say(text) {
 
 function authHeaders(extra) {
   const headers = extra ? { ...extra } : {};
-  if (sessionToken) headers["X-Lazo"] = sessionToken;
+  headers["X-Lazo-Local"] = "1";
   if (wireKey) headers["X-Seal"] = "1";
   return headers;
 }
@@ -64,18 +116,16 @@ async function readBody(res) {
 }
 
 async function api(path, body, method = "POST") {
-  const headers = authHeaders(method === "POST" ? { "Content-Type": "application/octet-stream" } : {});
+  const headers = method === "POST" ? { "Content-Type": "application/octet-stream" } : {};
   let payload;
   if (method === "POST") {
     const raw = JSON.stringify(body || {});
     payload = wireKey ? sealText(raw, wireKey) : raw;
     if (!wireKey) headers["Content-Type"] = "application/json";
   }
-  const res = await fetch(path, { method, headers, body: payload });
+  const res = await lzFetch(path, { method, headers, body: payload });
   const data = await readBody(res);
   if (res.status === 401) {
-    sessionToken = "";
-    localStorage.removeItem("lazo-token");
     showPin();
     throw new Error(data.error || "PIN");
   }
@@ -92,8 +142,6 @@ function setLink(mode) {
 
 function showPin() {
   const input = document.querySelector("#pin-input");
-  const saved = sessionStorage.getItem("lazo-pin") || "";
-  if (saved && !input.value) input.value = saved;
   pinPanel.hidden = false;
   app.hidden = true;
   dock.hidden = true;
@@ -101,7 +149,7 @@ function showPin() {
   window.clearInterval(poll);
   window.clearInterval(clipsTimer);
   window.clearInterval(caretTimer);
-  fetch("/api/bye", { method: "POST", headers: authHeaders() }).catch(() => {});
+  fetch("/api/bye?i=" + deviceId, { method: "POST", headers: authHeaders() }).catch(() => {});
 }
 
 function showHome() {
@@ -224,15 +272,31 @@ function renderFiles(items) {
     const row = document.createElement("li");
     row.className = "file-row";
     const link = document.createElement("a");
-    link.href = "/api/files/" + item.id;
-    link.download = item.name;
+    link.href = "#";
+    link.addEventListener("click", async (event) => {
+      event.preventDefault();
+      try {
+        const res = await lzFetch("/api/files/" + item.id);
+        if (!res.ok) throw new Error("No se pudo bajar");
+        const blob = new Uint8Array(await res.arrayBuffer());
+        const plain = wireKey ? openSeal(blob, wireKey) : blob;
+        const url = URL.createObjectURL(new Blob([plain]));
+        const temp = document.createElement("a");
+        temp.href = url;
+        temp.download = item.name;
+        temp.click();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+      } catch (err) {
+        say(err.message);
+      }
+    });
     const kb = item.size < 1024 ? item.size + " B" : Math.max(1, Math.round(item.size / 1024)) + " KB";
     link.textContent = item.name + " · " + kb;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.textContent = "Quitar";
     remove.addEventListener("click", async () => {
-      await fetch("/api/files/" + item.id, { method: "DELETE", headers: authHeaders() });
+      await lzFetch("/api/files/" + item.id, { method: "DELETE" });
       syncClipboard();
     });
     row.append(link, remove);
@@ -242,11 +306,11 @@ function renderFiles(items) {
 
 async function syncClipboard() {
   try {
-    const res = await fetch("/api/clipboard", { headers: authHeaders() });
+    const res = await lzFetch("/api/clipboard");
     if (res.status === 401) return;
     const data = await readBody(res);
     renderClips(data.items || []);
-    const files = await fetch("/api/files", { headers: authHeaders() });
+    const files = await lzFetch("/api/files");
     if (files.status === 401) return;
     const listed = await readBody(files);
     renderFiles(listed.files || []);
@@ -291,7 +355,8 @@ function uploadTracked(url, body, headers, pending) {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", url);
     xhr.responseType = "arraybuffer";
-    Object.entries(headers).forEach(([name, value]) => xhr.setRequestHeader(name, value));
+    const signed = { ...headers, ...signHeaders("POST", url, bodyLength(body)) };
+    Object.entries(signed).forEach(([name, value]) => xhr.setRequestHeader(name, value));
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
       xferBytes += Math.max(0, event.loaded - xferFileLoaded);
@@ -418,26 +483,22 @@ document.querySelector("#file-input").addEventListener("change", async (event) =
 
 async function login() {
   const pin = document.querySelector("#pin-input").value.trim();
-  if (/^\d{4}$/.test(pin)) sessionStorage.setItem("lazo-pin", pin);
   try {
-    const headers = { "Content-Type": "application/octet-stream" };
-    const raw = JSON.stringify({ pin });
-    const body = wireKey ? sealText(raw, wireKey) : raw;
-    if (wireKey) headers["X-Seal"] = "1";
-    else headers["Content-Type"] = "application/json";
-    const res = await fetch("/api/login", { method: "POST", headers, body });
-    const data = await readBody(res);
+    const res = await fetch("/api/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       say(data.error || "PIN incorrecto");
       setLink("off");
       return;
     }
-    if (data.token) {
-      sessionToken = data.token;
-      localStorage.setItem("lazo-token", data.token);
-      sessionStorage.setItem("lazo-pin", pin);
-    }
-    say(wireKey ? "Conectado y cifrado" : "Conectado a este PC");
+    setMasterKey(data.key);
+    localStorage.setItem("lazo-key", data.key);
+    await syncClock();
+    say("Conectado y cifrado");
     showApp();
   } catch (_err) {
     say("Sin respuesta del PC");
@@ -576,35 +637,28 @@ window.addEventListener("pagehide", () => {
 renderDock();
 
 const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
-const keyFromLink = hash.get("k") || localStorage.getItem("lazo-key") || "";
+const fromQr = hash.get("k") || "";
+const keyFromLink = fromQr || localStorage.getItem("lazo-key") || "";
+if (fromQr) history.replaceState(null, "", location.pathname);
 if (keyFromLink) {
   try {
-    wireKey = b64urlToBytes(keyFromLink);
+    setMasterKey(keyFromLink);
     localStorage.setItem("lazo-key", keyFromLink);
   } catch (_err) {
     wireKey = null;
+    authKey = null;
   }
 }
-const fromLink = hash.get("p") || "";
-if (/^\d{4}$/.test(fromLink)) {
-  document.querySelector("#pin-input").value = fromLink;
-  history.replaceState(null, "", location.pathname);
-  login();
-} else if (sessionToken) {
+if (authKey) {
   pinPanel.hidden = true;
   say("Conectando…");
-  fetch("/api/status", { headers: authHeaders() }).then(async (res) => {
+  syncClock().then(() => lzFetch("/api/status")).then(async (res) => {
     const data = await readBody(res);
-    const sealed = res.headers.get("content-type") !== "application/json";
-    if (res.status === 401 || (wireKey && sealed && !data.platform)) {
-      sessionToken = "";
-      localStorage.removeItem("lazo-token");
-      say("Desconectado");
-      showPin();
-      return;
-    }
-    if (!res.ok) {
-      say("Sin respuesta del PC");
+    if (res.status === 401 || !data.platform) {
+      localStorage.removeItem("lazo-key");
+      wireKey = null;
+      authKey = null;
+      say("Escanea el QR de nuevo");
       showPin();
       return;
     }
@@ -717,7 +771,11 @@ function applyAim() {
 
 function connectPointer() {
   if (pointerSocket && (pointerSocket.readyState === 0 || pointerSocket.readyState === 1)) return;
-  const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
+  const query = new URLSearchParams(signHeaders("GET", "/ws", 0));
+  const signed = query.has("X-Lazo-S")
+    ? "?" + new URLSearchParams({ i: deviceId, t: query.get("X-Lazo-T"), n: query.get("X-Lazo-N"), s: query.get("X-Lazo-S") })
+    : "";
+  const url = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws${signed}`;
   const sock = new WebSocket(url);
   pointerSocket = sock;
   sock.binaryType = "arraybuffer";
@@ -745,15 +803,7 @@ function flushPointer() {
   acc.x -= dx;
   acc.y -= dy;
   moveFlight = true;
-  fetch("/api/move", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dx, dy }),
-  })
-    .then((res) => {
-      if (res.status === 401) showPin();
-      return res.text();
-    })
+  api("/api/move", { dx, dy })
     .catch(() => {})
     .finally(() => {
       moveFlight = false;
@@ -771,11 +821,7 @@ function flushScroll() {
   scrollAcc = 0;
   if (!dy) return;
   scrollFlight = true;
-  fetch("/api/scroll", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ dy }),
-  })
+  api("/api/scroll", { dy })
     .catch(() => {})
     .finally(() => {
       scrollFlight = false;
@@ -885,7 +931,7 @@ nativeType.addEventListener("blur", () => {
 
 async function watchCaret() {
   try {
-    const res = await fetch("/api/caret", { headers: authHeaders() });
+    const res = await lzFetch("/api/caret");
     if (res.status === 401) return;
     const data = await readBody(res);
     const typing = !!data.typing;

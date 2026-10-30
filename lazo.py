@@ -15,14 +15,14 @@ import webbrowser
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import control
 import protocol
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.32-beta1"
+VERSION = "0.32-beta2"
 PAIRING = protocol.Pairing()
 PORT = 8787
 VISITS: list[str] = []
@@ -281,7 +281,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.32 beta 1</p>
+      <p class="ver">0.32 beta 2</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -315,14 +315,64 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         return
 
-    def _authed(self) -> bool:
-        if self.client_address[0] in ("127.0.0.1", "::1"):
-            return True
-        return PAIRING.authed(self.headers.get("X-Lazo"), self.headers.get("Cookie"))
+    remote = True
+    denied = ""
 
-    def _send(self, code: int, payload: dict | None = None, body: bytes | None = None, content_type: str = "application/json") -> None:
+    def _loopback(self) -> bool:
+        return self.client_address[0] in ("127.0.0.1", "::1")
+
+    def _host_ok(self) -> bool:
+        host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
+        return host in ("127.0.0.1", "localhost", "::1")
+
+    def _ws_query(self) -> dict[str, str]:
+        return {key: values[0] for key, values in parse_qs(urlsplit(self.path).query).items()}
+
+    def _who(self, ws: bool = False) -> str:
+        found = self._ws_query().get("i", "") if ws else self.headers.get(protocol.H_ID, "")
+        if re.fullmatch(r"[0-9a-f]{8,40}", found or ""):
+            return found
+        return self.client_address[0]
+
+    def _authed(self, ws: bool = False) -> bool:
+        """El PC se fía de sí mismo, pero no de una web abierta en su navegador: pide la
+        cabecera `X-Lazo-Local` (una web ajena no puede ponerla) y un Host de este PC. El
+        móvil firma cada petición con la clave del QR; ver protocol.py."""
+        self.remote = not self._loopback()
+        self.denied = ""
+        if not self.remote:
+            if not self._host_ok():
+                return False
+            if ws:
+                origin = self.headers.get("Origin")
+                return not origin or urlsplit(origin).netloc == self.headers.get("Host")
+            return self.headers.get("X-Lazo-Local") == "1"
+        path = self.path.split("?", 1)[0]
+        if ws:
+            query = self._ws_query()
+            got, length = (query.get("t", ""), query.get("n", ""), query.get("s", "")), 0
+        else:
+            got = tuple(self.headers.get(name, "") for name in (protocol.H_T, protocol.H_N, protocol.H_S))
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        if not got[2] or self._who(ws) == self.client_address[0]:
+            return False
+        self.denied = PAIRING.verify(self.command, path, length, *got)
+        if self.denied != "ok":
+            return False
+        PAIRING.note_phone(self._who(ws))
+        maybe_open_mesa()
+        return True
+
+    def _unauth(self) -> None:
+        self.close_connection = True
+        if self.denied == "hora":
+            self._send(401, {"error": "El reloj del móvil no coincide con el del PC", "clock": True})
+        else:
+            self._send(401, {"error": "Entra con el QR"})
+
+    def _send(self, code: int, payload: dict | None = None, body: bytes | None = None, content_type: str = "application/json", seal: bool = True) -> None:
         data = body if body is not None else json.dumps(payload or {}, ensure_ascii=False).encode()
-        if body is None and self.headers.get("X-Seal") == "1":
+        if body is None and seal and self.headers.get("X-Seal") == "1":
             data = PAIRING.seal(data)
             content_type = "application/octet-stream"
         self.send_response(code)
@@ -332,11 +382,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _read_json(self) -> dict:
+    def _read_json(self, need_seal: bool | None = None) -> dict:
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length > 120000:
             raise control.ControlError("petición demasiado grande")
         raw = self.rfile.read(length) if length else b"{}"
+        if (self.remote if need_seal is None else need_seal) and length and not raw.startswith(protocol.MAGIC):
+            raise control.ControlError("hace falta cifrado")
         if raw.startswith(protocol.MAGIC):
             try:
                 raw = PAIRING.open(raw)
@@ -373,13 +425,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/conectar":
             host = self.client_address[0]
-            if not _local_pc(host):
+            if not (_local_pc(host) and self._host_ok()):
                 self._send(404, {"error": "no está"})
                 return
             self._send(200, body=connect_page(), content_type="text/html; charset=utf-8")
             return
+        if path == "/api/time":
+            self._send(200, {"t": int(time.time() * 1000)}, seal=False)
+            return
         if path == "/api/seen":
-            if not _local_pc(self.client_address[0]):
+            if not (_local_pc(self.client_address[0]) and self._host_ok()):
                 self._send(404, {"error": "no está"})
                 return
             self._send(200, {"visits": list(VISITS), "paired": PAIRING.phone_online()})
@@ -411,8 +466,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Upgrade", "").lower() != "websocket":
             self._send(426, {"error": "hace falta websocket"})
             return
-        if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+        if not self._authed(ws=True):
+            self._unauth()
             return
         accept = protocol.ws_accept(self.headers.get("Sec-WebSocket-Key", ""))
         self.send_response(101, "Switching Protocols")
@@ -422,9 +477,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         sock = self.connection
         sock.settimeout(None)
-        PAIRING.note_phone()
+        who = self._who(ws=True)
         try:
-            protocol.pointer_loop(sock, PAIRING, control.move_mouse)
+            protocol.pointer_loop(sock, PAIRING, control.move_mouse, who, require_seal=self.remote)
         except control.ControlError:
             pass
         finally:
@@ -456,7 +511,7 @@ class Handler(BaseHTTPRequestHandler):
             self._photo_open()
             return
         if path == "/api/bye":
-            PAIRING.phone_gone()
+            PAIRING.phone_gone(parse_qs(urlsplit(self.path).query).get("i", [self._who()])[0])
             self._send(200, {"ok": True})
             return
         action = path.removeprefix("/api/")
@@ -472,36 +527,28 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, body=path.read_bytes(), content_type=content_type)
 
     def _login(self) -> None:
+        """Emparejar con el PIN cuando no hay cámara. Devuelve la clave sin cifrar:
+        es la parte menos segura, y el QR es el camino recomendado."""
+        self.remote = not self._loopback()
         try:
-            body = self._read_json()
+            body = self._read_json(need_seal=False)
         except control.ControlError as exc:
-            self._send(400, {"error": str(exc)})
+            self._send(400, {"error": str(exc)}, seal=False)
             return
         result = PAIRING.login(str(body.get("pin", "")))
         if result == "espera":
-            self._send(429, {"error": "Demasiados intentos. Espera un momento."})
+            self._send(429, {"error": "Demasiados intentos. Espera un momento."}, seal=False)
             return
         if result == "mal":
-            self._send(401, {"error": "PIN incorrecto"})
+            self._send(401, {"error": "PIN incorrecto"}, seal=False)
             return
-        if self.client_address[0] not in ("127.0.0.1", "::1"):
+        if self.remote:
             maybe_open_mesa()
-        payload = json.dumps({"ok": True, "token": PAIRING.token}).encode()
-        content_type = "application/json"
-        if self.headers.get("X-Seal") == "1":
-            payload = PAIRING.seal(payload)
-            content_type = "application/octet-stream"
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(payload)))
-        self.send_header("Set-Cookie", PAIRING.cookie())
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(payload)
+        self._send(200, {"ok": True, "key": PAIRING.key_text()}, seal=False)
 
     def _guard(self, fn) -> None:
         if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+            self._unauth()
             return
         try:
             if self.command == "POST":
@@ -522,7 +569,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _push_clip(self) -> None:
         if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+            self._unauth()
             return
         try:
             body = self._read_json()
@@ -534,13 +581,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def _upload(self) -> None:
         if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+            self._unauth()
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
         if length <= 0 or length > 80 * 1024 * 1024:
             self._send(400, {"error": "El archivo pasa de 80 MB o está vacío"})
             return
         data = self.rfile.read(length)
+        if self.remote and not data.startswith(protocol.MAGIC):
+            self._send(400, {"error": "hace falta cifrado"})
+            return
         if data.startswith(protocol.MAGIC):
             try:
                 data = PAIRING.open(data)
@@ -555,7 +605,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _photo_check(self) -> None:
         if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+            self._unauth()
             return
         try:
             body = self._read_json()
@@ -565,7 +615,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _photo_open(self) -> None:
         if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+            self._unauth()
             return
         try:
             self._send(200, control.open_photos_folder())
@@ -574,11 +624,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _upload_photo(self) -> None:
         if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+            self._unauth()
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
         name = unquote(self.headers.get("X-Filename", "foto"))
         sealed = self.headers.get("X-Seal") == "1"
+        if self.remote and not sealed:
+            self.close_connection = True
+            self._send(400, {"error": "hace falta cifrado"})
+            return
         plain_size = int(self.headers.get("X-Plain-Size", "0") or 0) if sealed else length
         try:
             started = control.start_photo(name, plain_size)
@@ -612,7 +666,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _download(self, file_id: str) -> None:
         if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+            self._unauth()
             return
         try:
             name, data = control.read_file(file_id)
@@ -622,6 +676,8 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self._send(404, {"error": "ese archivo ya no está"})
             return
+        if self.headers.get("X-Seal") == "1":
+            data = PAIRING.seal(data)
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(data)))
@@ -636,7 +692,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "no está"})
             return
         if not self._authed():
-            self._send(401, {"error": "Entra con el PIN"})
+            self._unauth()
             return
         self._send(200, control.delete_file(path.rsplit("/", 1)[-1]))
 

@@ -9,6 +9,7 @@ import socket
 import struct
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import control
@@ -178,71 +179,73 @@ def test_hook_speed() -> None:
     print(f"hook 1000 movimientos: {elapsed:.2f} ms")
 
 
-def _login(port: int) -> str:
-    req = urllib.request.Request(
-        f"http://127.0.0.1:{port}/api/login",
-        data=json.dumps({"pin": lazo.PAIRING.pin}).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=3) as res:
-        cookie = res.headers.get("Set-Cookie", "")
-    return cookie.split(";", 1)[0]
-
-
-def _ws(port: int, cookie: str, frames: list[tuple[int, int]]) -> float:
+def _ws_open(port: int, extra_head: str = "", query: str = "", host: str | None = None) -> tuple[socket.socket, bytes]:
     sock = socket.create_connection(("127.0.0.1", port), timeout=3)
     key = base64.b64encode(b"lazo-test-key-0001").decode()
     sock.sendall(
         (
-            f"GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n"
+            f"GET /ws{query} HTTP/1.1\r\nHost: {host or f'127.0.0.1:{port}'}\r\nUpgrade: websocket\r\n"
             f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
-            f"Sec-WebSocket-Version: 13\r\nCookie: {cookie}\r\n\r\n"
+            f"Sec-WebSocket-Version: 13\r\n{extra_head}\r\n"
         ).encode()
     )
     head = b""
     while b"\r\n\r\n" not in head:
-        head += sock.recv(256)
+        chunk = sock.recv(256)
+        if not chunk:
+            break
+        head += chunk
+    return sock, head
+
+
+def _ws_send(sock: socket.socket, payload: bytes, opcode: int = 0x2) -> None:
+    mask = b"\x01\x02\x03\x04"
+    masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
+    sock.sendall(bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + masked)
+
+
+def _ws(port: int, frames: list[tuple[int, int]]) -> float:
+    sock, head = _ws_open(port)
     if b"101" not in head.split(b"\r\n", 1)[0]:
         raise SystemExit(head[:180])
-    mask = b"\x01\x02\x03\x04"
     started = time.perf_counter()
     for dx, dy in frames:
-        payload = struct.pack("<ii", dx, dy)
-        masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
-        sock.sendall(bytes([0x82, 0x80 | len(payload)]) + mask + masked)
+        _ws_send(sock, struct.pack("<ii", dx, dy))
     sent_ms = (time.perf_counter() - started) * 1000
     time.sleep(0.05)
     sock.close()
     return sent_ms
 
 
+def _post(port: int, path: str, body: bytes, headers: dict[str, str]) -> tuple[int, bytes]:
+    req = urllib.request.Request(f"http://127.0.0.1:{port}{path}", data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=3) as res:
+            return res.status, res.read()
+    except urllib.error.HTTPError as exc:
+        return exc.code, exc.read()
+
+
 def test_live_channel() -> None:
     seen: list[tuple[int, int]] = []
     control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
-    lazo.PAIRING.pin = "123456"
     server = lazo.ThreadingHTTPServer(("127.0.0.1", 0), lazo.Handler)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        cookie = _login(port)
         frames = [(3, -2), (8, 1), (-4, 6), (1, 1)] * 50
-        elapsed = _ws(port, cookie, frames)
+        elapsed = _ws(port, frames)
         deadline = time.perf_counter() + 1
         while len(seen) < len(frames) and time.perf_counter() < deadline:
             time.sleep(0.01)
         if seen != frames:
             raise SystemExit(f"ws desordenado o incompleto: {len(seen)}/{len(frames)}")
         print(f"websocket {len(frames)} movimientos: {elapsed:.2f} ms")
-        req = urllib.request.Request(
-            f"http://127.0.0.1:{port}/api/move",
-            data=json.dumps({"dx": 5, "dy": -3}).encode(),
-            headers={"Content-Type": "application/json", "Cookie": cookie},
-        )
+        body = json.dumps({"dx": 5, "dy": -3}).encode()
         started = time.perf_counter()
-        with urllib.request.urlopen(req, timeout=3) as res:
-            res.read()
+        status, _ = _post(port, "/api/move", body, {"Content-Type": "application/json", "X-Lazo-Local": "1"})
         http_ms = (time.perf_counter() - started) * 1000
-        if seen[-1] != (5, -3):
+        if status != 200 or seen[-1] != (5, -3):
             raise SystemExit("http no movió")
         print(f"http un movimiento: {http_ms:.2f} ms")
     finally:
@@ -284,64 +287,140 @@ def test_protocol() -> None:
     if (folder / "x").read_bytes() != big:
         raise SystemExit("sello en trozos")
 
-    pairing = protocol.Pairing("4321")
-    if pairing.pin != "4321" or len(protocol.Pairing("12").pin) != 4:
-        raise SystemExit("PIN")
-    for _ in range(protocol.MAX_FAILS - 1):
-        if pairing.login("0000") != "mal":
+    pairing = protocol.Pairing("432101")
+    if pairing.pin != "432101" or len(protocol.Pairing("1234").pin) != 6:
+        raise SystemExit("PIN de 6 dígitos")
+    for _ in range(protocol.MAX_FAILS):
+        if pairing.login("000000") != "mal":
             raise SystemExit("PIN malo aceptado")
-    if pairing.login("0000") != "mal" or pairing.login("4321") != "espera":
-        raise SystemExit("no bloqueó tras ocho fallos")
-    pairing = protocol.Pairing("4321")
-    if pairing.phone_online() or pairing.login("4321") != "ok" or not pairing.phone_online():
-        raise SystemExit("señal de vida")
-    pairing.phone_gone()
+    if pairing.login("432101") != "espera":
+        raise SystemExit("no bloqueó tras los fallos")
+    pairing._locked_until = 0
+    for _ in range(protocol.MAX_FAILS):
+        pairing.login("000000")
+    if pairing._locked_until - time.time() < 2 * protocol.LOCK_SECONDS - 2:
+        raise SystemExit("el segundo bloqueo no dura el doble")
+    pairing = protocol.Pairing("432101")
+    if pairing.login("432101") != "ok":
+        raise SystemExit("PIN bueno rechazado")
+    pairing.note_phone("a")
+    pairing.note_phone("b")
+    pairing.phone_gone("a")
+    if pairing.phone_count() != 1 or not pairing.phone_online():
+        raise SystemExit("presencia por mando")
+    pairing.phone_gone("b")
     if pairing.phone_online():
         raise SystemExit("el móvil no se fue")
-    if not pairing.authed(None, f"a=b; lazo={pairing.token}") or not pairing.authed(pairing.token, None):
-        raise SystemExit("no aceptó el token")
-    if pairing.authed("x" * len(pairing.token), "lazo=") or pairing.authed(None, None):
-        raise SystemExit("aceptó un token falso")
-    if not pairing.phone_url("http", "192.168.1.2", 8787).startswith("http://192.168.1.2:8787/#p=4321&k="):
+    good = pairing.sign("POST", "/api/move", 40)
+    ask = (pairing.verify, "POST", "/api/move", 40, good[protocol.H_T], good[protocol.H_N], good[protocol.H_S])
+    if ask[0](*ask[1:]) != "ok" or ask[0](*ask[1:]) != "repetida":
+        raise SystemExit("la firma debe valer una sola vez")
+    for method, path, length in (("GET", "/api/move", 40), ("POST", "/api/otra", 40), ("POST", "/api/move", 41)):
+        fresh = pairing.sign("POST", "/api/move", 40)
+        if pairing.verify(method, path, length, fresh[protocol.H_T], fresh[protocol.H_N], fresh[protocol.H_S]) != "firma":
+            raise SystemExit(f"aceptó una firma cambiada: {method} {path} {length}")
+    late = pairing.sign("GET", "/api/status", 0, now=time.time() - 300)
+    if pairing.verify("GET", "/api/status", 0, late[protocol.H_T], late[protocol.H_N], late[protocol.H_S]) != "hora":
+        raise SystemExit("aceptó una firma vieja")
+    other = protocol.Pairing("432101").sign("GET", "/api/status", 0)
+    if pairing.verify("GET", "/api/status", 0, other[protocol.H_T], other[protocol.H_N], other[protocol.H_S]) != "firma":
+        raise SystemExit("aceptó la firma de otro anfitrión")
+    url = pairing.phone_url("http", "192.168.1.2", 8787)
+    if not url.startswith("http://192.168.1.2:8787/#k=") or "p=" in url:
         raise SystemExit("dirección del QR")
     if protocol.ws_accept("dGhlIHNhbXBsZSBub25jZQ==") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=":
         raise SystemExit("saludo del websocket")
     print("protocolo: sello LZ2 de la 0.31, PIN, token y websocket")
 
 
-def test_sealed_channel() -> None:
+def test_remote_security() -> None:
+    """El móvil entra firmando; el propio PC pide cabecera y Host; nada de cookies."""
     seen: list[tuple[int, int]] = []
     control.set_move_hook(lambda dx, dy: seen.append((dx, dy)))
-    lazo.PAIRING.pin = "123456"
+    pairing = lazo.PAIRING
     server = lazo.ThreadingHTTPServer(("127.0.0.1", 0), lazo.Handler)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    real_loopback = lazo.Handler._loopback
+    ident = "ab" * 8
     try:
-        cookie = _login(port)
-        sock = socket.create_connection(("127.0.0.1", port), timeout=3)
-        key = base64.b64encode(b"lazo-test-key-0002").decode()
-        sock.sendall(
-            (
-                f"GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n"
-                f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
-                f"Sec-WebSocket-Version: 13\r\nCookie: {cookie}\r\n\r\n"
-            ).encode()
-        )
-        head = b""
-        while b"\r\n\r\n" not in head:
-            head += sock.recv(256)
-        mask = b"\x01\x02\x03\x04"
-        for payload, opcode in ((lazo.PAIRING.seal(struct.pack("<ii", 7, -9)), 0x2), (b"2 3", 0x1)):
-            masked = bytes(byte ^ mask[i % 4] for i, byte in enumerate(payload))
-            sock.sendall(bytes([0x80 | opcode, 0x80 | len(payload)]) + mask + masked)
+        # El propio PC: sin cabecera, con un Host ajeno o con Origin ajeno, no entra.
+        move = json.dumps({"dx": 1, "dy": 1}).encode()
+        if _post(port, "/api/move", move, {"Content-Type": "application/json"})[0] != 401:
+            raise SystemExit("una web ajena pudo mover el ratón")
+        if _post(port, "/api/move", move, {"X-Lazo-Local": "1", "Host": "malo.example"})[0] != 401:
+            raise SystemExit("aceptó un Host ajeno (DNS rebinding)")
+        _sock, head = _ws_open(port, extra_head="Origin: http://malo.example\r\n")
+        if b"401" not in head.split(b"\r\n", 1)[0]:
+            raise SystemExit("aceptó un websocket de otra web")
+        if seen:
+            raise SystemExit("se movió el ratón sin permiso")
+
+        # Un mando remoto.
+        lazo.Handler._loopback = lambda self: False
+        sealed = pairing.seal(move)
+        path = "/api/move"
+
+        def signed(length: int = len(sealed), nonce_from=None) -> dict[str, str]:
+            return {"Content-Type": "application/octet-stream", protocol.H_ID: ident, **pairing.sign("POST", path, length)}
+
+        headers = signed()
+        status, _ = _post(port, path, sealed, headers)
+        if status != 200 or seen != [(1, 1)]:
+            raise SystemExit(f"el mando firmado no entró: {status}")
+        if not pairing.phone_online():
+            raise SystemExit("no anotó el mando")
+        if _post(port, path, sealed, headers)[0] != 401:
+            raise SystemExit("aceptó repetir una petición capturada")
+        if _post(port, path, move, signed(len(move)))[0] != 400:
+            raise SystemExit("aceptó un cuerpo sin sellar")
+        if _post(port, path, sealed, {**signed(), "Cookie": "lazo=x"})[0] != 200:
+            raise SystemExit("la cookie estorba")
+        broken = signed()
+        broken[protocol.H_S] = "0" * 64
+        if _post(port, path, sealed, broken)[0] != 401:
+            raise SystemExit("aceptó una firma falsa")
+        if _post(port, path, sealed, {"Content-Type": "application/octet-stream"})[0] != 401:
+            raise SystemExit("aceptó una petición sin firma")
+        late = {**signed(), **pairing.sign("POST", path, len(sealed), now=time.time() - 300)}
+        status, body = _post(port, path, sealed, late)
+        if status != 401 or b"reloj" not in body:
+            raise SystemExit("no avisó del reloj")
+
+        # Websocket del mando: firmado por la consulta y con tramas selladas.
+        sig = pairing.sign("GET", "/ws", 0)
+        query = f"?i={ident}&t={sig[protocol.H_T]}&n={sig[protocol.H_N]}&s={sig[protocol.H_S]}"
+        sock, head = _ws_open(port, query=query)
+        if b"101" not in head.split(b"\r\n", 1)[0]:
+            raise SystemExit(f"websocket firmado rechazado: {head[:80]}")
+        _ws_send(sock, pairing.seal(struct.pack("<ii", 7, -9)))
+        _ws_send(sock, struct.pack("<ii", 100, 100))  # sin sellar: corta
+        _ws_send(sock, pairing.seal(struct.pack("<ii", 5, 5)))
         deadline = time.perf_counter() + 1
-        while len(seen) < 2 and time.perf_counter() < deadline:
+        while (7, -9) not in seen and time.perf_counter() < deadline:
             time.sleep(0.01)
+        time.sleep(0.1)
         sock.close()
-        if seen != [(7, -9), (2, 3)]:
+        if (7, -9) not in seen or (100, 100) in seen or (5, 5) in seen:
             raise SystemExit(f"websocket sellado: {seen}")
-        print("websocket sellado y de texto")
+        _sock, head = _ws_open(port, query=query)
+        if b"401" not in head.split(b"\r\n", 1)[0]:
+            raise SystemExit("aceptó repetir el saludo del websocket")
+        _sock, head = _ws_open(port)
+        if b"401" not in head.split(b"\r\n", 1)[0]:
+            raise SystemExit("aceptó un websocket sin firma")
+
+        # PIN: da la clave una vez bien puesto, sin cookie.
+        plain = {"Content-Type": "application/json"}
+        status, _ = _post(port, "/api/login", json.dumps({"pin": "000000"}).encode(), plain)
+        if status != 401:
+            raise SystemExit("PIN malo")
+        status, body = _post(port, "/api/login", json.dumps({"pin": pairing.pin}).encode(), plain)
+        if status != 200 or json.loads(body)["key"] != pairing.key_text():
+            raise SystemExit("el PIN no entregó la clave")
+        print("remoto: firma única, sin cookie, sellado obligatorio, PC protegido de webs ajenas")
     finally:
+        lazo.Handler._loopback = real_loopback
         server.shutdown()
         control.set_move_hook(None)
 
@@ -360,5 +439,5 @@ if __name__ == "__main__":
     test_hook_speed()
     test_live_channel()
     test_protocol()
-    test_sealed_channel()
+    test_remote_security()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")

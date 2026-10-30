@@ -167,3 +167,17 @@ function sealText(text, key) {
 function openText(blob, key) {
   return new TextDecoder().decode(openSeal(blob, key));
 }
+
+/* Claves y firma de peticiones. Mismo formato que protocol.py. */
+function deriveKey(master, label) {
+  return hmacSha256(master, new TextEncoder().encode(label));
+}
+
+function toHex(bytes) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function signRequest(authKey, method, path, stamp, nonce, length) {
+  const text = `${method}\n${path}\n${stamp}\n${nonce}\n${length}`;
+  return toHex(hmacSha256(authKey, new TextEncoder().encode(text)));
+}

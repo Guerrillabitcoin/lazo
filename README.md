@@ -1,4 +1,4 @@
-# LaZoo 0.32 beta 1
+# LaZoo 0.32 beta 2
 
 Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -55,7 +55,7 @@ YouTube se controla con los atajos del reproductor (`k`, `j`, `l`, flechas). Laz
 
 ## Seguridad
 
-El PIN y la cookie viven solo en tu red local. No lo uses en una Wi-Fi pública. Quien tenga el PIN y esté en tu red puede mover el ratón, escribir y cerrar ventanas mientras Lazo está encendido.
+La clave viaja solo en el QR (o, si escribes el PIN de 6 dígitos, se entrega una vez al móvil). Cada petición va firmada y no vale dos veces; no hay cookie. El PIN es el camino menos seguro: si puedes, escanea el QR. Cada vez que reinicias el PC hay que volver a escanear el QR. No lo uses en una Wi-Fi pública. Quien tenga el PIN y esté en tu red puede mover el ratón, escribir y cerrar ventanas mientras Lazo está encendido.
 
 Para pararlo: `Ctrl+C` en la terminal.
 
