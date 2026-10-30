@@ -373,7 +373,7 @@ def parse_info(data: dict) -> dict[str, Any]:
             "formats": [],
         }
     formats = [f for f in (data.get("formats") or []) if isinstance(f, dict) and f.get("format_id")]
-    heights = sorted({int(f.get("height") or 0) for f in formats if (f.get("vcodec") or "none") != "none" and f.get("height")})
+    heights = sorted({int(f.get("height") or 0) for f in formats if f.get("vcodec") != "none" and f.get("height")})
     top = heights[-1] if heights else 0
     has_audio = any((f.get("acodec") or "none") != "none" for f in formats) or not formats
     choices = [{"id": "best", "label": "Mejor calidad (vídeo+audio)", "detail": f"{top}p" if top else ""}]
@@ -385,8 +385,8 @@ def parse_info(data: dict) -> dict[str, Any]:
         choices.append({"id": "audio", "label": "Solo audio original (m4a/opus)", "detail": ""})
     advanced = []
     for f in formats:
-        vcodec = f.get("vcodec") or "none"
-        acodec = f.get("acodec") or "none"
+        vcodec = f.get("vcodec") or ("?" if f.get("height") else "none")
+        acodec = f.get("acodec") or ("?" if f.get("height") else "none")
         if vcodec == "none" and acodec == "none" and f.get("ext") in ("mhtml",):
             continue
         kind = "vídeo+audio" if vcodec != "none" and acodec != "none" else "solo vídeo" if vcodec != "none" else "solo audio" if acodec != "none" else "?"
