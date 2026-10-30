@@ -67,7 +67,7 @@ const views = {
   spotify: document.querySelector("#view-spotify"),
   bridge: document.querySelector("#view-bridge"),
   notes: document.querySelector("#view-notes"),
-  volume: document.querySelector("#view-volume"),
+  system: document.querySelector("#view-system"),
   lab: document.querySelector("#view-lab"),
 };
 
@@ -78,7 +78,7 @@ const TOOLS = [
   { id: "youtube", name: "YouTube" },
   { id: "spotify", name: "Spotify" },
   { id: "notes", name: "Notas" },
-  { id: "volume", name: "Volumen" },
+  { id: "system", name: "Sistema" },
   { id: "lab", name: "Pruebas" },
 ];
 const PINNED = ["mouse"];
@@ -167,6 +167,7 @@ function openCube(id) {
     button.classList.toggle("on", button.dataset.cube === id);
   });
   if (id === "windows") loadWindows();
+  if (id === "system") loadSystem();
   if (id === "spotify") refreshStatus();
   if (id === "notes" || id === "bridge") syncClipboard();
 }
@@ -528,6 +529,16 @@ function loadOrder() {
     saved = [];
   }
   const known = TOOLS.map((tool) => tool.id);
+  const RENAMED = { volume: "system" };
+  if (!Array.isArray(saved)) saved = [];
+  if (saved.some((id) => RENAMED[id])) {
+    saved = saved.map((id) => RENAMED[id] || id).filter((id, i, all) => all.indexOf(id) === i);
+    try {
+      localStorage.setItem("lazo-order", JSON.stringify(saved));
+    } catch (_err) {
+      /* sin almacenamiento: vale el orden de esta visita */
+    }
+  }
   const rest = saved.filter((id) => known.includes(id) && !PINNED.includes(id));
   known.forEach((id) => {
     if (!PINNED.includes(id) && !rest.includes(id)) rest.push(id);
@@ -988,7 +999,7 @@ nativeType.addEventListener("input", () => {
 document.querySelector("#vol-down").addEventListener("click", async () => {
   try {
     await api("/api/volume", { delta: -1 });
-    say("Volumen de Windows bajado");
+    say("Volumen bajado");
   } catch (err) {
     say(err.message);
   }
@@ -996,7 +1007,7 @@ document.querySelector("#vol-down").addEventListener("click", async () => {
 document.querySelector("#vol-up").addEventListener("click", async () => {
   try {
     await api("/api/volume", { delta: 1 });
-    say("Volumen de Windows subido");
+    say("Volumen subido");
   } catch (err) {
     say(err.message);
   }
@@ -1004,7 +1015,7 @@ document.querySelector("#vol-up").addEventListener("click", async () => {
 document.querySelector("#vol-mute").addEventListener("click", async () => {
   try {
     await api("/api/volume", { delta: 0 });
-    say("Volumen de Windows muteado");
+    say("Volumen muteado");
   } catch (err) {
     say(err.message);
   }
@@ -1090,25 +1101,64 @@ document.querySelector("#phrase") && document.querySelector("#phrase").addEventL
     .catch((err) => say(err.message));
 });
 
+let screensInfo = null;
+
+async function loadScreens() {
+  const count = document.querySelector("#screen-count");
+  try {
+    screensInfo = await api("/api/screens", null, "GET");
+  } catch (_err) {
+    screensInfo = { count: 0, screens: [], can_move: false };
+  }
+  const n = screensInfo.count || 0;
+  count.textContent = n ? `Pantallas: ${n}` : "Pantallas: ?";
+  const box = document.querySelector("#screen-buttons");
+  const note = document.querySelector("#screen-note");
+  box.replaceChildren();
+  if (screensInfo.can_move) {
+    note.textContent = "Elige la pantalla de destino";
+    screensInfo.screens.forEach((scr) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `Pantalla ${scr.n}${scr.primary ? " (principal)" : ""}`;
+      button.addEventListener("click", () => {
+        if (!winId) {
+          say("Primero toca una ventana de la lista");
+          return;
+        }
+        api("/api/screen", { id: winId, screen: scr.n }).then((data) => say(data.detail || `A la pantalla ${scr.n}`)).catch((err) => say(err.message));
+      });
+      box.append(button);
+    });
+  } else {
+    note.textContent = n === 1 ? "Solo hay una pantalla conectada" : "Mover entre pantallas: no disponible en este sistema";
+  }
+  return screensInfo;
+}
+
 async function loadWindows() {
   const list = document.querySelector("#windows");
-  const actions = document.querySelector("#win-actions");
+  loadScreens();
   try {
     const data = await api("/api/windows", null, "GET");
     list.replaceChildren();
     winId = "";
-    actions.hidden = true;
     data.windows.forEach((win) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
+      button.className = "win-row";
       button.textContent = win.title;
+      button.title = win.title;
+      if (win.active) {
+        button.classList.add("active");
+        winId = win.id;
+        button.classList.add("picked");
+      }
       button.addEventListener("click", () => {
         winId = win.id;
         list.querySelectorAll("button").forEach((el) => el.classList.remove("picked"));
         button.classList.add("picked");
-        actions.hidden = false;
-        api("/api/window", { id: win.id, action: "focus" }).catch((err) => say(err.message));
       });
       item.append(button);
       list.append(item);
@@ -1121,6 +1171,11 @@ async function loadWindows() {
 
 document.querySelector("#win-refresh").addEventListener("click", loadWindows);
 
+document.querySelector("#win-move-open").addEventListener("click", () => {
+  const panel = document.querySelector("#win-move");
+  panel.hidden = !panel.hidden;
+});
+
 document.querySelectorAll("[data-win]").forEach((button) => {
   button.addEventListener("click", () => {
     if (!winId) {
@@ -1130,13 +1185,45 @@ document.querySelectorAll("[data-win]").forEach((button) => {
     const action = button.dataset.win;
     const names = {
       focus: "Ventana al frente",
-      minimize: "Ventana minimizada",
-      maximize: "Ventana maximizada",
+      toggle_max: "Maximizar / restaurar",
       snap_left: "Ventana a la izquierda",
       snap_right: "Ventana a la derecha",
       close: "Ventana cerrada",
     };
-    api("/api/window", { id: winId, action }).then(() => say(names[action] || "Ventana")).catch((err) => say(err.message));
+    api("/api/window", { id: winId, action })
+      .then((data) => {
+        say((data && data.detail) || names[action] || "Ventana");
+        if (action === "close") window.setTimeout(loadWindows, 600);
+      })
+      .catch((err) => say(err.message));
+  });
+});
+
+async function loadSystem() {
+  let caps = screensInfo;
+  try {
+    caps = await api("/api/screens", null, "GET");
+  } catch (_err) {
+    return;
+  }
+  const bright = !!caps.brightness;
+  document.querySelector("#bright-row").hidden = !bright;
+  document.querySelector("#bright-na").hidden = bright;
+  document.querySelector("#sys-project").hidden = !caps.project;
+  document.querySelector("#sys-lock").hidden = !caps.lock;
+  const na = document.querySelector("#sys-na");
+  const missing = [];
+  if (!caps.project) missing.push("Cambiar pantalla");
+  if (!caps.lock) missing.push("Bloquear");
+  na.hidden = !missing.length;
+  na.textContent = `${missing.join(" y ")}: no disponible en este sistema`;
+}
+
+document.querySelectorAll("[data-sys]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const action = button.dataset.sys;
+    if (action === "lock" && !window.confirm("¿Bloquear el PC?")) return;
+    api("/api/system", { action }).then((data) => say(data.detail || "Hecho")).catch((err) => say(err.message));
   });
 });
 

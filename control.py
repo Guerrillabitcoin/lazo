@@ -595,7 +595,7 @@ def list_windows() -> list[dict[str, str]]:
 
 
 def window_action(window_id: str, action: str) -> str:
-    allowed = {"focus", "minimize", "maximize", "close", "snap_left", "snap_right"}
+    allowed = {"focus", "minimize", "maximize", "toggle_max", "close", "snap_left", "snap_right"}
     if action not in allowed:
         raise ControlError("acción de ventana no válida")
     if not window_id:
@@ -604,7 +604,7 @@ def window_action(window_id: str, action: str) -> str:
         if SYSTEM == "Windows":
             return _windows_action(int(window_id), action)
         if SYSTEM == "Darwin":
-            return _mac_window_action(window_id, action)
+            return _mac_window_action(window_id, "maximize" if action == "toggle_max" else action)
         return _linux_window_action(window_id, action)
 
 
@@ -640,6 +640,10 @@ def _windows_list() -> list[dict[str, str]]:
         return True
 
     user32.EnumWindows(callback, 0)
+    user32.GetForegroundWindow.restype = ctypes.c_void_p
+    front = str(int(user32.GetForegroundWindow() or 0))
+    for row in rows:
+        row["active"] = row["id"] == front
     return rows[:40]
 
 
@@ -807,6 +811,15 @@ def _windows_action(hwnd: int, action: str) -> str:
     if action == "maximize":
         user32.ShowWindow(handle, 3)
         return "Maximizada"
+    if action == "toggle_max":
+        user32.IsZoomed.argtypes = [ctypes.c_void_p]
+        user32.IsZoomed.restype = ctypes.c_bool
+        if user32.IsZoomed(handle) or user32.IsIconic(handle):
+            user32.ShowWindow(handle, 9)
+            _force_foreground(hwnd)
+            return "Restaurada"
+        user32.ShowWindow(handle, 3)
+        return "Maximizada"
     if action == "close":
         user32.SendMessageTimeoutW.argtypes = [
             ctypes.c_void_p,
@@ -865,6 +878,9 @@ def _linux_window_action(window_id: str, action: str) -> str:
     elif action == "maximize":
         cmd = ["wmctrl", "-i", "-r", window_id, "-b", "add,maximized_vert,maximized_horz"]
         label = "Maximizada"
+    elif action == "toggle_max":
+        cmd = ["wmctrl", "-i", "-r", window_id, "-b", "toggle,maximized_vert,maximized_horz"]
+        label = "Maximizar / restaurar"
     elif action == "close":
         cmd = ["wmctrl", "-i", "-c", window_id]
         label = "Cerrar enviado"
@@ -2106,3 +2122,225 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
 
 
 
+
+
+# --- Pantallas y pastilla Sistema (0.33) ---
+
+MAX_SCREENS = 3
+_screens_hook = None  # pruebas: función que devuelve la lista de pantallas
+
+
+def set_screens_hook(fn) -> None:
+    global _screens_hook
+    _screens_hook = fn
+
+
+def parse_xrandr_monitors(text: str) -> list[dict[str, Any]]:
+    """Lee `xrandr --listmonitors`: ' 0: +*HDMI-1 1920/530x1080/300+0+0  HDMI-1'."""
+    rows: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 3 or not parts[0].rstrip(":").isdigit():
+            continue
+        geo = parts[2]
+        try:
+            size, x, y = geo.split("+")[:3]
+            w = int(size.split("x")[0].split("/")[0])
+            h = int(size.split("x")[1].split("/")[0])
+            rows.append({"x": int(x), "y": int(y), "w": w, "h": h, "primary": "*" in parts[1]})
+        except (ValueError, IndexError):
+            continue
+    return rows
+
+
+def _number_screens(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """La principal es la 1; el resto de izquierda a derecha. Máximo 3."""
+    rows = sorted(rows, key=lambda r: (not r.get("primary"), r["x"], r["y"]))[:MAX_SCREENS]
+    for i, row in enumerate(rows, 1):
+        row["n"] = i
+    return rows
+
+
+def list_screens() -> list[dict[str, Any]]:
+    if _screens_hook is not None:
+        return _number_screens([dict(r) for r in _screens_hook()])
+    if SYSTEM == "Windows":
+        return _number_screens(_windows_screens())
+    if SYSTEM == "Linux" and _which("xrandr") and _display_ok():
+        result = _run(["xrandr", "--listmonitors"])
+        if result.returncode == 0:
+            return _number_screens(parse_xrandr_monitors(result.stdout))
+    return []
+
+
+def screens_info() -> dict[str, Any]:
+    try:
+        rows = list_screens()
+    except Exception:
+        rows = []
+    can_move = len(rows) > 1 and (SYSTEM == "Windows" or (SYSTEM == "Linux" and _which("wmctrl")) or _screens_hook is not None)
+    return {"screens": rows, "count": len(rows), "can_move": can_move}
+
+
+def _windows_screens() -> list[dict[str, Any]]:
+    from ctypes import wintypes
+
+    class MONITORINFO(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+    user32 = ctypes.windll.user32
+    user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    rows: list[dict[str, Any]] = []
+    proto = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ssize_t)
+
+    def callback(hmon, _hdc, _rect, _data):
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(MONITORINFO)
+        if user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+            w = info.rcWork
+            m = info.rcMonitor
+            rows.append({
+                "x": m.left, "y": m.top, "w": m.right - m.left, "h": m.bottom - m.top,
+                "wx": w.left, "wy": w.top, "ww": w.right - w.left, "wh": w.bottom - w.top,
+                "primary": bool(info.dwFlags & 1),
+            })
+        return True
+
+    cb = proto(callback)
+    user32.EnumDisplayMonitors.argtypes = [ctypes.c_void_p, ctypes.c_void_p, proto, ctypes.c_ssize_t]
+    user32.EnumDisplayMonitors(None, None, cb, 0)
+    return rows
+
+
+def place_on_screen(win: tuple[int, int, int, int], screens: list[dict[str, Any]], target: int) -> tuple[int, int, int, int]:
+    """Nuevo (x, y, ancho, alto) para llevar la ventana a la pantalla `target`,
+    con el mismo hueco relativo y sin salirse del área útil."""
+    x, y, w, h = win
+    dst = next((s for s in screens if s["n"] == target), None)
+    if dst is None:
+        raise ControlError("Esa pantalla no existe")
+    cx, cy = x + w // 2, y + h // 2
+    src = next((s for s in screens if s["x"] <= cx < s["x"] + s["w"] and s["y"] <= cy < s["y"] + s["h"]), screens[0])
+    ax, ay = dst.get("wx", dst["x"]), dst.get("wy", dst["y"])
+    aw, ah = dst.get("ww", dst["w"]), dst.get("wh", dst["h"])
+    w, h = min(w, aw), min(h, ah)
+    nx = ax + (x - src.get("wx", src["x"]))
+    ny = ay + (y - src.get("wy", src["y"]))
+    nx = max(ax, min(nx, ax + aw - w))
+    ny = max(ay, min(ny, ay + ah - h))
+    return nx, ny, w, h
+
+
+def window_to_screen(window_id: str, target: int) -> str:
+    try:
+        target = int(target)
+    except (TypeError, ValueError):
+        raise ControlError("pantalla no válida") from None
+    if not 1 <= target <= MAX_SCREENS:
+        raise ControlError("pantalla no válida")
+    if not window_id:
+        raise ControlError("falta la ventana")
+    screens = list_screens()
+    if len(screens) < 2:
+        raise ControlError("Solo veo una pantalla")
+    with _lock:
+        if SYSTEM == "Windows":
+            return _windows_to_screen(int(window_id), screens, target)
+        if SYSTEM == "Linux":
+            return _linux_to_screen(window_id, screens, target)
+    raise ControlError("No disponible en este sistema")
+
+
+def _windows_to_screen(hwnd: int, screens: list[dict[str, Any]], target: int) -> str:
+    from ctypes import wintypes
+
+    user32 = _user32()
+    handle = _hwnd(hwnd)
+    if not user32.IsWindow(handle):
+        raise ControlError("Esa ventana ya se cerró. Pulsa Actualizar.")
+    user32.IsZoomed.argtypes = [ctypes.c_void_p]
+    user32.IsZoomed.restype = ctypes.c_bool
+    user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    user32.MoveWindow.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_bool]
+    zoomed = bool(user32.IsZoomed(handle))
+    if zoomed or user32.IsIconic(handle):
+        user32.ShowWindow(handle, 9)
+    rect = wintypes.RECT()
+    user32.GetWindowRect(handle, ctypes.byref(rect))
+    x, y, w, h = place_on_screen((rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top), screens, target)
+    user32.MoveWindow(handle, x, y, w, h, True)
+    if zoomed:
+        user32.ShowWindow(handle, 3)
+    _force_foreground(hwnd)
+    return f"A la pantalla {target}"
+
+
+def _linux_to_screen(window_id: str, screens: list[dict[str, Any]], target: int) -> str:
+    if not window_id.startswith("0x") or not _which("wmctrl"):
+        raise ControlError("No disponible en este sistema")
+    dst = next((s for s in screens if s["n"] == target), None)
+    if dst is None:
+        raise ControlError("Esa pantalla no existe")
+    _run(["wmctrl", "-i", "-r", window_id, "-b", "remove,maximized_vert,maximized_horz"])
+    result = _run(["wmctrl", "-i", "-r", window_id, "-e", f"0,{dst['x'] + 40},{dst['y'] + 40},-1,-1"])
+    if result.returncode != 0:
+        raise ControlError("No pude mover esa ventana")
+    _run(["wmctrl", "-i", "-a", window_id])
+    return f"A la pantalla {target}"
+
+
+SYSTEM_ACTIONS = {"vol_up", "vol_down", "vol_mute", "bright_up", "bright_down", "project", "lock"}
+
+
+def system_action(action: str) -> dict[str, Any]:
+    if action not in SYSTEM_ACTIONS:
+        raise ControlError("acción de sistema no válida")
+    if action.startswith("vol_"):
+        delta = {"vol_up": 1, "vol_down": -1, "vol_mute": 0}[action]
+        return {"detail": system_volume(delta)}
+    if action.startswith("bright_"):
+        return {"detail": _brightness(10 if action == "bright_up" else -10)}
+    if action == "project":
+        if SYSTEM != "Windows":
+            raise ControlError("No disponible en este sistema")
+        _win_hotkey(0x5B, 0x50)
+        return {"detail": "Menú de pantallas abierto en el PC"}
+    return {"detail": _lock_screen()}
+
+
+def _brightness(delta: int) -> str:
+    if SYSTEM == "Windows":
+        try:
+            return _windows_brightness(delta)
+        except ControlError:
+            raise ControlError("Brillo no disponible en este PC (solo portátiles o pantallas compatibles)") from None
+    if SYSTEM == "Linux" and _which("brightnessctl"):
+        result = _run(["brightnessctl", "set", "10%+" if delta > 0 else "10%-"])
+        if result.returncode == 0:
+            return "Brillo cambiado"
+    raise ControlError("Brillo no disponible en este sistema")
+
+
+def _lock_screen() -> str:
+    if SYSTEM == "Windows":
+        ctypes.windll.user32.LockWorkStation()
+        return "PC bloqueado"
+    if SYSTEM == "Linux":
+        for cmd in (["loginctl", "lock-session"], ["xdg-screensaver", "lock"]):
+            if _which(cmd[0]) and _run(cmd).returncode == 0:
+                return "PC bloqueado"
+    if SYSTEM == "Darwin":
+        result = _run(["pmset", "displaysleepnow"])
+        if result.returncode == 0:
+            return "Pantalla del Mac apagada"
+    raise ControlError("Bloquear no disponible en este sistema")
+
+
+def system_caps() -> dict[str, Any]:
+    """Qué botones de Sistema se pueden mostrar en este PC."""
+    return {
+        "system": SYSTEM,
+        "brightness": SYSTEM == "Windows" or (SYSTEM == "Linux" and _which("brightnessctl")),
+        "project": SYSTEM == "Windows",
+        "lock": SYSTEM in {"Windows", "Darwin"} or (SYSTEM == "Linux" and (_which("loginctl") or _which("xdg-screensaver"))),
+    }

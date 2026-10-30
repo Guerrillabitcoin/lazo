@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.32 beta 3</title>
+    <title>LaZoo 0.33 beta 1</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.32 beta 3</p>
+          <p class="ver">0.33 beta 1</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -46,18 +46,25 @@
         </div>
 
         <div id="view-windows" class="view" hidden>
-          <article class="deck">
-            <div class="row-actions">
+          <article class="deck win-deck">
+            <div class="row-actions win-head">
+              <span id="screen-count" class="screen-count">Pantallas: …</span>
               <button id="win-refresh" type="button">Actualizar</button>
             </div>
-            <ul id="windows" class="list"></ul>
-            <div id="win-actions" class="win-actions" hidden>
-              <button type="button" data-win="focus">Al frente</button>
-              <button type="button" data-win="minimize">Minimizar</button>
-              <button type="button" data-win="maximize">Maximizar</button>
-              <button type="button" data-win="snap_left">Izquierda</button>
-              <button type="button" data-win="snap_right">Derecha</button>
+            <ul id="windows" class="list win-list"></ul>
+            <div id="win-move" class="win-move" hidden>
+              <p id="screen-note" class="screen-note"></p>
+              <div id="screen-buttons" class="screen-buttons"></div>
+              <div class="split">
+                <button type="button" data-win="snap_left">Mitad izquierda</button>
+                <button type="button" data-win="snap_right">Mitad derecha</button>
+              </div>
+            </div>
+            <div id="win-actions" class="win-grid">
+              <button type="button" data-win="focus">Traer al frente</button>
+              <button type="button" data-win="toggle_max">Maximizar / Minimizar</button>
               <button type="button" data-win="close" class="danger">Cerrar</button>
+              <button type="button" id="win-move-open">Mover a pantalla…</button>
             </div>
           </article>
         </div>
@@ -147,13 +154,26 @@
           </article>
         </div>
 
-        <div id="view-volume" class="view" hidden>
-          <article class="deck">
+        <div id="view-system" class="view" hidden>
+          <article class="deck sys-deck">
+            <p class="sys-title">Volumen</p>
             <div class="vol" aria-label="Volumen del sistema">
               <button id="vol-down" type="button">Bajar</button>
-              <button id="vol-mute" type="button">Mute</button>
+              <button id="vol-mute" type="button">Silencio</button>
               <button id="vol-up" type="button">Subir</button>
             </div>
+            <p class="sys-title">Brillo</p>
+            <div id="bright-row" class="split">
+              <button type="button" data-sys="bright_down">Bajar brillo</button>
+              <button type="button" data-sys="bright_up">Subir brillo</button>
+            </div>
+            <p id="bright-na" class="screen-note" hidden>Brillo: no disponible en este sistema</p>
+            <p class="sys-title">Pantalla</p>
+            <div class="split">
+              <button id="sys-project" type="button" data-sys="project">Cambiar pantalla</button>
+              <button id="sys-lock" type="button" data-sys="lock">Bloquear PC</button>
+            </div>
+            <p id="sys-na" class="screen-note" hidden></p>
           </article>
         </div>
 

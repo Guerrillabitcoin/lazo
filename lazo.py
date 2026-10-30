@@ -22,7 +22,7 @@ import protocol
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.32-beta3"
+VERSION = "0.33-beta1"
 PAIRING = protocol.Pairing()
 PORT = 8787
 VISITS: list[str] = []
@@ -46,6 +46,8 @@ ACTIONS = {
     "youtube": lambda body: control.youtube(str(body.get("action", "")), body),
     "spotify": lambda body: control.spotify(str(body.get("action", "")), body),
     "lab": lambda body: control.lab(str(body.get("action", "")), body),
+    "system": lambda body: control.system_action(str(body.get("action", ""))),
+    "screen": lambda body: control.window_to_screen(str(body.get("id", "")), body.get("screen", 0)),
 }
 
 
@@ -281,7 +283,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.32 beta 3</p>
+      <p class="ver">0.33 beta 1</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -457,6 +459,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/windows":
             self._guard(lambda _body: {"windows": control.list_windows()})
+            return
+        if path == "/api/screens":
+            self._guard(lambda _body: {**control.screens_info(), **control.system_caps()})
             return
         if path == "/api/clipboard":
             self._guard(lambda _body: control.clipboard_history())

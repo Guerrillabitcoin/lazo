@@ -1,4 +1,4 @@
-# LaZoo 0.32 beta 3
+# LaZoo 0.33 beta 1
 
 Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -6,11 +6,11 @@ Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada 
 
 - Ratón: trackpad, clic, clic derecho, arrastre y scroll
 - Teclado, incluida la ñ, y una frase entera
-- Ventanas: lista, traer al frente, minimizar, maximizar, izquierda, derecha, cerrar
+- Ventanas: lista vertical con la activa resaltada; traer al frente, maximizar / restaurar, cerrar, mitad izquierda o derecha y mover a otra pantalla (hasta 3; Windows y Linux X11 con wmctrl)
 - YouTube: play, salto de 10 s, volumen del vídeo, pantalla completa, siguiente
 - Spotify: play, anterior, siguiente y volumen de la app
 - Cursor del sistema: normal, grande o enorme
-- Volumen del sistema
+- Sistema: volumen (subir, bajar, silencio), brillo (Windows; Linux con brightnessctl), cambiar pantalla (Win+P) y bloquear el PC
 
 No es una web suelta. El navegador del móvil no puede mover el ratón del ordenador. Lazo es un programa pequeño que arrancas **en el PC** y el móvil entra por la Wi-Fi.
 

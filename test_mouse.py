@@ -425,6 +425,155 @@ def test_remote_security() -> None:
         control.set_move_hook(None)
 
 
+class _Patch:
+    """Cambia atributos de control solo durante la prueba (nada toca el PC real)."""
+
+    def __init__(self, **values):
+        self.values = values
+        self.old = {}
+
+    def __enter__(self):
+        for name, value in self.values.items():
+            self.old[name] = getattr(control, name)
+            setattr(control, name, value)
+        return self
+
+    def __exit__(self, *_exc):
+        for name, value in self.old.items():
+            setattr(control, name, value)
+
+
+class _Done:
+    def __init__(self, code: int = 0, out: str = ""):
+        self.returncode = code
+        self.stdout = out
+
+
+def test_screens() -> None:
+    text = (
+        "Monitors: 3\n"
+        " 0: +*HDMI-1 1920/530x1080/300+0+0  HDMI-1\n"
+        " 1: +DP-1 2560/600x1440/340+1920+0  DP-1\n"
+        " 2: +DP-2 1280/300x1024/250+4480+0  DP-2\n"
+    )
+    rows = control.parse_xrandr_monitors(text)
+    assert [r["w"] for r in rows] == [1920, 2560, 1280]
+    assert rows[0]["primary"] and not rows[1]["primary"]
+    four = rows + [{"x": 9000, "y": 0, "w": 800, "h": 600, "primary": False}]
+    control.set_screens_hook(lambda: [four[2], four[3], four[1], four[0]])
+    try:
+        screens = control.list_screens()
+        assert len(screens) == 3, screens
+        assert screens[0]["primary"] and screens[0]["n"] == 1
+        assert [s["x"] for s in screens] == [0, 1920, 4480]
+        info = control.screens_info()
+        assert info["count"] == 3 and info["can_move"]
+    finally:
+        control.set_screens_hook(None)
+    control.set_screens_hook(lambda: [rows[0]])
+    try:
+        assert control.screens_info()["can_move"] is False
+        try:
+            control.window_to_screen("0x1", 2)
+            raise AssertionError("una sola pantalla no debe mover")
+        except control.ControlError:
+            pass
+    finally:
+        control.set_screens_hook(None)
+
+
+def test_place_on_screen() -> None:
+    screens = control._number_screens([
+        {"x": 0, "y": 0, "w": 1920, "h": 1080, "wx": 0, "wy": 0, "ww": 1920, "wh": 1040, "primary": True},
+        {"x": 1920, "y": 0, "w": 1280, "h": 720, "primary": False},
+    ])
+    assert control.place_on_screen((100, 50, 800, 600), screens, 2) == (2020, 50, 800, 600)
+    # una ventana grande se ajusta a la pantalla pequeña
+    assert control.place_on_screen((0, 0, 1900, 1000), screens, 2) == (1920, 0, 1280, 720)
+    # y vuelve a la principal sin salirse del área útil
+    assert control.place_on_screen((2500, 300, 400, 300), screens, 1) == (580, 300, 400, 300)
+    try:
+        control.place_on_screen((0, 0, 10, 10), screens, 3)
+        raise AssertionError("pantalla 3 no existe")
+    except control.ControlError:
+        pass
+
+
+def test_move_window_linux() -> None:
+    calls = []
+
+    def fake_run(cmd, timeout=4):
+        calls.append(cmd)
+        return _Done()
+
+    two = [{"x": 0, "y": 0, "w": 1920, "h": 1080, "primary": True}, {"x": 1920, "y": 0, "w": 1920, "h": 1080, "primary": False}]
+    control.set_screens_hook(lambda: two)
+    try:
+        with _Patch(SYSTEM="Linux", _run=fake_run, _which=lambda name: True):
+            assert control.window_to_screen("0x04000007", 2) == "A la pantalla 2"
+            assert ["wmctrl", "-i", "-r", "0x04000007", "-e", "0,1960,40,-1,-1"] in calls
+            for bad in ("0", "4", "x"):
+                try:
+                    control.window_to_screen("0x04000007", bad)
+                    raise AssertionError(bad)
+                except control.ControlError:
+                    pass
+            calls.clear()
+            control.window_action("0x04000007", "toggle_max")
+            assert calls[-1][-1] == "toggle,maximized_vert,maximized_horz"
+        with _Patch(SYSTEM="Darwin"):
+            try:
+                control.window_to_screen("App\t1", 2)
+                raise AssertionError("mac no mueve")
+            except control.ControlError as exc:
+                assert "No disponible" in str(exc)
+    finally:
+        control.set_screens_hook(None)
+
+
+def test_system_pill() -> None:
+    seen = []
+    with _Patch(SYSTEM="Windows", system_volume=lambda d: seen.append(("vol", d)) or "Volumen",
+                _windows_brightness=lambda d: seen.append(("bright", d)) or "Brillo 60",
+                _win_hotkey=lambda *vks: seen.append(("keys", vks))):
+        control.system_action("vol_up")
+        control.system_action("vol_down")
+        control.system_action("vol_mute")
+        assert control.system_action("bright_up")["detail"] == "Brillo 60"
+        control.system_action("bright_down")
+        control.system_action("project")
+        assert control.system_caps()["project"] and control.system_caps()["brightness"]
+    assert seen == [("vol", 1), ("vol", -1), ("vol", 0), ("bright", 10), ("bright", -10), ("keys", (0x5B, 0x50))], seen
+
+    def no_bright(_d):
+        raise control.ControlError("x")
+
+    with _Patch(SYSTEM="Windows", _windows_brightness=no_bright):
+        try:
+            control.system_action("bright_up")
+            raise AssertionError("debe avisar")
+        except control.ControlError as exc:
+            assert "no disponible" in str(exc).lower()
+    calls = []
+    with _Patch(SYSTEM="Linux", _which=lambda name: name == "loginctl", _run=lambda cmd, timeout=4: calls.append(cmd) or _Done()):
+        for action in ("project", "bright_up"):
+            try:
+                control.system_action(action)
+                raise AssertionError(action)
+            except control.ControlError as exc:
+                assert "No disponible" in str(exc) or "no disponible" in str(exc)
+        assert control.system_action("lock")["detail"] == "PC bloqueado"
+        assert calls == [["loginctl", "lock-session"]]
+        caps = control.system_caps()
+        assert caps["lock"] and not caps["project"] and not caps["brightness"]
+    try:
+        control.system_action("rm -rf")
+        raise AssertionError("acción rara")
+    except control.ControlError:
+        pass
+    assert "system" in lazo.ACTIONS and "screen" in lazo.ACTIONS
+
+
 if __name__ == "__main__":
     os.environ.setdefault("LAZO_TEST", "1")
     test_backends()
@@ -440,4 +589,8 @@ if __name__ == "__main__":
     test_live_channel()
     test_protocol()
     test_remote_security()
+    test_screens()
+    test_place_on_screen()
+    test_move_window_linux()
+    test_system_pill()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")
