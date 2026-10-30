@@ -127,7 +127,17 @@ async function api(path, body, method = "POST") {
     payload = wireKey ? sealText(raw, wireKey) : raw;
     if (!wireKey) headers["Content-Type"] = "application/json";
   }
-  const res = await lzFetch(path, { method, headers, body: payload });
+  const stop = new AbortController();
+  const timer = window.setTimeout(() => stop.abort(), 25000);
+  let res;
+  try {
+    res = await lzFetch(path, { method, headers, body: payload, signal: stop.signal });
+  } catch (err) {
+    if (err && err.name === "AbortError") throw new Error("El PC tarda demasiado en contestar");
+    throw new Error("Sin conexión con el PC. ¿Sigue LaZoo abierto y en la misma Wi-Fi?");
+  } finally {
+    window.clearTimeout(timer);
+  }
   const data = await readBody(res);
   if (res.status === 401) {
     showPin();
@@ -475,6 +485,14 @@ document.querySelector("#file-input").addEventListener("change", async (event) =
   const file = event.target.files && event.target.files[0];
   event.target.value = "";
   if (!file) return;
+  if (file.size > 80 * 1024 * 1024) {
+    say(`«${file.name}» pesa ${Math.round(file.size / 1048576)} MB. El puente admite hasta 80 MB por archivo; para vídeos usa «Fotos».`);
+    return;
+  }
+  if (!file.size) {
+    say("Ese archivo está vacío");
+    return;
+  }
   xferStarted = performance.now();
   xferBytes = 0;
   try {
@@ -1168,38 +1186,182 @@ async function loadScreens() {
   return screensInfo;
 }
 
-async function loadWindows() {
-  const list = document.querySelector("#windows");
-  loadScreens();
+let winRows = [];
+let winTabsFor = "";
+
+function winFolded() {
   try {
-    const data = await api("/api/windows", null, "GET");
-    list.replaceChildren();
-    winId = "";
-    data.windows.forEach((win) => {
+    const v = JSON.parse(localStorage.getItem("lazo-win-folded") || "[]");
+    return Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  } catch (_err) {
+    return [];
+  }
+}
+
+function winHue(name) {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 360;
+  return h;
+}
+
+function pickWindow(win, button) {
+  winId = win.id;
+  document.querySelectorAll("#windows .win-row").forEach((el) => el.classList.remove("picked"));
+  if (button) button.classList.add("picked");
+  showTabs(win);
+}
+
+function renderWindows() {
+  const list = document.querySelector("#windows");
+  const query = document.querySelector("#win-filter").value.trim().toLowerCase();
+  const folded = new Set(winFolded());
+  const groups = new Map();
+  winRows.forEach((win) => {
+    const app = win.app || "Otras";
+    const hay = `${win.title} ${app}`.toLowerCase();
+    if (query && !hay.includes(query)) return;
+    if (!groups.has(app)) groups.set(app, []);
+    groups.get(app).push(win);
+  });
+  list.replaceChildren();
+  [...groups.keys()].sort((x, y) => groups.get(y).length - groups.get(x).length || x.localeCompare(y)).forEach((app) => {
+    const rows = groups.get(app);
+    const head = document.createElement("li");
+    head.className = "win-group";
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "win-group-head";
+    const badge = document.createElement("span");
+    badge.className = "win-badge";
+    badge.textContent = (app.match(/[\p{L}\p{N}]/u) || ["?"])[0].toUpperCase();
+    badge.style.background = `hsl(${winHue(app)} 45% 32%)`;
+    const name = document.createElement("span");
+    name.className = "win-app";
+    name.textContent = app;
+    const count = document.createElement("span");
+    count.className = "win-count";
+    count.textContent = String(rows.length);
+    const open = !folded.has(app) || !!query;
+    toggle.setAttribute("aria-expanded", String(open));
+    toggle.append(badge, name, count);
+    toggle.addEventListener("click", () => {
+      const now = new Set(winFolded());
+      if (now.has(app)) now.delete(app);
+      else now.add(app);
+      localStorage.setItem("lazo-win-folded", JSON.stringify([...now].slice(-60)));
+      renderWindows();
+    });
+    head.append(toggle);
+    list.append(head);
+    if (!open) return;
+    rows.forEach((win) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
       button.type = "button";
       button.className = "win-row";
-      button.textContent = win.title;
+      button.textContent = win.short || win.title;
+      button.dir = "auto";
       button.title = win.title;
-      if (win.active) {
-        button.classList.add("active");
-        winId = win.id;
-        button.classList.add("picked");
-      }
-      button.addEventListener("click", () => {
-        winId = win.id;
-        list.querySelectorAll("button").forEach((el) => el.classList.remove("picked"));
-        button.classList.add("picked");
+      if (win.active) button.classList.add("active");
+      if (win.id === winId) button.classList.add("picked");
+      let held = 0;
+      button.addEventListener("pointerdown", () => {
+        held = window.setTimeout(() => say(win.title), 550);
       });
+      ["pointerup", "pointercancel", "pointerleave"].forEach((ev) => button.addEventListener(ev, () => window.clearTimeout(held)));
+      button.addEventListener("click", () => pickWindow(win, button));
       item.append(button);
       list.append(item);
     });
-    if (!data.windows.length) say("No veo ventanas");
-  } catch (err) {
-    say(err.message);
+  });
+  if (!list.children.length) {
+    const empty = document.createElement("li");
+    empty.className = "win-empty";
+    empty.textContent = query ? "Ninguna ventana coincide" : "No veo ventanas";
+    list.append(empty);
   }
 }
+
+async function showTabs(win) {
+  const box = document.querySelector("#win-tabs");
+  const ul = document.querySelector("#win-tabs-list");
+  if (!win || !win.tabs) {
+    box.hidden = true;
+    winTabsFor = "";
+    return;
+  }
+  box.hidden = false;
+  winTabsFor = win.id;
+  document.querySelector("#win-tabs-app").textContent = win.app;
+  ul.replaceChildren();
+  try {
+    const data = await api("/api/tabs", { id: win.id });
+    if (winTabsFor !== win.id) return;
+    const tabs = Array.isArray(data.tabs) ? data.tabs : [];
+    tabs.forEach((tab) => {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "win-row";
+      b.textContent = tab.title;
+      b.dir = "auto";
+      b.title = tab.title;
+      if (tab.active) b.classList.add("active");
+      b.addEventListener("click", () => {
+        api("/api/tab", { id: win.id, action: "go", index: tab.i })
+          .then((res) => {
+            say(res.detail || "Pestaña cambiada");
+            ul.querySelectorAll(".win-row").forEach((el) => el.classList.remove("active"));
+            b.classList.add("active");
+          })
+          .catch((err) => say(err.message));
+      });
+      li.append(b);
+      ul.append(li);
+    });
+    ul.hidden = !tabs.length;
+  } catch (_err) {
+    ul.hidden = true;
+  }
+}
+
+let winLoading = false;
+async function loadWindows() {
+  if (winLoading) return;
+  winLoading = true;
+  loadScreens();
+  try {
+    const data = await api("/api/windows", null, "GET");
+    winRows = Array.isArray(data.windows) ? data.windows : [];
+    if (!winRows.some((w) => w.id === winId)) {
+      const front = winRows.find((w) => w.active);
+      winId = front ? front.id : "";
+    }
+    renderWindows();
+    const picked = winRows.find((w) => w.id === winId);
+    showTabs(picked);
+  } catch (err) {
+    say(err.message);
+  } finally {
+    winLoading = false;
+  }
+}
+
+document.querySelector("#win-filter").addEventListener("input", renderWindows);
+
+document.querySelectorAll("[data-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    if (!winTabsFor) return;
+    const id = winTabsFor;
+    api("/api/tab", { id, action: button.dataset.tab })
+      .then((res) => {
+        say(res.detail || "Pestaña cambiada");
+        const win = winRows.find((w) => w.id === id);
+        window.setTimeout(() => showTabs(win), 400);
+      })
+      .catch((err) => say(err.message));
+  });
+});
 
 document.querySelector("#win-refresh").addEventListener("click", loadWindows);
 

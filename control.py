@@ -7,6 +7,7 @@ import json
 import platform
 import secrets
 import shutil
+import re
 import subprocess
 import threading
 import time
@@ -35,10 +36,22 @@ class ControlError(Exception):
 
 
 def _run(cmd: list[str], timeout: float = 4) -> subprocess.CompletedProcess[str]:
+    """Ejecuta sin colgar LaZoo: si el programa no contesta a tiempo, cuenta como fallo."""
+    try:
+        return _run_raw(cmd, timeout)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(cmd, 124, "", "tiempo agotado")
+    except OSError as exc:
+        return subprocess.CompletedProcess(cmd, 127, "", str(exc))
+
+
+def _run_raw(cmd: list[str], timeout: float) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         check=False,
     )
@@ -65,6 +78,7 @@ def _input():
 
 
 def _button(name: str):
+    _input()
     from pynput.mouse import Button
 
     if name == "right":
@@ -75,6 +89,7 @@ def _button(name: str):
 
 
 def _special(name: str):
+    _input()
     from pynput.keyboard import Key
 
     table = {
@@ -289,6 +304,7 @@ def _keyboard_send(name: str) -> None:
 
 
 def _chord(parts: list[str]) -> None:
+    _input()
     from pynput.keyboard import Key
 
     _mouse, keyboard = _input()
@@ -375,6 +391,7 @@ def _linux_volume(delta: int) -> str:
 
 
 def _media_key(kind: str) -> None:
+    _input()
     from pynput.keyboard import Key
 
     mapping = {
@@ -531,6 +548,8 @@ def _apply_cursor_size(size: Any) -> str:
 
 
 _SKIP_TITLES = {
+    "xfce4-panel",
+    "desktop",
     "program manager",
     "windows input experience",
     "windows shell experience host",
@@ -585,13 +604,189 @@ def typing_focus() -> bool:
     return "edit" in kind
 
 
+_APP_NAMES = {
+    "chrome": "Chrome", "google-chrome": "Chrome", "chromium": "Chromium", "chromium-browser": "Chromium",
+    "msedge": "Edge", "microsoft-edge": "Edge", "firefox": "Firefox", "navigator": "Firefox",
+    "brave": "Brave", "brave-browser": "Brave", "opera": "Opera", "vivaldi": "Vivaldi",
+    "explorer": "Explorador de archivos", "nautilus": "Archivos", "org.gnome.nautilus": "Archivos",
+    "thunar": "Archivos", "dolphin": "Archivos", "nemo": "Archivos", "pcmanfm": "Archivos", "finder": "Finder",
+    "7zfm": "7-Zip", "7zg": "7-Zip", "winrar": "WinRAR", "file-roller": "Archivos comprimidos",
+    "org.gnome.fileroller": "Archivos comprimidos", "ark": "Archivos comprimidos", "peazip": "PeaZip",
+    "code": "VS Code", "notepad": "Bloc de notas", "notepad++": "Notepad++", "spotify": "Spotify",
+    "vlc": "VLC", "xterm": "Terminal", "gnome-terminal-server": "Terminal", "windowsterminal": "Terminal",
+    "cmd": "Símbolo del sistema", "powershell": "PowerShell", "pwsh": "PowerShell", "conhost": "Consola",
+    "discord": "Discord", "telegram": "Telegram", "telegramdesktop": "Telegram", "signal": "Signal",
+    "obs64": "OBS", "obs": "OBS", "steam": "Steam", "winword": "Word", "excel": "Excel",
+    "powerpnt": "PowerPoint", "outlook": "Outlook", "teams": "Teams", "ms-teams": "Teams",
+    "thunderbird": "Thunderbird", "gimp": "GIMP", "libreoffice": "LibreOffice", "soffice": "LibreOffice",
+    "mspaint": "Paint", "calc": "Calculadora", "applicationframehost": "App de Windows",
+    "systemsettings": "Configuración", "taskmgr": "Administrador de tareas", "python": "Python", "pythonw": "Python",
+}
+_TAB_APPS = {"Chrome", "Chromium", "Edge", "Brave", "Opera", "Vivaldi", "Firefox"}
+_TITLE_HINTS = (
+    ("google chrome", "Chrome"), ("microsoft edge", "Edge"), ("mozilla firefox", "Firefox"),
+    ("brave", "Brave"), ("visual studio code", "VS Code"), ("winrar", "WinRAR"), ("7-zip", "7-Zip"),
+)
+
+
+def app_name(process: str, title: str = "") -> str:
+    """Nombre amigable de la app a partir del proceso (o la clase de ventana en Linux)."""
+    raw = (process or "").strip()
+    key = raw.lower()
+    if key.endswith(".exe"):
+        key = key[:-4]
+    if key in _APP_NAMES:
+        return _APP_NAMES[key]
+    low = (title or "").lower()
+    for mark, name in _TITLE_HINTS:
+        if low.endswith(mark) or f" - {mark}" in low:
+            return name
+    if not key:
+        return "Otras"
+    base = raw[:-4] if raw.lower().endswith(".exe") else raw
+    base = base.rsplit(".", 1)[-1] if "." in base else base
+    return (base[:1].upper() + base[1:])[:40] or "Otras"
+
+
+def short_title(title: str, app: str) -> str:
+    """Quita el « - Google Chrome» final para que se lea lo importante."""
+    text = "".join(ch for ch in title if ch not in "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069")
+    for suffix in (" - Google Chrome", " - Microsoft​ Edge", " - Microsoft Edge", " — Mozilla Firefox",
+                   " - Mozilla Firefox", " - Brave", " - Visual Studio Code", " - Chromium"):
+        if text.endswith(suffix) and len(text) > len(suffix):
+            text = text[: -len(suffix)]
+            break
+    return text.strip() or title or app
+
+
+def _decorate(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    for row in rows:
+        app = app_name(str(row.get("process", "") or row.get("cls", "")), str(row.get("title", "")))
+        row["app"] = app
+        row["short"] = short_title(str(row.get("title", "")), app)
+        row["tabs"] = app in _TAB_APPS
+    return rows
+
+
+def window_tabs(window_id: str) -> dict[str, Any]:
+    """Pestañas de un navegador. En Windows las lee con UI Automation (sin puertos ni extensiones)."""
+    if not window_id:
+        raise ControlError("falta la ventana")
+    if SYSTEM == "Windows":
+        try:
+            hwnd = int(window_id)
+        except ValueError:
+            raise ControlError("ventana no válida") from None
+        tabs = _uia_tabs(hwnd, None)
+        return {"tabs": tabs, "list": tabs is not None}
+    return {"tabs": None, "list": False}
+
+
+def tab_action(window_id: str, action: str, index: Any = None) -> str:
+    if action not in {"next", "prev", "go"}:
+        raise ControlError("acción de pestaña no válida")
+    if not window_id:
+        raise ControlError("falta la ventana")
+    if SYSTEM == "Windows":
+        try:
+            hwnd = int(window_id)
+        except ValueError:
+            raise ControlError("ventana no válida") from None
+        if action == "go":
+            try:
+                n = int(index)
+            except (TypeError, ValueError):
+                raise ControlError("pestaña no válida") from None
+            with _lock:
+                if _uia_tabs(hwnd, n) is None:
+                    raise ControlError("No pude cambiar a esa pestaña")
+                _force_foreground(hwnd)
+            return "Pestaña cambiada"
+        with _lock:
+            if not _activate_window(hwnd):
+                raise ControlError("No pude traer el navegador al frente")
+            if action == "next":
+                _win_hotkey(0x11, 0x09)
+            else:
+                _win_hotkey(0x11, 0x10, 0x09)
+        return "Pestaña siguiente" if action == "next" else "Pestaña anterior"
+    if SYSTEM == "Darwin":
+        raise ControlError("Cambiar de pestaña aún no está en Mac")
+    if not re.fullmatch(r"0x[0-9a-fA-F]{1,10}", window_id):
+        raise ControlError("ventana no válida")
+    if not _which("xdotool"):
+        raise ControlError("Instala xdotool para cambiar de pestaña (sudo apt install xdotool)")
+    keys = {"next": "ctrl+Tab", "prev": "ctrl+shift+Tab"}
+    if action == "go":
+        try:
+            n = int(index)
+        except (TypeError, ValueError):
+            raise ControlError("pestaña no válida") from None
+        if not 1 <= n <= 8:
+            raise ControlError("pestaña no válida")
+        keys["go"] = f"ctrl+{n}"
+    with _lock:
+        _linux_window_action(window_id, "focus")
+        time.sleep(0.15)
+        _run(["xdotool", "key", "--clearmodifiers", keys[action]])
+    return "Pestaña cambiada"
+
+
+_UIA_PS = r"""
+$ErrorActionPreference='Stop'
+Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
+$h=[IntPtr]::new([long]$env:LAZO_HWND)
+$w=[System.Windows.Automation.AutomationElement]::FromHandle($h)
+$c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::TabItem)
+$items=$w.FindAll([System.Windows.Automation.TreeScope]::Descendants,$c)
+$pick=[int]$env:LAZO_PICK
+$i=0
+foreach($t in $items){
+  $sel=$false
+  try{$sel=$t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected}catch{}
+  if($i -eq $pick){$t.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()}
+  $n=$t.Current.Name -replace "[\r\n\t]"," "
+  [Console]::Out.WriteLine(($i.ToString()+"`t"+[int]$sel+"`t"+$n))
+  $i++
+  if($i -ge 80){break}
+}
+"""
+
+
+def _uia_tabs(hwnd: int, pick: int | None) -> list[dict[str, Any]] | None:
+    import os
+
+    env = dict(os.environ, LAZO_HWND=str(int(hwnd)), LAZO_PICK=str(-1 if pick is None else int(pick)))
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+             "[Console]::OutputEncoding=[Text.Encoding]::UTF8;" + _UIA_PS],
+            capture_output=True, timeout=8, env=env, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return parse_uia_tabs(result.stdout.decode("utf-8", "replace"))
+
+
+def parse_uia_tabs(text: str) -> list[dict[str, Any]]:
+    tabs = []
+    for line in text.splitlines():
+        parts = line.lstrip("\ufeff").split("\t", 2)
+        if len(parts) != 3 or not parts[0].isdigit():
+            continue
+        tabs.append({"i": int(parts[0]), "active": parts[1] == "1", "title": parts[2].strip()[:160] or "Pestaña"})
+    return tabs
+
+
 def list_windows() -> list[dict[str, str]]:
     with _lock:
         if SYSTEM == "Windows":
-            return _windows_list()
+            return _decorate(_windows_list())
         if SYSTEM == "Darwin":
-            return _mac_windows()
-        return _linux_windows()
+            return _decorate(_mac_windows())
+        return _decorate(_linux_windows())
 
 
 def window_action(window_id: str, action: str) -> str:
@@ -602,6 +797,8 @@ def window_action(window_id: str, action: str) -> str:
         raise ControlError("falta la ventana")
     with _lock:
         if SYSTEM == "Windows":
+            if not window_id.isdigit():
+                raise ControlError("ventana no válida")
             return _windows_action(int(window_id), action)
         if SYSTEM == "Darwin":
             return _mac_window_action(window_id, "maximize" if action == "toggle_max" else action)
@@ -644,7 +841,7 @@ def _windows_list() -> list[dict[str, str]]:
     front = str(int(user32.GetForegroundWindow() or 0))
     for row in rows:
         row["active"] = row["id"] == front
-    return rows[:40]
+    return rows[:150]
 
 
 def _hwnd(value: int) -> ctypes.c_void_p:
@@ -852,23 +1049,60 @@ def _linux_windows() -> list[dict[str, str]]:
     result = _run(["wmctrl", "-l"])
     if result.returncode != 0:
         raise ControlError("wmctrl no pudo listar las ventanas. En Wayland a veces hace falta una sesión Xorg.")
+    classes = _run(["wmctrl", "-lx"])
+    return parse_wmctrl(result.stdout, classes.stdout if classes.returncode == 0 else "", _linux_active())
+
+
+def parse_wmctrl(plain: str, with_class: str = "", active: str = "") -> list[dict[str, Any]]:
+    """Cruza «wmctrl -l» (título fiable) con «wmctrl -lx» (clase, que puede llevar espacios)."""
+    lx = {}
+    for line in with_class.splitlines():
+        parts = line.split(None, 2)
+        if len(parts) == 3:
+            lx[parts[0]] = parts[2]
     rows = []
-    for line in result.stdout.splitlines():
+    for line in plain.splitlines():
         parts = line.split(None, 3)
-        if len(parts) < 4:
+        if len(parts) < 3:
             continue
-        title = parts[3].strip()
+        wid = parts[0]
+        host = parts[2]
+        title = parts[3].strip() if len(parts) > 3 else ""
+        if title == "N/A":
+            title = "Sin título"
         if not title or title.lower() in _SKIP_TITLES:
             continue
-        rows.append({"id": parts[0], "title": title[:180]})
-    return rows[:40]
+        cls = ""
+        rest = lx.get(wid, "")
+        cut = rest.rfind(" " + host + " ") if title else -1
+        if cut < 0 and rest.endswith(" " + host):
+            cut = len(rest) - len(host) - 1
+        if cut > 0:
+            cls = rest[:cut].strip()
+        process = cls.split(".", 1)[0].split(" (", 1)[0] if cls else ""
+        try:
+            is_active = bool(active) and int(wid, 16) == int(active, 16)
+        except ValueError:
+            is_active = False
+        rows.append({"id": wid, "title": title[:180], "process": process, "active": is_active})
+    return rows[:150]
+
+
+def _linux_active() -> str:
+    if not _which("xdotool"):
+        return ""
+    result = _run(["xdotool", "getactivewindow"], timeout=2)
+    value = result.stdout.strip()
+    return hex(int(value)) if value.isdigit() else ""
 
 
 def _linux_window_action(window_id: str, action: str) -> str:
-    if not window_id.startswith("0x"):
+    if not re.fullmatch(r"0x[0-9a-fA-F]{1,10}", window_id):
         raise ControlError("ventana no válida")
     if not _which("wmctrl"):
         raise ControlError("Instala wmctrl")
+    if not _linux_window_alive(window_id):
+        raise ControlError("Esa ventana ya se cerró. Pulsa Actualizar.")
     if action == "focus":
         cmd = ["wmctrl", "-i", "-a", window_id]
         label = "Ventana al frente"
@@ -896,6 +1130,21 @@ def _linux_window_action(window_id: str, action: str) -> str:
     if result.returncode != 0:
         raise ControlError("No pude mover esa ventana")
     return label
+
+
+def _linux_window_alive(window_id: str) -> bool:
+    result = _run(["wmctrl", "-l"])
+    if result.returncode != 0 or not (result.stdout or "").strip():
+        return True
+    want = int(window_id, 16)
+    for line in result.stdout.splitlines():
+        head = line.split(None, 1)[0] if line.strip() else ""
+        try:
+            if int(head, 16) == want:
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def _desktop_size() -> tuple[int, int]:
@@ -1327,6 +1576,8 @@ def _linux_spotify(action: str, extra: dict | None = None) -> dict[str, Any]:
     if not _which("playerctl"):
         raise ControlError("Instala playerctl para Spotify (sudo apt install playerctl)")
     players = _run(["playerctl", "-l"])
+    if players.returncode == 124:
+        raise ControlError("Spotify no respondió a tiempo")
     names = [line.strip() for line in players.stdout.splitlines() if line.strip()]
     player = next((name for name in names if "spotify" in name.lower()), None)
     if player is None:
@@ -1508,6 +1759,7 @@ def lab(action: str, extra: dict | None = None) -> dict[str, Any]:
 
 
 def _lab_shortcut(action: str) -> None:
+    _input()
     from pynput.keyboard import Key
 
     chords = {
@@ -1536,6 +1788,7 @@ def _lab_shortcut(action: str) -> None:
 
 
 def _lab_chord(parts: list[str]) -> None:
+    _input()
     from pynput.keyboard import Key
 
     table = {

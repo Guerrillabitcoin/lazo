@@ -25,7 +25,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.37"
+VERSION = "0.38"
 PAIRING = protocol.Pairing()
 PORT = 8787
 VISITS: list[str] = []
@@ -50,6 +50,8 @@ ACTIONS = {
     "spotify": lambda body: control.spotify(str(body.get("action", "")), body),
     "lab": lambda body: control.lab(str(body.get("action", "")), body),
     "system": lambda body: control.system_action(str(body.get("action", ""))),
+    "tabs": lambda body: control.window_tabs(str(body.get("id", ""))),
+    "tab": lambda body: control.tab_action(str(body.get("id", "")), str(body.get("action", "")), body.get("index")),
     "screen": lambda body: control.window_to_screen(str(body.get("id", "")), body.get("screen", 0)),
 }
 
@@ -295,7 +297,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.37</p>
+      <p class="ver">0.38</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -610,6 +612,9 @@ class Handler(BaseHTTPRequestHandler):
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)})
             return
+        except (ValueError, TypeError, OverflowError):
+            self._send(400, {"error": "Dato no válido"})
+            return
         except Exception:
             self._send(500, {"error": "El PC no pudo hacer eso"})
             return
@@ -635,7 +640,8 @@ class Handler(BaseHTTPRequestHandler):
             self._unauth()
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
-        if length <= 0 or length > 80 * 1024 * 1024:
+        if length <= 0 or length > 80 * 1024 * 1024 + 4096:
+            self.close_connection = True
             self._send(400, {"error": "El archivo pasa de 80 MB o está vacío"})
             return
         data = self.rfile.read(length)

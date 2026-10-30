@@ -441,7 +441,24 @@ def _clean_error(text: str) -> str:
     errors = [ln for ln in lines if ln.startswith("ERROR")]
     msg = (errors or lines or ["No se pudo leer ese enlace"])[-1]
     msg = re.sub(r"^ERROR:\s*", "", msg)
+    low = msg.lower()
+    for mark, text in _ERROR_TEXT:
+        if mark in low:
+            return text
     return msg[:180]
+
+
+_ERROR_TEXT = (
+    ("unsupported url", "Esa web no es compatible con Descargatodo"),
+    ("unable to download webpage", "No pude abrir ese enlace. ¿Hay internet en el PC?"),
+    ("name or service not known", "No hay conexión con esa web. ¿Hay internet en el PC?"),
+    ("getaddrinfo failed", "No hay conexión con esa web. ¿Hay internet en el PC?"),
+    ("timed out", "La web tardó demasiado en contestar"),
+    ("private video", "Ese vídeo es privado"),
+    ("video unavailable", "Ese vídeo no está disponible"),
+    ("sign in to confirm", "La web pide iniciar sesión para ese vídeo"),
+    ("http error 404", "Ese enlace no existe (404)"),
+)
 
 
 def safe_output(path: str, out_dir: Path) -> Path | None:

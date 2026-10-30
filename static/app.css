@@ -554,3 +554,26 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 .about-addr { font-size: 12px; word-break: break-all; color: #f3eee6; }
 .about-pay button { min-height: 44px; }
 .about-logo { color: var(--copper); }
+
+.win-filter { width: 100%; box-sizing: border-box; min-height: 40px; margin: 6px 0; padding: 8px 12px; border-radius: 10px; border: 1px solid #333; background: #141414; color: #eee; font-size: 16px; }
+.win-group { list-style: none; }
+.win-group-head { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; text-align: left; background: #1b1b1b; }
+.win-group-head[aria-expanded="false"] { opacity: .75; }
+.win-group-head::after { content: "▾"; color: #e07a3d; margin-left: 4px; }
+.win-group-head[aria-expanded="false"]::after { content: "▸"; }
+.win-badge { flex: 0 0 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-weight: 700; }
+.win-app { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.win-count { flex: 0 0 auto; min-width: 24px; padding: 2px 8px; border-radius: 999px; background: #e07a3d; color: #111; font-size: 13px; text-align: center; }
+.win-list .win-row, .win-tabs-list .win-row { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; padding-left: 18px; }
+.win-empty { list-style: none; padding: 12px; color: #999; }
+.win-tabs { margin-top: 8px; display: grid; gap: 6px; }
+.win-tabs-bar { display: grid; grid-template-columns: 1fr 56px 56px; gap: 8px; align-items: center; }
+.win-tabs-bar button { min-height: 40px; font-size: 22px; padding: 0; }
+.win-tabs-title { color: #e07a3d; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.win-tabs-list { max-height: 30vh; overflow-y: auto; }
+.win-tabs-list .active { border-left: 4px solid #e07a3d; }
+@media (max-height: 560px) {
+  .win-grid button { min-height: 40px; }
+  .win-tabs-list { max-height: 22vh; }
+  .win-list { min-height: 90px; }
+}

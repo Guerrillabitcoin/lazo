@@ -1,4 +1,4 @@
-# LaZoo 0.37
+# LaZoo 0.38
 
 Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -6,7 +6,7 @@ Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada 
 
 - Ratón: trackpad, clic, clic derecho, arrastre y scroll
 - Teclado, incluida la ñ, y una frase entera
-- Ventanas: lista vertical con la activa resaltada; traer al frente, maximizar / restaurar, cerrar, mitad izquierda o derecha y mover a otra pantalla (hasta 3; Windows y Linux X11 con wmctrl)
+- Ventanas: agrupadas por app (Chrome, Explorador, 7-Zip…) con buscador, grupos plegables y título completo al mantener pulsado. En Chrome/Edge, pestaña anterior/siguiente; en Windows además la lista de pestañas para tocar una (UI Automation, sin puertos ni extensiones). La activa resaltada; traer al frente, maximizar / restaurar, cerrar, mitad izquierda o derecha y mover a otra pantalla (hasta 3; Windows y Linux X11 con wmctrl)
 - YouTube: play, salto de 10 s, volumen del vídeo, pantalla completa, siguiente
 - Spotify: play, anterior, siguiente y volumen de la app
 - Cursor del sistema: normal, grande o enorme
@@ -41,7 +41,7 @@ Cuando Windows pregunte por el firewall, permite las redes privadas. No abras el
 | --- | --- |
 | YouTube | Una pestaña del navegador cuyo título diga YouTube |
 | Spotify | La aplicación de Spotify, no hace falta que esté delante |
-| Ventanas en Linux | `sudo apt install wmctrl` |
+| Ventanas en Linux | `sudo apt install wmctrl xdotool` (xdotool para pestañas) |
 | Spotify en Linux | `sudo apt install playerctl` |
 | Cursor grande en Linux | Escritorio GNOME (`gsettings`) |
 

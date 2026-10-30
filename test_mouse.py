@@ -741,6 +741,70 @@ def test_descargatodo() -> None:
         descargas.ytdlp_cmd, descargas.find_ffmpeg, descargas.QUEUE.out_dir = real_cmd, real_ff, real_out
 
 
+def test_windows_grouped() -> None:
+    import subprocess as sp
+
+    import control
+
+    assert control.app_name("chrome.exe") == "Chrome"
+    assert control.app_name("explorer.exe") == "Explorador de archivos"
+    assert control.app_name("7zFM.exe") == "7-Zip"
+    assert control.app_name("WinRAR.exe") == "WinRAR"
+    assert control.app_name("notepad.exe") == "Bloc de notas"
+    assert control.app_name("raroapp.exe") == "Raroapp"
+    assert control.app_name("") == "Otras"
+    assert control.short_title("Inicio - YouTube - Google Chrome", "Chrome") == "Inicio - YouTube"
+    rtl = "\u200e\u202bمرحبا - Google Chrome\u202c\u200e"
+    assert control.short_title(rtl, "Chrome") == "مرحبا"
+    plain = (
+        "0x01  0 host Video 1 - YouTube - Google Chrome\n"
+        "0x02  0 host N/A\n"
+        "0x03 -1 host xfce4-panel\n"
+        "0x04  0 host 😀 emoji «raro»\n"
+        "basura\n"
+    )
+    lx = (
+        "0x01  0 google-chrome (/tmp/p).Google-chrome  host Video 1 - YouTube - Google Chrome\n"
+        "0x02  0 xmessage.Xmessage  host N/A\n"
+        "0x04  0 xterm.XTerm  host 😀 emoji «raro»\n"
+    )
+    rows = control._decorate(control.parse_wmctrl(plain, lx, "0x1"))
+    assert [r["id"] for r in rows] == ["0x01", "0x02", "0x04"], rows
+    assert rows[0]["app"] == "Chrome" and rows[0]["tabs"] and rows[0]["active"], rows[0]
+    assert rows[1]["title"] == "Sin título"
+    assert rows[2]["app"] == "Terminal"
+    tabs = control.parse_uia_tabs("\ufeff0\t0\tInicio\n1\t1\tYouTube\nmal\n2\t0\t\n")
+    assert tabs == [
+        {"i": 0, "active": False, "title": "Inicio"},
+        {"i": 1, "active": True, "title": "YouTube"},
+        {"i": 2, "active": False, "title": "Pestaña"},
+    ], tabs
+    for bad in [("", "next", None), ("0x1", "rm", None), ("0x1", "go", "x")]:
+        try:
+            control.tab_action(*bad)
+        except control.ControlError:
+            pass
+        else:
+            raise SystemExit(f"tab_action aceptó {bad}")
+    if control.SYSTEM == "Linux":
+        for bad in ["0x1;rm", "0xZZ", "12"]:
+            try:
+                control.window_action(bad, "focus")
+            except control.ControlError:
+                pass
+            else:
+                raise SystemExit(f"window_action aceptó {bad}")
+    # Un programa que no contesta no cuelga LaZoo ni da un 500.
+    real = control._run_raw
+    control._run_raw = lambda cmd, timeout: (_ for _ in ()).throw(sp.TimeoutExpired(cmd, timeout))
+    try:
+        assert control._run(["x"]).returncode == 124
+    finally:
+        control._run_raw = real
+    assert control._run(["no-existe-este-programa-lazo"]).returncode == 127
+    print("ventanas: agrupadas por app, títulos raros, pestañas y comandos que no contestan")
+
+
 if __name__ == "__main__":
     os.environ.setdefault("LAZO_TEST", "1")
     test_backends()
@@ -761,4 +825,5 @@ if __name__ == "__main__":
     test_move_window_linux()
     test_system_pill()
     test_descargatodo()
+    test_windows_grouped()
     print("ok windows=sendinput macos=cgevent linux-x11=xtest linux-wayland=ydotool")

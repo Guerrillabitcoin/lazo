@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.37</title>
+    <title>LaZoo 0.38</title>
     <link rel="stylesheet" href="/app.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.37</p>
+          <p class="ver">0.38</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -51,7 +51,16 @@
               <span id="screen-count" class="screen-count">Pantallas: …</span>
               <button id="win-refresh" type="button">Actualizar</button>
             </div>
+            <input id="win-filter" class="win-filter" type="search" placeholder="Buscar ventana o app" autocomplete="off" enterkeyhint="search" />
             <ul id="windows" class="list win-list"></ul>
+            <div id="win-tabs" class="win-tabs" hidden>
+              <div class="win-tabs-bar">
+                <span class="win-tabs-title">Pestañas · <span id="win-tabs-app">Chrome</span></span>
+                <button type="button" data-tab="prev" aria-label="Pestaña anterior">‹</button>
+                <button type="button" data-tab="next" aria-label="Pestaña siguiente">›</button>
+              </div>
+              <ul id="win-tabs-list" class="list win-tabs-list" hidden></ul>
+            </div>
             <div id="win-move" class="win-move" hidden>
               <p id="screen-note" class="screen-note"></p>
               <div id="screen-buttons" class="screen-buttons"></div>
@@ -262,7 +271,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.37</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.38</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
