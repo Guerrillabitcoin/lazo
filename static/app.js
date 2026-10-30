@@ -186,6 +186,10 @@ function showApp() {
   caretTimer = window.setInterval(watchCaret, 700);
   connectPointer();
   loadWindows();
+  if (!localStorage.getItem("lazo-hint")) {
+    localStorage.setItem("lazo-hint", "1");
+    window.setTimeout(() => say("Mantén pulsada una pastilla y arrástrala para ordenar"), 900);
+  }
 }
 
 async function refreshStatus() {
@@ -546,14 +550,26 @@ function loadOrder() {
   return [...PINNED, ...rest];
 }
 
+let reordering = false;
+document.addEventListener(
+  "touchmove",
+  (ev) => {
+    if (reordering && ev.cancelable) ev.preventDefault();
+  },
+  { passive: false },
+);
+
 function dragTool(button, pointerId, originX) {
   const scroller = button.parentElement;
+  reordering = true;
+  if (navigator.vibrate) navigator.vibrate(15);
   let lastX = originX;
   let dragged = false;
   button.classList.add("dragging");
   try {
     button.setPointerCapture(pointerId);
   } catch (_err) {
+    reordering = false;
     button.classList.remove("dragging");
     return;
   }
@@ -574,6 +590,7 @@ function dragTool(button, pointerId, originX) {
   }
   function stop(ev) {
     if (ev.pointerId !== pointerId) return;
+    reordering = false;
     button.classList.remove("dragging");
     button.removeEventListener("pointermove", move);
     button.removeEventListener("pointerup", stop);
@@ -597,7 +614,7 @@ function armTool(event) {
   let timer = window.setTimeout(() => {
     timer = 0;
     dragTool(button, pointerId, startX);
-  }, 260);
+  }, 350);
   function moved(ev) {
     if (!timer || ev.pointerId !== pointerId) return;
     if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > 12) end();
@@ -637,16 +654,8 @@ function renderDock() {
       openCube(id);
     });
     if (!PINNED.includes(id)) {
-      const grip = document.createElement("span");
-      grip.className = "grip";
-      grip.setAttribute("aria-hidden", "true");
-      grip.addEventListener("pointerdown", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        dragTool(button, event.pointerId, event.clientX);
-      });
-      button.append(grip);
       button.addEventListener("pointerdown", armTool);
+      button.addEventListener("contextmenu", (event) => event.preventDefault());
     }
     (PINNED.includes(id) ? fixed : scroller).append(button);
   });
