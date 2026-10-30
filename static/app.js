@@ -135,9 +135,11 @@ async function api(path, body, method = "POST") {
   return data;
 }
 
-function setLink(mode) {
+let missedPolls = 0;
+
+function setLink(mode, text) {
   statusBar.dataset.link = mode;
-  linkLabel.textContent = mode === "on" ? (wireKey ? "Conectado · cifrado" : "Conectado") : "Sin conexión";
+  linkLabel.textContent = text || (mode === "on" ? (wireKey ? "Conectado · cifrado" : "Conectado") : "Sin conexión");
 }
 
 function showPin() {
@@ -194,8 +196,18 @@ async function refreshStatus() {
     if (tab === "spotify" && data.spotify) {
       document.querySelector("#sp-title").textContent = data.spotify;
     }
+    if (missedPolls >= 2) {
+      setLink("on");
+      say("LaZoo ha vuelto");
+    }
+    missedPolls = 0;
   } catch (_err) {
-    /* el visor ya muestra el fallo si hace falta */
+    if (pinPanel.hidden === false) return;
+    missedPolls += 1;
+    if (missedPolls === 2) {
+      setLink("off", "LaZoo cerrado en el PC");
+      say("LaZoo se ha cerrado en el PC");
+    }
   }
 }
 
@@ -782,6 +794,8 @@ function connectPointer() {
   sock.onopen = () => flushPointer();
   sock.onclose = () => {
     if (pointerSocket === sock) pointerSocket = null;
+    window.setTimeout(refreshStatus, 600);
+    window.setTimeout(refreshStatus, 2000);
   };
 }
 
