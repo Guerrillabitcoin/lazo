@@ -3,26 +3,39 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.40</title>
-    <link rel="stylesheet" href="/app.css?v=0.40" />
+    <title>LaZoo 0.41</title>
+    <link rel="stylesheet" href="/app.css?v=0.41" />
   </head>
   <body>
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.40</p>
+          <p class="ver">0.41</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
           <p id="visor" class="visor"></p>
         </div>
+        <button id="qr-top" type="button" class="qr-top" aria-label="Escanear el QR del PC">QR</button>
       </header>
 
       <section id="pin" class="panel pin" hidden>
         <input id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="PIN de 6 dígitos" />
         <button id="pin-go" type="button" class="primary">Entrar</button>
+        <div class="qr-box">
+          <button id="qr-scan" type="button" class="primary qr-btn">Escanear QR</button>
+          <input id="qr-cam" type="file" accept="image/*" capture="environment" hidden />
+          <label class="file-label qr-photo">Elegir foto del QR<input id="qr-photo" type="file" accept="image/*" hidden /></label>
+          <p id="qr-msg" class="hint" aria-live="polite"></p>
+          <p class="hint">También puedes abrir la app de cámara del móvil y apuntar al QR de la pantalla del PC: abrirá LaZoo directamente con la clave.</p>
+        </div>
       </section>
+      <div id="qr-live" class="qr-live" hidden>
+        <video id="qr-video" playsinline muted></video>
+        <p class="hint">Apunta al QR de la pantalla del PC</p>
+        <button id="qr-stop" type="button">Cerrar cámara</button>
+      </div>
 
       <section id="app" class="app" hidden>
         <div id="stage">
@@ -148,11 +161,12 @@
         <div id="view-bridge" class="view" hidden>
           <article class="deck">
             <div class="photo-actions">
+              <label class="file-label file-any">Archivos<input id="send-input" type="file" multiple hidden /></label>
               <label class="file-label">Fotos y vídeos<input id="send-media" type="file" accept="image/*,video/*" multiple hidden /></label>
-              <label class="file-label file-any">Archivos<input id="send-input" type="file" accept="*/*,application/octet-stream" multiple hidden /></label>
-              <label id="send-dir-label" class="file-label">Una carpeta<input id="send-dir" type="file" webkitdirectory multiple hidden /></label>
+              <label id="send-dir-label" class="file-label">Carpeta<input id="send-dir" type="file" webkitdirectory multiple hidden /></label>
             </div>
-            <p class="hint">«Archivos» abre el explorador del móvil: PDF, ZIP, APK, documentos… de cualquier tamaño. Va a trozos cifrados y se comprueba al final.</p>
+            <p class="hint">«Archivos» abre el selector de archivos del móvil (PDF, ZIP, APK, documentos… de cualquier tamaño). Si se abre en «Recientes», toca ☰ arriba a la izquierda y elige «Descargas», «Documentos» o la memoria del móvil. «Carpeta» manda una carpeta entera; algunos navegadores de móvil no lo permiten y entonces solo deja elegir archivos sueltos.</p>
+            <p id="send-dir-warn" class="hint dl-err" hidden></p>
             <div id="xfer" class="xfer" hidden>
               <div class="xfer-track" role="progressbar" aria-label="Progreso total" aria-valuemin="0" aria-valuemax="100"><div id="xfer-bar"></div></div>
               <div class="xfer-head">
@@ -288,7 +302,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.40</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.41</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -335,7 +349,7 @@
         </div>
       </section>
     </main>
-    <script src="/seal.js?v=0.40"></script>
-    <script src="/app.js?v=0.40"></script>
+    <script src="/seal.js?v=0.41"></script>
+    <script src="/app.js?v=0.41"></script>
   </body>
 </html>

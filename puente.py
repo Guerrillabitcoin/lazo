@@ -75,6 +75,21 @@ def clean_name(name: str, fallback: str = "archivo") -> str:
     return (stem.rstrip(" .") or fallback) + ext
 
 
+def clean_dir(rel: Any) -> list[str]:
+    """Ruta de carpeta relativa (al enviar una carpeta entera), saneada pieza a pieza:
+    sin `..`, sin raíz, sin unidades, nombres válidos en todos los sistemas, 8 niveles máximo."""
+    parts = []
+    for piece in str(rel or "").replace("\\", "/").split("/"):
+        piece = piece.strip()
+        if not piece or piece in (".", ".."):
+            continue
+        clean = clean_name(piece, "carpeta")
+        if clean in (".", ".."):
+            continue
+        parts.append(clean)
+    return parts[:8]
+
+
 def unique_path(folder: Path, name: str) -> Path:
     candidate = folder / name
     if not candidate.exists():
@@ -168,7 +183,7 @@ class Uploads:
         return total
 
     # --- subida ------------------------------------------------------------
-    def start(self, name: str, size: Any, key: str = "", who: str = "") -> dict[str, Any]:
+    def start(self, name: str, size: Any, key: str = "", who: str = "", rel: Any = "") -> dict[str, Any]:
         try:
             size = int(size)
         except (TypeError, ValueError):
@@ -178,12 +193,13 @@ class Uploads:
         if size > MAX_FILE:
             raise BridgeError(f"Pasa del límite de {human(MAX_FILE)} por archivo")
         clean = clean_name(name)
+        sub = clean_dir(rel)
         self.cleanup()
         folder = self.folder()
-        existing = folder / clean
+        existing = folder.joinpath(*sub, clean)
         if size and existing.is_file() and existing.stat().st_size == size:
-            return {"skip": True, "name": clean}
-        up_id = hashlib.sha256(f"{who}\n{key}\n{clean}\n{size}".encode()).hexdigest()[:20] if key else secrets.token_hex(10)
+            return {"skip": True, "name": "/".join([*sub, clean])}
+        up_id = hashlib.sha256(f"{who}\n{key}\n{'/'.join(sub)}\n{clean}\n{size}".encode()).hexdigest()[:20] if key else secrets.token_hex(10)
         total = (size + CHUNK - 1) // CHUNK
         with self._id_lock(up_id):
             try:
@@ -191,7 +207,7 @@ class Uploads:
                 if meta.get("size") != size or meta.get("chunk") != CHUNK:
                     raise BridgeError("cambió")
             except BridgeError:
-                meta = {"name": clean, "size": size, "chunk": CHUNK, "have": [], "at": int(time.time())}
+                meta = {"name": clean, "dir": sub, "size": size, "chunk": CHUNK, "have": [], "at": int(time.time())}
             need = size - len(meta["have"]) * CHUNK
             free = shutil.disk_usage(folder).free
             reserved = self._reserved(skip=up_id)
@@ -253,13 +269,21 @@ class Uploads:
                 self._meta_path(up_id).unlink(missing_ok=True)
                 raise BridgeError("El archivo llegó dañado (el SHA-256 no coincide). Vuelve a enviarlo.")
             folder = self.folder()
+            target = folder.joinpath(*clean_dir("/".join(meta.get("dir") or [])))
+            try:
+                if folder.resolve() != target.resolve() and folder.resolve() not in target.resolve().parents:
+                    raise BridgeError("Carpeta no válida")
+                target.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise BridgeError("No se pudo crear la carpeta en el PC") from exc
             with self._lock:
-                final = unique_path(folder, meta["name"])
+                final = unique_path(target, meta["name"])
                 os.replace(part, final)
             self._meta_path(up_id).unlink(missing_ok=True)
         with self._lock:
             self._locks.pop(up_id, None)
-        return {"name": final.name, "size": size, "sha256": digest.hexdigest(), "folder": str(folder)}
+        shown = "/".join([*(meta.get("dir") or []), final.name])
+        return {"name": shown, "size": size, "sha256": digest.hexdigest(), "folder": str(folder)}
 
     def cancel(self, up_id: str) -> dict[str, Any]:
         with self._id_lock(up_id):

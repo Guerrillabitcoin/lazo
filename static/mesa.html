@@ -114,7 +114,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.40</p>
+          <p class="ver">0.41</p>
         </div>
         <p id="link-label">Sin conexión</p>
       </header>
@@ -369,12 +369,13 @@
         try {
           const t = await dlCall("/api/dl/tools");
           $("#dl-folder").textContent = t.folder;
-          const missing = !t.ytdlp || (!t.ffmpeg && t.ffmpeg_can_install);
-          $("#dl-tools").hidden = !missing && t.install.state !== "instalando";
+          const missing = !t.ytdlp || (!t.ffmpeg && t.ffmpeg_can_install) || (!t.deno && t.deno_can_install);
+          $("#dl-tools").hidden = !missing && !t.old && t.install.state !== "instalando";
           const parts = [];
           if (!t.ytdlp) parts.push("yt-dlp");
           if (!t.ffmpeg) parts.push("ffmpeg");
-          $("#dl-tools-msg").textContent = parts.length ? "Falta " + parts.join(" y ") + ". Se baja del sitio oficial y se comprueba su huella." : "";
+          if (!t.deno) parts.push("deno (YouTube lo necesita)");
+          $("#dl-tools-msg").textContent = parts.length ? "Falta " + parts.join(", ") + ". Se baja del sitio oficial y se comprueba su huella." : (t.old ? "Tu yt-dlp (" + t.version + ") es viejo y YouTube suele rechazarlo. Pulsa «Actualizar yt-dlp»." : "");
           $("#dl-install").hidden = !missing;
           $("#dl-update").hidden = !t.ytdlp;
           dlSay((t.ytdlp ? "yt-dlp " + t.version : "yt-dlp no instalado") + (t.ffmpeg ? " · ffmpeg listo" : " · " + (t.ffmpeg_hint || "sin ffmpeg")));
@@ -426,6 +427,7 @@
             if (inst.state === "error") $("#dl-tools-msg").textContent = "No se pudo instalar: " + inst.error;
             else dlTools();
           }
+          if ($("#dl-jobs").matches(":active")) return; // no repintar mientras se pulsa un botón
           $("#dl-jobs").replaceChildren(...(data.jobs || []).slice(0, 12).map((job) => {
             const li = document.createElement("li");
             const name = document.createElement("div");

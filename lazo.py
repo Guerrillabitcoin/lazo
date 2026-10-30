@@ -26,7 +26,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.40"
+VERSION = "0.41"
 PAIRING = protocol.Pairing()
 PORT = 8787
 VISITS: list[str] = []
@@ -301,7 +301,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.40</p>
+      <p class="ver">0.41</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -456,6 +456,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/seal.js":
             self._file(STATIC / "seal.js", "text/javascript; charset=utf-8")
             return
+        if path == "/jsqr.js":
+            self._file(STATIC / "jsqr.js", "text/javascript; charset=utf-8")
+            return
+        if path == "/jsqr-LICENSE.txt":
+            self._file(STATIC / "jsqr-LICENSE.txt", "text/plain; charset=utf-8")
+            return
         if path == "/puente-worker.js":
             self._file(STATIC / "puente-worker.js", "text/javascript; charset=utf-8")
             return
@@ -560,7 +566,7 @@ class Handler(BaseHTTPRequestHandler):
             self._upload()
             return
         if path == "/api/up/start":
-            self._guard(lambda body: UPLOADS.start(str(body.get("name", "")), body.get("size"), str(body.get("key", ""))[:200], self._who()))
+            self._guard(lambda body: UPLOADS.start(str(body.get("name", "")), body.get("size"), str(body.get("key", ""))[:200], self._who(), str(body.get("dir", ""))[:600]))
             return
         match = UP_PATH.fullmatch(path)
         if match:

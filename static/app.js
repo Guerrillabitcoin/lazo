@@ -409,7 +409,7 @@ const localHashes = new Map();
 function cryptoCall(msg, transfer) {
   if (!cryptoWorker && !cryptoBroken) {
     try {
-      cryptoWorker = new Worker("/puente-worker.js?v=0.40");
+      cryptoWorker = new Worker("/puente-worker.js?v=0.41");
       cryptoWorker.onmessage = (event) => {
         const wait = cryptoWaits.get(event.data.seq);
         if (!wait) return;
@@ -535,12 +535,25 @@ async function apiRetry(job, path, body) {
   });
 }
 
+// Carpeta relativa de un archivo elegido con «Carpeta» (webkitdirectory): «Viaje/fotos/a.jpg» -> «Viaje/fotos».
+// El PC la vuelve a sanear (sin «..», sin raíz).
+function relDir(file) {
+  const rel = String(file.webkitRelativePath || "");
+  if (!rel.includes("/")) return "";
+  return rel
+    .split("/")
+    .slice(0, -1)
+    .filter((p) => p && p !== "." && p !== "..")
+    .join("/");
+}
+
 async function sendFile(job) {
   const file = job.file;
   const start = await apiRetry(job, "/api/up/start", {
-    name: file.webkitRelativePath && file.webkitRelativePath.includes("/") ? file.name : file.name,
+    name: file.name,
+    dir: relDir(file),
     size: file.size,
-    key: `${file.name}|${file.size}|${file.lastModified || 0}`,
+    key: `${file.webkitRelativePath || file.name}|${file.size}|${file.lastModified || 0}`,
   });
   if (start.skip) {
     job.state = "Ya estaba en el PC";
@@ -720,8 +733,22 @@ function paintXfers(force) {
 document.querySelector("#send-input").addEventListener("change", (event) => queueFiles(event.target));
 document.querySelector("#send-media").addEventListener("change", (event) => queueFiles(event.target));
 /* En el móvil elegir carpeta no funciona (Android/iOS no lo dejan): se oculta. */
-if (window.matchMedia && window.matchMedia("(pointer: coarse)").matches) document.querySelector("#send-dir-label").hidden = true;
-document.querySelector("#send-dir").addEventListener("change", (event) => queueFiles(event.target));
+(function () {
+  const warn = document.querySelector("#send-dir-warn");
+  if (!("webkitdirectory" in document.createElement("input"))) {
+    warn.textContent = "Este navegador no permite elegir carpetas. Usa «Archivos» y marca varios.";
+    warn.hidden = false;
+  }
+})();
+document.querySelector("#send-dir").addEventListener("change", (event) => {
+  const files = Array.from(event.target.files || []);
+  const warn = document.querySelector("#send-dir-warn");
+  if (files.length && !files.some((f) => relDir(f))) {
+    warn.textContent = "Tu navegador no dejó elegir la carpeta; se envían como archivos sueltos.";
+    warn.hidden = false;
+  }
+  queueFiles(event.target);
+});
 document.querySelector("#xfer-cancel").addEventListener("click", () => {
   xferJobs.forEach((job) => {
     if (job.status === "wait" || job.status === "run") cancelJob(job);
@@ -766,7 +793,8 @@ async function receiveChunked(kind, id, fallbackName, onProgress) {
   document.body.append(temp);
   temp.click();
   temp.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 120000);
+  window.setTimeout(() => URL.revokeObjectURL(url), 600000);
+  info.blobUrl = url;
   return info;
 }
 
@@ -2248,17 +2276,22 @@ async function dlTools() {
   try {
     const t = await api("/api/dl/tools", null, "GET");
     const box = dlEl("#dl-tools");
-    const missing = !t.ytdlp || (!t.ffmpeg && t.ffmpeg_can_install);
-    box.hidden = !missing && t.install.state !== "instalando";
+    const missing = !t.ytdlp || (!t.ffmpeg && t.ffmpeg_can_install) || (!t.deno && t.deno_can_install);
+    box.hidden = !missing && !t.old && t.install.state !== "instalando";
     const parts = [];
     if (!t.ytdlp) parts.push("yt-dlp");
     if (!t.ffmpeg) parts.push("ffmpeg");
+    if (!t.deno) parts.push("deno (YouTube lo necesita)");
     dlEl("#dl-tools-msg").textContent = parts.length
-      ? `Falta ${parts.join(" y ")}. Se descarga del sitio oficial y se comprueba su huella.`
-      : "Herramientas listas.";
+      ? `Falta ${parts.join(", ")}. Se descarga del sitio oficial y se comprueba su huella.`
+      : t.old
+        ? `Tu yt-dlp (${t.version}) es viejo y YouTube suele rechazarlo. Pulsa «Actualizar yt-dlp».`
+        : "Herramientas listas.";
     dlEl("#dl-install").hidden = !missing;
+    dlEl("#dl-install").textContent = t.ytdlp ? "Instalar lo que falta" : "Instalar herramientas (una vez)";
     dlEl("#dl-version").textContent =
       (t.ytdlp ? `yt-dlp ${t.version || ""}` : "yt-dlp no instalado") +
+      (t.deno ? " · deno listo" : "") +
       (t.ffmpeg ? " · ffmpeg listo" : t.ffmpeg_hint ? " · " + t.ffmpeg_hint : " · sin ffmpeg (sin MP3 ni unir vídeo+audio)") +
       ` · Se guarda en ${t.folder}`;
     dlEl("#dl-update").hidden = !t.ytdlp;
@@ -2307,83 +2340,140 @@ async function dlPoll() {
   } catch (_err) {}
 }
 
+// La lista se actualiza cada 1,2 s. Antes se borraba y se volvía a pintar entera, así que
+// un toque en «Enviar al móvil» o «Cancelar» justo en ese momento se perdía. Ahora cada
+// fila se conserva (por id) y solo cambian los textos.
+var dlRows = {};
+var dlBusy = {};
+
+function dlRow(job) {
+  let r = dlRows[job.id];
+  if (r) return r;
+  const row = document.createElement("li");
+  row.className = "dl-job";
+  const name = document.createElement("p");
+  name.className = "dl-job-name";
+  const stat = document.createElement("p");
+  stat.className = "hint";
+  const err = document.createElement("p");
+  err.className = "dl-err";
+  const track = document.createElement("div");
+  track.className = "xfer-track";
+  const fill = document.createElement("div");
+  fill.className = "dl-fill";
+  track.append(fill);
+  const actions = document.createElement("div");
+  actions.className = "dl-row";
+  const send = document.createElement("button");
+  send.type = "button";
+  send.className = "primary";
+  send.addEventListener("click", () => dlReceive(dlRows[job.id].job, send));
+  const save = document.createElement("a");
+  save.className = "dl-save";
+  save.hidden = true;
+  save.textContent = "Guardar archivo";
+  const upd = document.createElement("button");
+  upd.type = "button";
+  upd.className = "primary";
+  upd.textContent = "Actualizar yt-dlp";
+  upd.addEventListener("click", dlUpdate);
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "dl-cancel";
+  cancel.addEventListener("click", async () => {
+    row.remove();
+    delete dlRows[job.id];
+    try {
+      await api("/api/dl/cancel", { id: job.id });
+      dlPoll();
+    } catch (e) {
+      say(e.message);
+    }
+  });
+  actions.append(send, save, upd, cancel);
+  row.append(name, stat, err, track, actions);
+  r = { row, name, stat, err, track, fill, send, save, upd, cancel, job };
+  dlRows[job.id] = r;
+  return r;
+}
+
 function dlRenderJobs(jobs) {
   const list = dlEl("#dl-jobs");
-  list.replaceChildren();
-  for (const job of jobs.slice(0, 12)) {
-    const row = document.createElement("li");
-    row.className = "dl-job";
-    const name = document.createElement("p");
-    name.className = "dl-job-name";
-    name.textContent = job.name || job.title;
-    const stat = document.createElement("p");
-    stat.className = "hint";
+  const shown = jobs.slice(0, 12);
+  const keep = {};
+  shown.forEach((job, i) => {
+    const r = dlRow(job);
+    r.job = job;
+    keep[job.id] = true;
+    r.name.textContent = job.name || job.title;
     let text = `${job.label} · ${job.state === "preparando" ? "preparando…" : job.state}`;
     if (job.state === "descargando") {
       text += job.pct ? ` ${job.pct}%` : job.got ? ` ${dlSize(job.got)}` : " (preparando…)";
       if (job.speed) text += ` · ${dlSize(job.speed)}/s`;
       if (job.eta) text += ` · quedan ${dlTime(job.eta)}`;
     }
-    if (job.state === "hecha") text += ` · ${dlSize(job.size)}`;
-    if (job.error) text += ` · ${job.error}`;
-    stat.textContent = text;
-    row.append(name, stat);
-    if (job.state === "descargando" || job.state === "procesando" || job.state === "preparando") {
-      const track = document.createElement("div");
-      track.className = "xfer-track";
-      const fill = document.createElement("div");
-      fill.className = "dl-fill";
-      fill.style.width = (job.state === "procesando" ? 100 : job.pct || 0) + "%";
-      if (!job.pct && job.state !== "procesando") track.classList.add("busy");
-      track.append(fill);
-      row.append(track);
+    if (job.state === "hecha") text += ` · ${dlSize(job.size)} · guardado en el PC`;
+    if (job.note && job.state !== "hecha" && job.state !== "error") text += ` · ${job.note}`;
+    r.stat.textContent = text;
+    r.err.textContent = job.error || "";
+    r.err.hidden = !job.error;
+    const active = ["en cola", "preparando", "descargando", "procesando"].includes(job.state);
+    r.track.hidden = !active;
+    r.fill.style.width = (job.state === "procesando" ? 100 : job.pct || 0) + "%";
+    r.track.classList.toggle("busy", active && !job.pct && job.state !== "procesando");
+    r.send.hidden = job.state !== "hecha";
+    if (!dlBusy[job.id]) r.send.textContent = dlSent[job.id] ? "Enviar otra vez" : "Enviar al móvil";
+    r.upd.hidden = !(job.state === "error" && job.update);
+    r.cancel.textContent = active ? "Cancelar" : "Quitar";
+    if (list.children[i] !== r.row) list.insertBefore(r.row, list.children[i] || null);
+  });
+  for (const id of Object.keys(dlRows)) {
+    if (!keep[id] && !dlBusy[id]) {
+      dlRows[id].row.remove();
+      delete dlRows[id];
     }
-    const actions = document.createElement("div");
-    actions.className = "dl-row";
-    if (job.state === "hecha") {
-      const send = document.createElement("button");
-      send.type = "button";
-      send.className = "primary";
-      send.textContent = dlSent[job.id] ? "Enviado ✓" : "Enviar al móvil";
-      send.addEventListener("click", () => dlReceive(job, send));
-      actions.append(send);
-    }
-    {
-      const active = ["en cola", "preparando", "descargando", "procesando"].includes(job.state);
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.textContent = active ? "Cancelar" : "Quitar";
-      cancel.addEventListener("click", async () => {
-        row.remove();
-        try {
-          await api("/api/dl/cancel", { id: job.id });
-          dlPoll();
-        } catch (err) {
-          say(err.message);
-        }
-      });
-      actions.append(cancel);
-    }
-    if (actions.childElementCount) row.append(actions);
-    list.append(row);
+  }
+}
+
+async function dlUpdate() {
+  try {
+    const res = await api("/api/dl/update", {});
+    say(res.detail || "Actualizando…");
+    dlEl("#dl-tools").hidden = false;
+    dlWasInstalling = true;
+    dlPoll();
+  } catch (err) {
+    say(err.message);
   }
 }
 
 async function dlReceive(job, button) {
+  if (dlBusy[job.id]) return;
+  dlBusy[job.id] = true;
   button.disabled = true;
   button.textContent = "Recibiendo…";
   try {
-    await receiveChunked("dl", job.id, job.name || "descarga", (got, size) => {
+    const info = await receiveChunked("dl", job.id, job.name || "descarga", (got, size) => {
       button.textContent = `Recibiendo… ${Math.round((got / Math.max(1, size)) * 100)}%`;
     });
     dlSent[job.id] = true;
     button.textContent = "Enviado ✓";
-    say("Guardado en el móvil");
+    // Algunos móviles ignoran la descarga automática tras una espera larga: dejamos un
+    // enlace real para tocarlo a mano.
+    const r = dlRows[job.id];
+    if (r && info && info.blobUrl) {
+      r.save.href = info.blobUrl;
+      r.save.download = info.name || job.name || "descarga";
+      r.save.hidden = false;
+      r.save.textContent = "¿No se guardó? Toca aquí";
+    }
+    say("Listo: mira las descargas del móvil");
   } catch (err) {
     button.textContent = "Enviar al móvil";
     say(err.message);
   } finally {
     button.disabled = false;
+    delete dlBusy[job.id];
   }
 }
 
@@ -2607,3 +2697,209 @@ document.addEventListener("visibilitychange", () => {
   if (tab === "dl") dlPoll();
   if (tab === "youtube" || tab === "spotify") mediaPoll();
 });
+
+/* ---- Escanear el QR del PC ----
+   Por HTTP en la Wi-Fi (sin certificado) Chrome y Safari NO dejan usar la cámara en
+   directo (getUserMedia solo existe en HTTPS o localhost). Por eso «Escanear QR» abre
+   la cámara NATIVA del móvil (input con capture) y la foto se lee aquí mismo, sin
+   internet: primero con BarcodeDetector si el navegador lo tiene y si no con jsQR
+   (Apache-2.0, incluido en /jsqr.js). Si hay cámara en directo (localhost/HTTPS), se usa. */
+var qrLib = null;
+var qrStream = null;
+var qrTimer = 0;
+
+function qrSay(text) {
+  const el = document.querySelector("#qr-msg");
+  if (el) el.textContent = text;
+  say(text);
+}
+
+function qrLoadLib() {
+  if (window.jsQR) return Promise.resolve(window.jsQR);
+  if (qrLib) return qrLib;
+  qrLib = new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "/jsqr.js?v=0.41";
+    s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error("No se pudo cargar el lector de QR")));
+    s.onerror = () => {
+      qrLib = null;
+      reject(new Error("No se pudo cargar el lector de QR"));
+    };
+    document.head.append(s);
+  });
+  return qrLib;
+}
+
+// ¿Es una dirección de la red de casa? Nunca saltamos a internet pública.
+function qrPrivateHost(host) {
+  const h = String(host || "").toLowerCase().replace(/^\[|\]$/g, "");
+  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".lan") || h.endsWith(".home.arpa")) return true;
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (m) {
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if ([m[1], m[2], m[3], m[4]].some((x) => Number(x) > 255)) return false;
+    return a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127);
+  }
+  if (h.includes(":")) return h === "::1" || /^f[cd][0-9a-f]{2}:/.test(h) || /^fe[89ab][0-9a-f]:/.test(h);
+  return false;
+}
+
+// Texto del QR -> entrar. Devuelve un mensaje de error o "" si va bien.
+function qrUse(text) {
+  let url;
+  try {
+    url = new URL(String(text || "").trim());
+  } catch (_err) {
+    return "Ese QR no es de LaZoo";
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") return "Ese QR no es de LaZoo";
+  const key = new URLSearchParams(url.hash.replace(/^#/, "")).get("k") || "";
+  if (!key) return "Ese QR no trae la clave de LaZoo";
+  if (!qrPrivateHost(url.hostname)) return "Ese QR apunta a internet, no a un PC de tu red. No lo abro.";
+  if (url.host === location.host) {
+    try {
+      setMasterKey(key);
+    } catch (_err) {
+      return "La clave del QR no es válida";
+    }
+    localStorage.setItem("lazo-key", key);
+    qrSay("QR leído. Conectando…");
+    window.setTimeout(() => location.replace(location.pathname), 150);
+    return "";
+  }
+  qrSay("QR leído. Abriendo LaZoo en " + url.host + "…");
+  window.setTimeout(() => location.replace(url.origin + "/#k=" + encodeURIComponent(key)), 150);
+  return "";
+}
+
+async function qrFromCanvas(canvas) {
+  if ("BarcodeDetector" in window) {
+    try {
+      const det = new window.BarcodeDetector({ formats: ["qr_code"] });
+      const codes = await det.detect(canvas);
+      if (codes && codes.length) return codes[0].rawValue;
+    } catch (_err) {}
+  }
+  const jsQR = await qrLoadLib();
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const found = jsQR(img.data, img.width, img.height, { inversionAttempts: "attemptBoth" });
+  return found ? found.data : "";
+}
+
+async function qrLoadImage(file) {
+  if (window.createImageBitmap) {
+    try {
+      return await createImageBitmap(file, { imageOrientation: "from-image" });
+    } catch (_err) {}
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    return img;
+  } finally {
+    window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
+}
+
+// Una foto del móvil pesa 12 MP: se prueba a varios tamaños (los QR pequeños en la foto
+// necesitan resolución; los grandes se leen mejor reducidos).
+async function qrFromFile(file) {
+  if (!file) return;
+  qrSay("Leyendo el QR de la foto…");
+  let img;
+  try {
+    img = await qrLoadImage(file);
+  } catch (_err) {
+    qrSay("No pude abrir esa imagen");
+    return;
+  }
+  const w = img.width || img.naturalWidth;
+  const h = img.height || img.naturalHeight;
+  for (const side of [1600, 1000, 640, 2400]) {
+    const scale = Math.min(1, side / Math.max(w, h));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    canvas.getContext("2d", { willReadFrequently: true }).drawImage(img, 0, 0, canvas.width, canvas.height);
+    let text = "";
+    try {
+      text = await qrFromCanvas(canvas);
+    } catch (err) {
+      qrSay(err.message);
+      return;
+    }
+    if (text) {
+      const bad = qrUse(text);
+      if (bad) qrSay(bad);
+      return;
+    }
+    if (scale === 1 && side !== 2400) continue;
+  }
+  qrSay("No encontré un QR en la foto. Acércate, que salga entero y sin reflejos.");
+}
+
+function qrStopLive() {
+  window.clearInterval(qrTimer);
+  qrTimer = 0;
+  if (qrStream) qrStream.getTracks().forEach((t) => t.stop());
+  qrStream = null;
+  document.querySelector("#qr-live").hidden = true;
+}
+
+async function qrLive() {
+  const video = document.querySelector("#qr-video");
+  qrStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+  video.srcObject = qrStream;
+  document.querySelector("#qr-live").hidden = false;
+  await video.play();
+  const canvas = document.createElement("canvas");
+  let busy = false;
+  qrTimer = window.setInterval(async () => {
+    if (busy || !video.videoWidth) return;
+    busy = true;
+    try {
+      const scale = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight));
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      canvas.getContext("2d", { willReadFrequently: true }).drawImage(video, 0, 0, canvas.width, canvas.height);
+      const text = await qrFromCanvas(canvas);
+      if (text) {
+        const bad = qrUse(text);
+        if (!bad) qrStopLive();
+        else qrSay(bad);
+      }
+    } catch (_err) {
+    } finally {
+      busy = false;
+    }
+  }, 300);
+}
+
+function qrStart() {
+  // Cámara en directo solo donde el navegador la permite (HTTPS o localhost).
+  if (window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    qrLoadLib().catch(() => {});
+    qrLive().catch(() => {
+      qrStopLive();
+      document.querySelector("#qr-cam").click();
+    });
+    return;
+  }
+  // Por HTTP: cámara nativa del móvil. Tiene que ir dentro del mismo toque.
+  document.querySelector("#qr-cam").click();
+  qrLoadLib().catch(() => {});
+}
+
+document.querySelector("#qr-scan").addEventListener("click", qrStart);
+document.querySelector("#qr-top").addEventListener("click", qrStart);
+document.querySelector("#qr-stop").addEventListener("click", qrStopLive);
+for (const sel of ["#qr-cam", "#qr-photo"]) {
+  document.querySelector(sel).addEventListener("change", (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = "";
+    qrFromFile(file);
+  });
+}

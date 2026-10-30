@@ -641,3 +641,15 @@ button[data-cursor] { min-height: 44px; }
 .win-acts .win-close { background: #8f2a20; color: #fff; }
 .win-panel .win-move { margin-top: 8px; }
 .win-acts button { white-space: normal; line-height: 1.15; text-align: center; overflow: visible; text-overflow: clip; }
+.dl-err { margin: 0; color: #ff8f7a; font-size: 0.86rem; word-break: break-word; }
+.dl-save { color: var(--copper); align-self: center; text-decoration: underline; }
+.dl-job [hidden] { display: none !important; }
+/* Escanear QR (pantalla de PIN / sin conexión) */
+.qr-box { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); }
+.qr-btn { min-height: 52px; font-size: 1.05rem; }
+.qr-box .hint { margin: 0; }
+.qr-top { display: none; margin-left: auto; min-height: 36px; padding: 0 12px; border-radius: 999px; background: var(--copper, #e07a3d); color: #111; font-weight: 700; border: 0; }
+.top[data-link="off"] .qr-top { display: inline-block; }
+.qr-live[hidden] { display: none !important; }
+.qr-live { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,0.92); display: grid; place-content: center; gap: 12px; padding: 16px; text-align: center; }
+.qr-live video { width: min(92vw, 420px); aspect-ratio: 1; object-fit: cover; border-radius: 16px; border: 2px solid var(--copper, #e07a3d); }

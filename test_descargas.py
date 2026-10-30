@@ -25,6 +25,23 @@ if "slow" in url:
     for i in range(200):
         print("LZP %d|1000|NA|10|5" % i, flush=True)
         time.sleep(0.1)
+if "--encoding" not in args:
+    print("ERROR: falta --encoding utf-8", flush=True)
+    sys.exit(1)
+if "garbled" in url:
+    # yt-dlp en Windows escribía la ruta en la página de códigos de la consola: LaZoo no la
+    # reconocía y decía «No salió ningún archivo» aunque el vídeo estaba bajado.
+    print("[twitter] 99999: Downloading guest token", flush=True)
+    real = os.path.join(out, "NASA \u2019 DART [88888].mp4")
+    open(real, "w").write("video")
+    print("LZF " + real.replace("\u2019", "?"), flush=True)
+    sys.exit(0)
+if "youtube.com" in url:
+    client = args[args.index("--extractor-args") + 1] if "--extractor-args" in args else ""
+    print("[youtube] botbotbotbo: Downloading webpage", flush=True)
+    if "always" in url or "mweb" not in client:
+        print("ERROR: [youtube] botbotbotbo: Sign in to confirm you\u2019re not a bot. Use --cookies", flush=True)
+        sys.exit(1)
 path = os.path.join(out, "ok [ok123456].mp4")
 open(path, "w").write("video")
 print("LZP 1000|1000|NA|10|0", flush=True)
@@ -37,15 +54,16 @@ class QueueTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         fake = Path(self.tmp.name) / "fake.py"
         fake.write_text(FAKE, encoding="utf-8")
-        self.old = (descargas.find_ytdlp, descargas.find_ffmpeg)
+        self.old = (descargas.find_ytdlp, descargas.find_ffmpeg, descargas.find_deno)
         descargas.find_ytdlp = lambda: [sys.executable, str(fake)]
         descargas.find_ffmpeg = lambda: None
+        descargas.find_deno = lambda: None
         self.q = descargas.Queue()
         self.q.out_dir = Path(self.tmp.name) / "out"
         self.q.idle_limit = 2
 
     def tearDown(self):
-        descargas.find_ytdlp, descargas.find_ffmpeg = self.old
+        descargas.find_ytdlp, descargas.find_ffmpeg, descargas.find_deno = self.old
         for job in list(self.q.jobs):
             self.q.cancel(job["id"])
         for proc in list(self.q.procs.values()):
@@ -132,6 +150,51 @@ class QueueTest(unittest.TestCase):
         self.q.worker = None
         self.q.status()
         self.assertTrue(self.q.worker.is_alive())
+
+
+    # --- 0.41: lo que pasaba en el PC real ---
+
+    def test_path_with_bad_encoding_still_found(self):
+        a = self.q.start("https://x.com/NASA/status/1574539270987173903?garbled", "best")
+        job = self.wait(a["job"]["id"], ("hecha", "error"))
+        self.assertEqual(job["state"], "hecha", job)
+        self.assertIn("DART", job["name"])
+
+    def test_youtube_bot_check_falls_back_to_other_client(self):
+        a = self.q.start("https://www.youtube.com/watch?v=botbotbotbo", "best")
+        job = self.wait(a["job"]["id"], ("hecha", "error"), 20)
+        self.assertEqual(job["state"], "hecha", job)
+
+    def test_youtube_bot_check_real_error_shown(self):
+        a = self.q.start("https://www.youtube.com/watch?v=botbotbotbo&always=1", "best")
+        job = self.wait(a["job"]["id"], ("error",), 20)
+        self.assertIn("deno", job["error"])  # sin deno lo dice claro
+        self.assertIn("bot", job["error"])
+        self.assertTrue(job["update"])
+        descargas.find_deno = lambda: "/x/deno"
+        b = self.q.start("https://www.youtube.com/watch?v=botbotbotbo&always=2", "720")
+        job = self.wait(b["job"]["id"], ("error",), 20)
+        self.assertNotIn("deno", job["error"])
+        self.assertIn("no eres un bot", job["error"])
+
+    def test_list_param_ignored(self):
+        cmd = descargas.download_cmd("https://www.youtube.com/watch?v=jNQXAC9IVRw&list=PL1", "best", Path("."), None, False)
+        self.assertIn("--no-playlist", cmd)
+        self.assertIn("--encoding", cmd)
+
+    def test_helpers(self):
+        self.assertTrue(descargas.should_retry("ERROR: Sign in to confirm you're not a bot"))
+        self.assertTrue(descargas.should_retry("HTTP Error 429: Too Many Requests"))
+        self.assertFalse(descargas.should_retry("ERROR: Private video"))
+        self.assertTrue(descargas.needs_update("ERROR: Unable to extract uploader id"))
+        self.assertFalse(descargas.needs_update("ERROR: Private video"))
+        self.assertTrue(descargas.ytdlp_old("2024.01.01"))
+        self.assertFalse(descargas.ytdlp_old(time.strftime("%Y.%m.%d")))
+        self.assertFalse(descargas.ytdlp_old(""))
+        self.assertTrue(descargas.is_youtube("https://youtu.be/x"))
+        self.assertTrue(descargas.is_youtube("https://m.youtube.com/watch?v=x"))
+        self.assertFalse(descargas.is_youtube("https://notyoutube.com/x"))
+        self.assertTrue(descargas.deno_asset().startswith("deno-"))
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# LaZoo 0.40
+# LaZoo 0.41
 
 Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -11,7 +11,9 @@ Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada 
 - Spotify: los mismos iconos y la misma regla de 5 s en anterior, y volumen de la app
 - Cursor del sistema: normal, grande o enorme
 - Sistema: volumen de sistema, brillo del portátil (Windows; Linux con brightnessctl), intercambiar las ventanas entre dos pantallas y bloquear el PC (en rojo y con confirmación). El menú Win+P queda en Pruebas
-- Descargatodo: cola que no se atasca, sin duplicados (mismo vídeo y mismo formato), cancelar la quita de la lista y borra los restos, y si no avanza en 60 s se para y dice por qué
+- Descargatodo: cola que no se atasca, sin duplicados (mismo vídeo y mismo formato), cancelar la quita de la lista y borra los restos, y si no avanza en 60 s se para y dice por qué. YouTube hoy exige un intérprete JS: «Instalar herramientas» baja también `deno` (sitio oficial, huella SHA-256 comprobada) a `herramientas/`. Si YouTube frena el PC («confirma que no eres un bot»), LaZoo reintenta solo con otros modos de YouTube. El error real sale en español en la tarjeta, con botón «Actualizar yt-dlp» cuando toca
+- Puente: «Archivos» abre el selector de archivos del móvil (sin filtro de tipo, para que Android no lo mande a la galería), «Fotos y vídeos» la galería y «Carpeta» una carpeta entera, que llega al PC con sus subcarpetas
+- Sin conexión: en la pantalla del PIN hay «Escanear QR». Por HTTP los navegadores no dejan usar la cámara en directo, así que abre la cámara del móvil, saca una foto del QR y la lee sin internet (BarcodeDetector o jsQR, Apache-2.0, en `static/jsqr.js`). También vale la app de cámara del móvil
 
 No es una web suelta. El navegador del móvil no puede mover el ratón del ordenador. Lazo es un programa pequeño que arrancas **en el PC** y el móvil entra por la Wi-Fi.
 

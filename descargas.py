@@ -43,6 +43,8 @@ PROGRESS = "download:LZP %(progress.downloaded_bytes)s|%(progress.total_bytes)s|
 YTDLP_BASE = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/"
 FFMPEG_BASE = "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/"
 FFMPEG_ZIP = "ffmpeg-master-latest-win64-gpl.zip"
+DENO_BASE = "https://github.com/denoland/deno/releases/latest/download/"
+OLD_DAYS = 60
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if SYSTEM == "Windows" else 0
 EXE = ".exe" if SYSTEM == "Windows" else ""
 
@@ -76,6 +78,23 @@ def find_ytdlp() -> list[str] | None:
         return [str(local)]
     found = shutil.which("yt-dlp")
     return [found] if found else None
+
+
+def find_deno() -> str | None:
+    """Intérprete JS que yt-dlp necesita hoy para YouTube (resolver sus desafíos)."""
+    local = _local("deno")
+    if local.is_file():
+        return str(local)
+    return shutil.which("deno")
+
+
+def deno_asset() -> str:
+    arch = "aarch64" if platform.machine().lower() in ("aarch64", "arm64") else "x86_64"
+    if SYSTEM == "Windows":
+        return "deno-x86_64-pc-windows-msvc.zip"
+    if SYSTEM == "Darwin":
+        return f"deno-{arch}-apple-darwin.zip"
+    return f"deno-{arch}-unknown-linux-gnu.zip"
 
 
 def find_ffmpeg() -> str | None:
@@ -125,6 +144,9 @@ def tools_status() -> dict[str, Any]:
         "ytdlp": bool(yt),
         "ytdlp_local": bool(yt) and yt[0] == str(_local("yt-dlp")),
         "version": version,
+        "old": ytdlp_old(version),
+        "deno": bool(find_deno()),
+        "deno_can_install": SYSTEM in ("Windows", "Darwin", "Linux"),
         "ffmpeg": bool(ff),
         "ffmpeg_can_install": SYSTEM == "Windows",
         "ffmpeg_hint": "" if ff else ffmpeg_hint(),
@@ -132,6 +154,18 @@ def tools_status() -> dict[str, Any]:
         "folder": str(QUEUE.out_dir),
         "notice": NOTICE,
     }
+
+
+def ytdlp_old(version: str) -> bool:
+    """yt-dlp sale cada pocas semanas; uno de hace más de 60 días suele fallar con YouTube."""
+    m = re.match(r"(\d{4})\.(\d{2})\.(\d{2})", version or "")
+    if not m:
+        return False
+    try:
+        made = time.mktime((int(m.group(1)), int(m.group(2)), int(m.group(3)), 0, 0, 0, 0, 0, -1))
+    except (OverflowError, ValueError):
+        return False
+    return time.time() - made > OLD_DAYS * 86400
 
 
 def _fetch(url: str, cap: int, what: str) -> bytes:
@@ -238,8 +272,30 @@ def _install_ffmpeg() -> None:
         raise DlError("ffmpeg: el zip no traía ffmpeg.exe")
 
 
+def _install_deno() -> None:
+    asset = deno_asset()
+    sums = _fetch(DENO_BASE + asset + ".sha256sum", 64 * 1024, "huella de deno").decode("utf-8", "replace")
+    found = re.search(r"\b([0-9a-fA-F]{64})\b", sums)
+    if not found:
+        raise DlError("no encontré la huella oficial de deno")
+    data = _fetch(DENO_BASE + asset, 200 * 1024 * 1024, "deno (para YouTube)")
+    if hashlib.sha256(data).hexdigest() != found.group(1).lower():
+        raise DlError("deno: la huella no coincide, no lo instalo")
+    TOOLS_DIR.mkdir(parents=True, exist_ok=True)
+    target = _local("deno")
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        name = next((n for n in zf.namelist() if n.rsplit("/", 1)[-1] == "deno" + EXE), "")
+        if not name:
+            raise DlError("deno: el zip no traía el programa")
+        temp = target.with_suffix(target.suffix + ".part")
+        temp.write_bytes(zf.read(name))
+    if SYSTEM != "Windows":
+        temp.chmod(0o755)
+    os.replace(temp, target)
+
+
 def install(what: str = "all") -> dict[str, Any]:
-    if what not in ("all", "ytdlp", "ffmpeg"):
+    if what not in ("all", "ytdlp", "ffmpeg", "deno"):
         raise DlError("¿instalar qué?")
     if not _INSTALL_LOCK.acquire(blocking=False):
         raise DlError("Ya se está instalando")
@@ -251,6 +307,12 @@ def install(what: str = "all") -> dict[str, Any]:
                 _install_ytdlp()
             if what == "ffmpeg" or (what == "all" and SYSTEM == "Windows" and not find_ffmpeg()):
                 _install_ffmpeg()
+            if what == "deno" or (what in ("all", "ytdlp") and not find_deno()):
+                try:
+                    _install_deno()
+                except DlError:
+                    if what == "deno":
+                        raise
             INSTALL.update(state="hecho", what="")
         except Exception as exc:  # noqa: BLE001 (se muestra al usuario)
             INSTALL.update(state="error", error=str(exc)[:200] or "No se pudo instalar")
@@ -263,8 +325,8 @@ def install(what: str = "all") -> dict[str, Any]:
 
 def update() -> dict[str, Any]:
     yt = find_ytdlp()
-    if not yt or yt[0] == str(_local("yt-dlp")):
-        return install("ytdlp")
+    if not yt or yt[0] == str(_local("yt-dlp")) or not find_deno():
+        return install("ytdlp" if (not yt or yt[0] == str(_local("yt-dlp"))) else "deno")
     try:
         out = subprocess.run([*yt, "-U"], capture_output=True, text=True, timeout=180, **_run_kwargs())
     except (OSError, subprocess.SubprocessError) as exc:
@@ -293,10 +355,59 @@ def check_url(url: Any) -> str:
     return url
 
 
-def info_cmd(url: str, playlist: bool = False) -> list[str]:
+def is_youtube(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return host == "youtu.be" or host == "youtube.com" or host.endswith(".youtube.com") or host.endswith("youtube-nocookie.com")
+
+
+# Si YouTube frena este PC («confirma que no eres un bot», 429), estos clientes
+# suelen seguir dando al menos una calidad. Se prueban en orden.
+YT_CLIENTS = ("", "mweb", "tv,web_safari")
+
+
+def base_args(client: str = "") -> list[str]:
+    args = [*ytdlp_cmd(), "--ignore-config", "--encoding", "utf-8"]
+    deno = find_deno()
+    if deno:
+        args += ["--js-runtimes", "deno:" + deno]
+    if client:
+        args += ["--extractor-args", "youtube:player_client=" + client]
+    return args
+
+
+def child_env() -> dict[str, str]:
+    """yt-dlp en Windows escribe en la página de códigos de la consola; así lo forzamos a UTF-8."""
+    env = dict(os.environ)
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    return env
+
+
+_RETRY_MARKS = ("not a bot", "sign in to confirm", "http error 429", "too many requests",
+                "no video formats found", "page needs to be reloaded", "http error 403",
+                "requested format is not available", "only images are available")
+
+
+def should_retry(text: str) -> bool:
+    low = (text or "").lower()
+    return any(mark in low for mark in _RETRY_MARKS)
+
+
+_UPDATE_MARKS = ("unable to extract", "http error 403", "no video formats found", "nsig", "signature extraction",
+                 "please report this issue", "yt-dlp -u", "guest token", "page needs to be reloaded",
+                 "js runtime", "javascript runtime")
+
+
+def needs_update(text: str) -> bool:
+    """¿El fallo huele a yt-dlp viejo o sin intérprete JS? Entonces se ofrece «Actualizar yt-dlp»."""
+    low = (text or "").lower()
+    return any(mark in low for mark in _UPDATE_MARKS)
+
+
+def info_cmd(url: str, playlist: bool = False, client: str = "") -> list[str]:
     url = check_url(url)
     mode = ["--yes-playlist", "--flat-playlist"] if playlist else ["--no-playlist"]
-    return [*ytdlp_cmd(), "--ignore-config", "-J", *mode, "--no-warnings", "--", url]
+    return [*base_args(client), "-J", *mode, "--no-warnings", "--", url]
 
 
 SIMPLE = ("best", "1080", "720", "480", "mp3", "audio")
@@ -328,11 +439,11 @@ def selector(choice: str, ffmpeg: bool) -> tuple[list[str], str]:
     raise DlError("Formato no válido")
 
 
-def download_cmd(url: str, choice: str, out_dir: Path, ffmpeg: str | None = None, playlist: bool = False) -> list[str]:
+def download_cmd(url: str, choice: str, out_dir: Path, ffmpeg: str | None = None, playlist: bool = False, client: str = "") -> list[str]:
     url = check_url(url)
     sel, _label = selector(choice, bool(ffmpeg))
     cmd = [
-        *ytdlp_cmd(), "--ignore-config", "--newline", "--no-mtime",
+        *base_args(client), "--newline", "--no-mtime",
         "--windows-filenames",
         "--yes-playlist" if playlist else "--no-playlist",
         "--progress-template", PROGRESS,
@@ -414,25 +525,34 @@ _INFO_LOCK = threading.Lock()
 
 
 def get_info(url: str, playlist: bool = False) -> dict[str, Any]:
-    cmd = info_cmd(url, playlist)
+    info_cmd(url, playlist)  # valida el enlace y que exista yt-dlp
     if not _INFO_LOCK.acquire(blocking=False):
         raise DlError("Ya estoy buscando otro enlace")
+    clients = YT_CLIENTS if is_youtube(url) else ("",)
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90, **_run_kwargs())
-    except subprocess.TimeoutExpired as exc:
-        raise DlError("La web tardó demasiado") from exc
-    except OSError as exc:
-        raise DlError("No pude abrir yt-dlp") from exc
+        for client in clients:
+            try:
+                out = subprocess.run(info_cmd(url, playlist, client), capture_output=True, text=True, encoding="utf-8",
+                                     errors="replace", timeout=90, env=child_env(), **_run_kwargs())
+            except subprocess.TimeoutExpired as exc:
+                raise DlError("La web tardó demasiado") from exc
+            except OSError as exc:
+                raise DlError("No pude abrir yt-dlp") from exc
+            if out.returncode == 0 or not should_retry(out.stderr):
+                break
     finally:
         _INFO_LOCK.release()
     if out.returncode != 0:
-        raise DlError(_clean_error(out.stderr))
+        err = DlError(_clean_error(out.stderr))
+        err.update = needs_update(out.stderr)  # type: ignore[attr-defined]
+        raise err
     try:
         data = json.loads(out.stdout)
     except json.JSONDecodeError as exc:
         raise DlError("yt-dlp no devolvió datos") from exc
     result = parse_info(data)
     result["ffmpeg"] = bool(find_ffmpeg())
+    result["client"] = client
     return result
 
 
@@ -456,7 +576,15 @@ _ERROR_TEXT = (
     ("timed out", "La web tardó demasiado en contestar"),
     ("private video", "Ese vídeo es privado"),
     ("video unavailable", "Ese vídeo no está disponible"),
-    ("sign in to confirm", "La web pide iniciar sesión para ese vídeo"),
+    ("not a bot", "YouTube ha frenado a este PC («confirma que no eres un bot»). Ya probé otros modos; espera un rato y reintenta"),
+    ("sign in to confirm your age", "Ese vídeo tiene restricción de edad y pide iniciar sesión"),
+    ("sign in to confirm", "YouTube pide iniciar sesión para ese vídeo"),
+    ("too many requests", "La web pide esperar (demasiadas peticiones)"),
+    ("no video formats found", "YouTube no dio ningún formato. Pulsa «Actualizar yt-dlp» y vuelve a intentarlo"),
+    ("page needs to be reloaded", "YouTube no dio ningún formato. Pulsa «Actualizar yt-dlp» y vuelve a intentarlo"),
+    ("this live event will begin", "Ese directo aún no ha empezado"),
+    ("permission denied", "No puedo escribir en la carpeta de descargas"),
+    ("no space left", "No queda espacio en el disco del PC"),
     ("http error 404", "Ese enlace no existe (404)"),
     ("requested format is not available", "Ese formato no existe para este enlace. Prueba «Mejor calidad»"),
     ("ffmpeg is not installed", "Falta ffmpeg para juntar vídeo y audio"),
@@ -600,7 +728,7 @@ class Queue:
         return {"ok": True, "detail": "En cola: " + job["title"][:40], "job": self.public(job)}
 
     def public(self, job: dict[str, Any]) -> dict[str, Any]:
-        return {k: v for k, v in job.items() if k not in ("url", "path", "key", "started", "last")}
+        return {k: v for k, v in job.items() if k not in ("url", "path", "key", "started", "last", "last_error")}
 
     def status(self) -> dict[str, Any]:
         self._ensure_worker()
@@ -682,7 +810,35 @@ class Queue:
 
     def _run(self, job: dict[str, Any]) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
-        cmd = download_cmd(job["url"], job["choice"], self.out_dir, find_ffmpeg(), job["playlist"])
+        job["started"] = time.time()
+        clients = YT_CLIENTS if is_youtube(job["url"]) else ("",)
+        for n, client in enumerate(clients):
+            if n:
+                job.update(state="preparando", pct=0.0, got=0, note="Reintentando con otro modo de YouTube…")
+            result = self._attempt(job, client, n + 1 < len(clients))
+            if result != "retry":
+                return
+
+    def _found(self, job: dict[str, Any]) -> list[Path]:
+        """Plan B si yt-dlp no dijo la ruta: archivos nuevos con el [id] del vídeo."""
+        tag = job.get("vid") or ""
+        found = []
+        try:
+            for item in self.out_dir.iterdir():
+                name = item.name
+                if not item.is_file():
+                    continue
+                if name.endswith((".part", ".ytdl", ".temp")) or ".part-Frag" in name or ".temp." in name or re.search(r"\.f[0-9A-Za-z-]+\.\w+$", name):
+                    continue
+                if item.stat().st_mtime >= job.get("started", 0) - 2:
+                    found.append(item)
+        except OSError:
+            return []
+        tagged = [p for p in found if tag and f"[{tag}]" in p.name]
+        return sorted(tagged or found, key=lambda p: p.stat().st_mtime)
+
+    def _attempt(self, job: dict[str, Any], client: str, can_retry: bool = False) -> str:
+        cmd = download_cmd(job["url"], job["choice"], self.out_dir, find_ffmpeg(), job["playlist"], client)
         kwargs = _run_kwargs()
         if SYSTEM == "Windows":
             kwargs["creationflags"] = kwargs.get("creationflags", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -690,7 +846,7 @@ class Queue:
             kwargs["start_new_session"] = True
         proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            encoding="utf-8", errors="replace", bufsize=1, **kwargs,
+            encoding="utf-8", errors="replace", bufsize=1, env=child_env(), **kwargs,
         )
         with self.lock:
             self.procs[job["id"]] = proc
@@ -726,24 +882,40 @@ class Queue:
         except subprocess.TimeoutExpired:
             _kill_tree(proc)
             code = -1
+        if proc.stdout:
+            proc.stdout.close()
         with self.lock:
             self.procs.pop(job["id"], None)
         if job["state"] == "cancelada":
             self._clean_parts(job)
-            return
+            return "fin"
+        if not files and code == 0:
+            files = self._found(job)
         if stalled:
             job["state"] = "error"
             why = _clean_error("\n".join(tail)) if tail else ""
             job["error"] = (f"Sin avance en {self.idle_limit} s. " + (why or "La web no responde o el formato no existe.") + "")[:180]
+            job["update"] = needs_update("\n".join(tail))
             self._clean_parts(job)
-            return
+            return "fin"
         if code != 0 or not files:
+            text = "\n".join(tail)
+            if can_retry and code != 0 and not files and should_retry(text) and job["state"] != "cancelada":
+                job["last_error"] = _clean_error(text)
+                self._clean_parts(job)
+                return "retry"
             job["state"] = "error"
-            job["error"] = _clean_error("\n".join(tail)) if code != 0 else "No salió ningún archivo"
+            job["error"] = (_clean_error(text) if code != 0 else "yt-dlp terminó pero no encuentro el archivo en la carpeta")[:240]
+            job["update"] = needs_update(text)
+            if code != 0 and is_youtube(job["url"]) and not find_deno():
+                job["error"] = ("YouTube ahora necesita «deno»: pulsa «Instalar lo que falta» arriba. "
+                                + job["error"])[:300]
+                job["update"] = True
             self._clean_parts(job)
-            return
+            return "fin"
         last = files[-1]
-        job.update(state="hecha", pct=100.0, path=str(last), name=last.name, size=last.stat().st_size, count=len(files))
+        job.update(state="hecha", pct=100.0, path=str(last), name=last.name, size=last.stat().st_size, count=len(files), note="", error="")
+        return "fin"
 
     def _line(self, job: dict[str, Any], line: str, tail: list[str], files: list[Path]) -> None:
         if not line:
