@@ -1,4 +1,4 @@
-# LaZoo 0.35
+# LaZoo 0.36
 
 Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 

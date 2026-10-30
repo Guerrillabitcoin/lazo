@@ -80,8 +80,8 @@ const TOOLS = [
   { id: "spotify", name: "Spotify" },
   { id: "notes", name: "Notas" },
   { id: "system", name: "Sistema" },
-  { id: "lab", name: "Pruebas" },
   { id: "dl", name: "Descargatodo" },
+  { id: "lab", name: "Pruebas" },
 ];
 const PINNED = ["mouse"];
 
@@ -546,6 +546,17 @@ function loadOrder() {
     } catch (_err) {
       /* sin almacenamiento: vale el orden de esta visita */
     }
+  }
+  try {
+    if (!localStorage.getItem("lazo-order-dl") && saved.includes("dl") && saved.includes("lab")) {
+      const without = saved.filter((id) => id !== "dl");
+      without.splice(without.indexOf("lab"), 0, "dl");
+      saved = without;
+      localStorage.setItem("lazo-order", JSON.stringify(saved));
+    }
+    localStorage.setItem("lazo-order-dl", "1");
+  } catch (_err) {
+    /* sin almacenamiento */
   }
   const rest = saved.filter((id) => known.includes(id) && !PINNED.includes(id));
   known.forEach((id) => {
