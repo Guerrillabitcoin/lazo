@@ -12,6 +12,7 @@ import re
 import shutil
 import ssl
 import subprocess
+import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -123,10 +124,15 @@ def _get_python(url: str, cap: int = 64) -> bytes:
         return res.read(cap)
 
 
-def _get_curl(url: str, cap: int = 64) -> bytes:
-    # Igual que Descargatodo: en Windows, curl.exe usa el almacén de certificados del sistema.
-    from descargas import _run_kwargs
+def _run_kwargs() -> dict:
+    kwargs: dict = {"stdin": subprocess.DEVNULL}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = 0x08000000  # sin ventana negra
+    return kwargs
 
+
+def _get_curl(url: str, cap: int = 64) -> bytes:
+    # En Windows, curl.exe usa el almacén de certificados del sistema.
     out = subprocess.run(
         [shutil.which("curl") or "curl", "-fsSL", "--proto", "=https", "--proto-redir", "=https",
          "--max-time", "8", "--max-filesize", str(max(cap, 1024) * 16), "-A", "LaZoo", url],

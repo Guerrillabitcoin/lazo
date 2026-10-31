@@ -95,9 +95,6 @@
         padding: 10px 12px;
       }
       small { color: #c4b8aa; }
-      .dl-notice { border: 1px solid #e07a3d; color: #e07a3d; border-radius: 10px; padding: 8px 10px; font-size: 13px; }
-      .dl input[type="url"] { flex: 1; min-height: 44px; border: 1px solid #4a4036; border-radius: 12px; background: #16130f; padding: 8px 12px; }
-      .dl .row button { padding: 0 16px; }
       .choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
       .choices button { padding: 0 14px; }
       .card { background: #16130f; border-radius: 12px; padding: 12px; margin-top: 12px; }
@@ -106,6 +103,13 @@
       .fill { height: 100%; background: #e07a3d; }
       .jobs li { display: block; background: #16130f; border-radius: 12px; padding: 10px 12px; }
       .jobs li .row button, .jobs li .row a { flex: none; padding: 0 14px; display: inline-grid; place-items: center; min-height: 40px; background: #3a332b; }
+      .ask { display: grid; gap: 10px; margin: 0 0 18px; }
+      .ask .card { border: 2px solid #e07a3d; border-radius: 14px; padding: 14px 16px; background: #241f1a; display: grid; gap: 10px; }
+      .ask .card p { margin: 0; }
+      .ask .card .row { display: flex; gap: 10px; }
+      .ask .card .row button { flex: 1; min-height: 48px; }
+      button.danger { background: #b3261e; color: #fff; }
+      .devs .jobs li { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
       @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -114,10 +118,11 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.41</p>
+          <p class="ver">0.42</p>
         </div>
         <p id="link-label">Sin conexión</p>
       </header>
+      <div id="ask" class="ask" hidden></div>
       <h1>Puente Wi-Fi</h1>
       <p>Solo la Wi-Fi de esta casa. Nada de esto sale a internet. Si el móvil entró con el QR, quien escuche la red ve el tráfico cifrado, no el texto ni los archivos. Lo que ya estaba copiado al abrir no se guarda: pégalo si lo quieres en las notas.</p>
       <div class="grid">
@@ -141,31 +146,11 @@
         <button id="open-fotos" type="button">Abrir carpeta</button>
         <ul id="fotos"></ul>
       </section>
-      <section class="fotos dl">
-        <h2>Descargatodo</h2>
-        <p class="dl-notice">Solo para uso personal. Respeta los derechos de autor y las normas de cada web.</p>
-        <p>YouTube, Instagram, TikTok, X y casi cualquier web. Se descarga en este PC, en <span id="dl-folder">Descargas/LaZoo</span>. Sin cookies del navegador.</p>
-        <div id="dl-tools" hidden>
-          <p id="dl-tools-msg"></p>
-          <button id="dl-install" class="primary" type="button">Instalar herramientas (una vez)</button>
-        </div>
-        <form id="dl-form" class="row">
-          <input id="dl-url" type="url" maxlength="2048" placeholder="Pega un enlace" />
-          <button id="dl-find" class="primary" type="submit">Buscar formatos</button>
-        </form>
-        <label><input id="dl-playlist" type="checkbox" /> <small>Lista completa</small></label>
-        <div id="dl-card" class="card" hidden>
-          <p id="dl-title"></p>
-          <small id="dl-meta"></small>
-          <div id="dl-choices" class="choices"></div>
-          <details><summary><small>Avanzado</small></summary><div id="dl-formats" class="choices"></div></details>
-        </div>
-        <ul id="dl-jobs" class="jobs"></ul>
-        <div class="row">
-          <button id="dl-open" type="button">Abrir carpeta</button>
-          <button id="dl-update" type="button">Actualizar yt-dlp</button>
-        </div>
-        <p><small id="dl-version"></small></p>
+      <section class="fotos devs">
+        <h2>Dispositivos</h2>
+        <p><small>Solo acepta conexiones de tu red local. Cada móvil nuevo hay que aceptarlo aquí la primera vez.</small></p>
+        <ul id="devs" class="jobs"></ul>
+        <div class="row"><button id="kick-all" class="danger" type="button">Expulsar a todos</button></div>
       </section>
     </main>
     <script>
@@ -349,137 +334,77 @@
       document.querySelector("#open-fotos").addEventListener("click", () => {
         fetch("/api/photos/open", { method: "POST" });
       });
-      // Descargatodo: lo mismo que la pastilla del móvil.
       const $ = (sel) => document.querySelector(sel);
-      let dlUrl = "";
-      let dlTitle = "";
-      async function dlCall(path, body) {
-        const res = await fetch(path, body === undefined ? {} : {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
+      const STATES = { aprobado: "Conectado", pendiente: "Esperando aprobación", rechazado: "Rechazado (5 min)" };
+      async function devCall(path, body) {
+        const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "No se pudo");
         return data;
       }
-      function dlSay(text) { $("#dl-version").textContent = text; }
-      function dlDur(sec) { return sec ? Math.floor(sec / 60) + ":" + String(sec % 60).padStart(2, "0") : ""; }
-      async function dlTools() {
-        try {
-          const t = await dlCall("/api/dl/tools");
-          $("#dl-folder").textContent = t.folder;
-          const missing = !t.ytdlp || (!t.ffmpeg && t.ffmpeg_can_install) || (!t.deno && t.deno_can_install);
-          $("#dl-tools").hidden = !missing && !t.old && t.install.state !== "instalando";
-          const parts = [];
-          if (!t.ytdlp) parts.push("yt-dlp");
-          if (!t.ffmpeg) parts.push("ffmpeg");
-          if (!t.deno) parts.push("deno (YouTube lo necesita)");
-          $("#dl-tools-msg").textContent = parts.length ? "Falta " + parts.join(", ") + ". Se baja del sitio oficial y se comprueba su huella." : (t.old ? "Tu yt-dlp (" + t.version + ") es viejo y YouTube suele rechazarlo. Pulsa «Actualizar yt-dlp»." : "");
-          $("#dl-install").hidden = !missing;
-          $("#dl-update").hidden = !t.ytdlp;
-          dlSay((t.ytdlp ? "yt-dlp " + t.version : "yt-dlp no instalado") + (t.ffmpeg ? " · ffmpeg listo" : " · " + (t.ffmpeg_hint || "sin ffmpeg")));
-        } catch (err) { dlSay(err.message); }
-      }
-      function dlButton(id, label, primary) {
-        const b = document.createElement("button");
-        b.type = "button";
-        b.textContent = label;
-        if (primary) b.className = "primary";
-        b.addEventListener("click", async () => {
-          try { await dlCall("/api/dl/start", { url: dlUrl, choice: id, title: dlTitle, playlist: $("#dl-playlist").checked }); dlJobs(); }
-          catch (err) { dlSay(err.message); }
-        });
-        return b;
-      }
-      $("#dl-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const url = $("#dl-url").value.trim();
-        $("#dl-find").disabled = true;
-        $("#dl-find").textContent = "Buscando…";
-        try {
-          const info = await dlCall("/api/dl/info", { url, playlist: $("#dl-playlist").checked });
-          dlUrl = url;
-          dlTitle = info.title;
-          $("#dl-card").hidden = false;
-          $("#dl-title").textContent = info.title;
-          $("#dl-meta").textContent = [info.uploader, dlDur(info.duration), info.playlist ? info.count + " vídeos" : ""].filter(Boolean).join(" · ");
-          $("#dl-choices").replaceChildren(...info.choices.map((c, i) => {
-            const b = dlButton(c.id, c.label + (c.ffmpeg && !info.ffmpeg ? " (necesita ffmpeg)" : ""), i === 0);
-            b.disabled = !!(c.ffmpeg && !info.ffmpeg);
-            return b;
-          }));
-          $("#dl-formats").replaceChildren(...info.formats.slice().reverse().map((f) => dlButton(
-            f.kind === "solo vídeo" && info.ffmpeg ? f.id + "+ba" : f.id,
-            f.id + " · " + (f.res || "-") + " · " + f.ext + " · " + f.kind + (f.size ? " · ~" + size(f.size) : ""), false)));
-        } catch (err) { dlSay(err.message); }
-        $("#dl-find").disabled = false;
-        $("#dl-find").textContent = "Buscar formatos";
-      });
-      async function dlJobs() {
-        try {
-          const data = await dlCall("/api/dl/status");
-          const inst = data.install || {};
-          if (inst.state === "instalando") {
-            $("#dl-tools").hidden = false;
-            $("#dl-tools-msg").textContent = "Instalando " + (inst.what || "") + "… " + size(inst.done || 0) + (inst.total ? " de " + size(inst.total) : "");
-          } else if (!$("#dl-tools").hidden && inst.state) {
-            if (inst.state === "error") $("#dl-tools-msg").textContent = "No se pudo instalar: " + inst.error;
-            else dlTools();
-          }
-          if ($("#dl-jobs").matches(":active")) return; // no repintar mientras se pulsa un botón
-          $("#dl-jobs").replaceChildren(...(data.jobs || []).slice(0, 12).map((job) => {
-            const li = document.createElement("li");
-            const name = document.createElement("div");
-            name.textContent = job.name || job.title;
-            const stat = document.createElement("small");
-            stat.textContent = job.label + " · " + (job.state === "preparando" ? "preparando…" : job.state) + (job.state === "descargando" ? " " + (job.pct ? job.pct + "%" : job.got ? size(job.got) : "(preparando…)") + (job.speed ? " · " + size(job.speed) + "/s" : "") : "") + (job.size ? " · " + size(job.size) : "") + (job.error ? " · " + job.error : "");
-            li.append(name, stat);
-            if (job.state === "descargando" || job.state === "procesando" || job.state === "preparando") {
-              const track = document.createElement("div");
-              track.className = "track";
-              const fill = document.createElement("div");
-              fill.className = "fill";
-              fill.style.width = (job.state === "procesando" ? 100 : job.pct) + "%";
-              track.append(fill);
-              li.append(track);
-            }
+      let askKey = "";
+      async function loadDevices() {
+        let list = [];
+        try { list = (await devCall("/api/dispositivos")).devices || []; } catch (_err) { return; }
+        const pending = list.filter((d) => d.state === "pendiente");
+        const key = pending.map((d) => d.id).join(",");
+        if (key !== askKey) {
+          askKey = key;
+          $("#ask").replaceChildren(...pending.map((d) => {
+            const card = document.createElement("div");
+            card.className = "card";
+            card.dataset.id = d.id;
+            const p = document.createElement("p");
+            p.textContent = `Nuevo dispositivo ${d.label} (${d.ip}, id ${d.short}) quiere entrar. Podrá usar el ratón y el teclado de este PC.`;
+            const left = document.createElement("small");
+            left.className = "left";
             const row = document.createElement("div");
             row.className = "row";
-            if (job.state === "hecha") {
-              const a = document.createElement("a");
-              a.textContent = "Guardar copia";
-              a.href = "/api/dl/file/" + job.id;
-              a.download = job.name;
-              a.addEventListener("click", async (event) => {
-                event.preventDefault();
-                const res = await fetch("/api/dl/file/" + job.id);
-                const blob = await res.blob();
-                const url = URL.createObjectURL(blob);
-                const t = document.createElement("a");
-                t.href = url; t.download = job.name; t.click();
-                setTimeout(() => URL.revokeObjectURL(url), 60000);
-              });
-              row.append(a);
-            }
-            {
-              const c = document.createElement("button");
-              c.type = "button";
-              c.textContent = ["en cola", "preparando", "descargando", "procesando"].includes(job.state) ? "Cancelar" : "Quitar";
-              c.addEventListener("click", () => li.remove() || dlCall("/api/dl/cancel", { id: job.id }).then(dlJobs).catch((err) => dlSay(err.message)));
-              row.append(c);
-            }
-            if (row.childElementCount) li.append(row);
-            return li;
+            const yes = document.createElement("button");
+            yes.className = "primary";
+            yes.type = "button";
+            yes.textContent = "Aceptar";
+            const no = document.createElement("button");
+            no.className = "danger";
+            no.type = "button";
+            no.textContent = "Rechazar";
+            yes.addEventListener("click", () => devCall("/api/dispositivos/decidir", { id: d.id, ok: true }).then(loadDevices).catch(() => {}));
+            no.addEventListener("click", () => devCall("/api/dispositivos/decidir", { id: d.id, ok: false }).then(loadDevices).catch(() => {}));
+            row.append(yes, no);
+            card.append(p, left, row);
+            return card;
           }));
-        } catch (_err) {}
+        }
+        pending.forEach((d) => {
+          const left = $("#ask").querySelector(`.card[data-id="${d.id}"] .left`);
+          if (left) left.textContent = `Si no respondes en ${d.left} s, se rechaza.`;
+        });
+        $("#ask").hidden = !pending.length;
+        if (pending.length) document.title = "¿Aceptar dispositivo? · LaZoo";
+        else document.title = "Puente Wi-Fi";
+        $("#devs").replaceChildren(...(list.length ? list : [null]).map((d) => {
+          const li = document.createElement("li");
+          if (!d) { li.textContent = "Ningún dispositivo todavía."; return li; }
+          const t = document.createElement("span");
+          t.textContent = `${d.label} · ${d.ip} · id ${d.short} · ${STATES[d.state] || d.state}`;
+          li.append(t);
+          if (d.state === "aprobado") {
+            const b = document.createElement("button");
+            b.type = "button";
+            b.textContent = "Expulsar";
+            b.addEventListener("click", () => devCall("/api/dispositivos/expulsar", { id: d.id }).then(loadDevices).catch(() => {}));
+            li.append(b);
+          }
+          return li;
+        }));
+        $("#kick-all").disabled = !list.some((d) => d.state === "aprobado");
       }
-      $("#dl-install").addEventListener("click", () => dlCall("/api/dl/install", { what: "all" }).then(() => { $("#dl-install").hidden = true; dlJobs(); }).catch((err) => dlSay(err.message)));
-      $("#dl-update").addEventListener("click", () => dlCall("/api/dl/update", {}).then((d) => dlSay(d.detail || "Actualizando…")).catch((err) => dlSay(err.message)));
-      $("#dl-open").addEventListener("click", () => dlCall("/api/dl/open", {}).catch((err) => dlSay(err.message)));
-      dlTools();
-      dlJobs();
-      setInterval(() => { if (!document.hidden) dlJobs(); }, 1500);
+      $("#kick-all").addEventListener("click", () => {
+        if (!confirm("¿Expulsar a todos los dispositivos? Tendrán que volver a ser aprobados en este PC.")) return;
+        devCall("/api/dispositivos/expulsar", { all: true }).then(loadDevices).catch(() => {});
+      });
+      loadDevices();
+      setInterval(loadDevices, 1000);
       load();
       watchLink();
       setInterval(() => { if (!document.hidden) load(); }, 2000);

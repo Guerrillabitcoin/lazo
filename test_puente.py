@@ -15,7 +15,10 @@ from pathlib import Path
 from unittest import mock
 
 import control
-import lazo
+os.environ["LAZO_AUTOAPPROVE"] = "1"  # SOLO pruebas: sin pedir aprobación en el PC
+import lazo  # noqa: E402
+
+lazo.APPROVALS.auto = True  # SOLO pruebas
 import protocol
 import puente
 

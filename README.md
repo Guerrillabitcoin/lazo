@@ -1,4 +1,4 @@
-# LaZoo 0.41
+# LaZoo 0.42
 
 Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -11,7 +11,6 @@ Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada 
 - Spotify: los mismos iconos y la misma regla de 5 s en anterior, y volumen de la app
 - Cursor del sistema: normal, grande o enorme
 - Sistema: volumen de sistema, brillo del portátil (Windows; Linux con brightnessctl), intercambiar las ventanas entre dos pantallas y bloquear el PC (en rojo y con confirmación). El menú Win+P queda en Pruebas
-- Descargatodo: cola que no se atasca, sin duplicados (mismo vídeo y mismo formato), cancelar la quita de la lista y borra los restos, y si no avanza en 60 s se para y dice por qué. YouTube hoy exige un intérprete JS: «Instalar herramientas» baja también `deno` (sitio oficial, huella SHA-256 comprobada) a `herramientas/`. Si YouTube frena el PC («confirma que no eres un bot»), LaZoo reintenta solo con otros modos de YouTube. El error real sale en español en la tarjeta, con botón «Actualizar yt-dlp» cuando toca
 - Puente: «Archivos» abre el selector de archivos del móvil (sin filtro de tipo, para que Android no lo mande a la galería), «Fotos y vídeos» la galería y «Carpeta» una carpeta entera, que llega al PC con sus subcarpetas
 - Sin conexión: en la pantalla del PIN hay «Escanear QR». Por HTTP los navegadores no dejan usar la cámara en directo, así que abre la cámara del móvil, saca una foto del QR y la lee sin internet (BarcodeDetector o jsQR, Apache-2.0, en `static/jsqr.js`). También vale la app de cámara del móvil
 
@@ -63,14 +62,6 @@ YouTube se controla con los atajos del reproductor (`k`, `j`, `l`, flechas). Laz
 - Los envíos a medias que nadie retoma se borran a las 24 horas.
 - **Del PC al móvil:** en la ventana del PC suelta archivos (o pulsa para elegir) y aparecen en el móvil en «Del PC al móvil».
 
-## Descargatodo
-
-Pastilla «Descargatodo» en el móvil y sección del mismo nombre en la ventana del PC. Pegas un enlace (YouTube, Instagram, TikTok, X y casi cualquier web), pulsas «Buscar formatos» y eliges: mejor calidad, 1080p, 720p, 480p, solo audio MP3, solo audio original o, en «Avanzado», un formato concreto. Se descarga **en el PC**, en `Descargas/LaZoo`; desde el móvil, «Enviar al móvil» lo recibe cifrado y por trozos, como el puente, sin tope de 400 MB.
-
-- Usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) y ffmpeg, que no van dentro de LaZoo. «Instalar herramientas (una vez)» los baja a la carpeta `herramientas/` del programa: yt-dlp del release oficial de GitHub y, en Windows, ffmpeg del release de BtbN/FFmpeg-Builds (unos 200 MB). Solo HTTPS y con la huella SHA-256 oficial comprobada. En Linux y macOS, ffmpeg se instala con el gestor del sistema (`sudo apt install ffmpeg`, `brew install ffmpeg`). «Actualizar yt-dlp» cuando una web deje de funcionar.
-- Privacidad: no usa cookies del navegador ni tu cuenta; el enlace solo lo ve el PC y la web de origen. Algunas webs piden iniciar sesión o bloquean descargas: entonces no funcionará.
-- **Solo para uso personal. Respeta los derechos de autor y las normas de cada web.**
-
 ## Sobre LaZoo
 
 La última pastilla enseña el logo, la versión, la licencia (MIT), cómo protege LaZoo la conexión y tus enlaces. «Buscar actualización» solo consulta internet cuando lo pulsas: el PC pide `VERSION.txt` de la rama `main` en GitHub y lo compara con el tuyo.
@@ -78,6 +69,14 @@ La última pastilla enseña el logo, la versión, la licencia (MIT), cómo prote
 Los enlaces y las direcciones de donación (solo Bitcoin: Lightning, BOLT12, pagos silenciosos `sp1...` y on-chain) salen de `about.json`. Copia `about.example.json` como `about.json` y rellénalo. Lo vacío o con formato raro no se muestra. Los QR se hacen en el PC, sin servicios externos. `about.json` no se sube al repositorio.
 
 ## Seguridad
+
+- **Solo red local.** LaZoo solo acepta conexiones de tu red local: el propio PC (127.x, `::1`), direcciones privadas (10.x, 172.16–31.x, 192.168.x), link-local (169.254.x, `fe80::`), IPv6 local (`fc00::/7`) y esas mismas en forma `::ffff:a.b.c.d`. Cualquier otra se corta antes de leer nada y la consola dice «Rechazada conexión desde fuera de la red local: …» (una vez por minuto y dirección como mucho).
+- No publiques LaZoo detrás de un proxy inverso: no está soportado. La cabecera `X-Forwarded-For` se ignora siempre.
+- Para entrar por una VPN propia (por ejemplo Tailscale, 100.64.0.0/10), añade el rango: `python lazo.py --permitir-ip 100.64.0.0/10` (se puede repetir) o la variable `LAZO_ALLOW=100.64.0.0/10,otro/rango`. La consola avisa de que amplías el acceso.
+- **Dispositivos nuevos.** La primera vez que un móvil entra (con QR o PIN), queda «Esperando aprobación en el PC…». En el PC se pregunta en la consola (S/N, 30 s), en Windows con un cuadro Sí/No y en la ventana del PC con Aceptar/Rechazar. Sin respuesta en 60 s, se rechaza. Rechazado = bloqueado 5 minutos. Lo aprobado vale hasta que cierras LaZoo.
+- En la ventana del PC y en «Sobre LaZoo» hay una lista de dispositivos con «Expulsar» y «Expulsar a todos». Un expulsado tiene que volver a ser aprobado.
+- Solo para pruebas automáticas: `LAZO_AUTOAPPROVE=1` (o `--auto-aprobar`) deja entrar sin preguntar. Nunca está activo por defecto; no lo uses en el día a día.
+
 
 La clave viaja solo en el QR (o, si escribes el PIN de 6 dígitos, se entrega una vez al móvil). Cada petición va firmada y no vale dos veces; no hay cookie. El PIN es el camino menos seguro: si puedes, escanea el QR. Cada vez que reinicias el PC hay que volver a escanear el QR. No lo uses en una Wi-Fi pública. Quien tenga el PIN y esté en tu red puede mover el ratón, escribir y cerrar ventanas mientras Lazo está encendido.
 

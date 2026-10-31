@@ -68,7 +68,6 @@ const views = {
   bridge: document.querySelector("#view-bridge"),
   notes: document.querySelector("#view-notes"),
   system: document.querySelector("#view-system"),
-  dl: document.querySelector("#view-dl"),
   lab: document.querySelector("#view-lab"),
   about: document.querySelector("#view-about"),
 };
@@ -81,7 +80,6 @@ const TOOLS = [
   { id: "spotify", name: "Spotify" },
   { id: "notes", name: "Notas" },
   { id: "system", name: "Sistema" },
-  { id: "dl", name: "Descargatodo" },
   { id: "lab", name: "Pruebas" },
   { id: "about", name: "Sobre LaZoo" },
 ];
@@ -139,6 +137,10 @@ async function api(path, body, method = "POST") {
     window.clearTimeout(timer);
   }
   const data = await readBody(res);
+  if (res.status === 403 && (data.pending || data.rejected)) {
+    showWait(data.rejected ? "rechazado" : "pendiente");
+    throw new Error(data.error || "Pendiente de aprobación");
+  }
   if (res.status === 401) {
     showPin();
     throw new Error(data.error || "PIN");
@@ -186,11 +188,80 @@ function openCube(id) {
   if (id === "notes" || id === "bridge") syncClipboard();
   if (id === "about") aboutOpen();
   mediaWatch(id === "youtube" || id === "spotify");
-  if (id === "dl") dlOpen();
-  else dlStop();
 }
 
-function showApp() {
+/* Aprobación en el PC: la primera vez, el móvil espera a que lo acepten allí. */
+const waitPanel = document.querySelector("#wait");
+let waitTimer = 0;
+
+function stopTimers() {
+  window.clearInterval(poll);
+  window.clearInterval(clipsTimer);
+  window.clearInterval(caretTimer);
+  if (pointerSocket) {
+    try { pointerSocket.close(); } catch (_err) { /* ya cerrado */ }
+  }
+}
+
+function showWait(state) {
+  const rejected = state === "rechazado";
+  document.querySelector("#wait-title").textContent = rejected ? "El PC rechazó este dispositivo" : "Esperando aprobación en el PC…";
+  document.querySelector("#wait-text").textContent = rejected
+    ? "Puedes volver a intentarlo dentro de 5 minutos. Si fue un error, pide que lo acepten en el PC."
+    : "En el PC sale un aviso para aceptar este móvil: en la ventana de LaZoo, en la consola o en un cuadro de Windows. Si nadie responde en 60 s, se rechaza.";
+  waitPanel.dataset.state = rejected ? "rechazado" : "pendiente";
+  setLink("off", rejected ? "Rechazado por el PC" : "Esperando aprobación");
+  say(rejected ? "El PC dijo que no" : "Acéptalo en el PC");
+  if (!waitPanel.hidden) return;
+  waitPanel.hidden = false;
+  pinPanel.hidden = true;
+  app.hidden = true;
+  dock.hidden = true;
+  stopTimers();
+  window.clearInterval(waitTimer);
+  waitTimer = window.setInterval(checkApproval, 1500);
+}
+
+async function approvalState() {
+  try {
+    const res = await lzFetch("/api/aprobacion", { method: "GET", headers: {} });
+    if (res.status === 401) return "pin";
+    const data = await readBody(res);
+    return data.state || "pendiente";
+  } catch (_err) {
+    return "error";
+  }
+}
+
+async function checkApproval() {
+  const state = await approvalState();
+  if (state === "aprobado") {
+    window.clearInterval(waitTimer);
+    waitPanel.hidden = true;
+    enterApp();
+  } else if (state === "pin") {
+    window.clearInterval(waitTimer);
+    waitPanel.hidden = true;
+    showPin();
+  } else if (state === "rechazado" || state === "pendiente") {
+    waitPanel.hidden = false;
+    showWait(state);
+  }
+}
+
+async function showApp() {
+  const state = await approvalState();
+  if (state === "pendiente" || state === "rechazado") {
+    showWait(state);
+    return;
+  }
+  enterApp();
+}
+
+document.querySelector("#wait-retry").addEventListener("click", checkApproval);
+
+function enterApp() {
+  waitPanel.hidden = true;
   pinPanel.hidden = true;
   app.hidden = false;
   dock.hidden = false;
@@ -409,7 +480,7 @@ const localHashes = new Map();
 function cryptoCall(msg, transfer) {
   if (!cryptoWorker && !cryptoBroken) {
     try {
-      cryptoWorker = new Worker("/puente-worker.js?v=0.41");
+      cryptoWorker = new Worker("/puente-worker.js?v=0.42");
       cryptoWorker.onmessage = (event) => {
         const wait = cryptoWaits.get(event.data.seq);
         if (!wait) return;
@@ -844,13 +915,12 @@ function loadOrder() {
     }
   }
   try {
-    if (!localStorage.getItem("lazo-order-dl") && saved.includes("dl") && saved.includes("lab")) {
-      const without = saved.filter((id) => id !== "dl");
-      without.splice(without.indexOf("lab"), 0, "dl");
-      saved = without;
+    // 0.42: la pastilla de descargas ya no existe. Se quita del orden guardado.
+    if (saved.includes("dl")) {
+      saved = saved.filter((id) => id !== "dl");
       localStorage.setItem("lazo-order", JSON.stringify(saved));
     }
-    localStorage.setItem("lazo-order-dl", "1");
+    localStorage.removeItem("lazo-order-dl");
     if (!localStorage.getItem("lazo-order-about") && saved.includes("about")) {
       saved = [...saved.filter((id) => id !== "about"), "about"];
       localStorage.setItem("lazo-order", JSON.stringify(saved));
@@ -2235,361 +2305,6 @@ document.querySelector("#lab-open").addEventListener("submit", async (event) => 
   }
 });
 
-/* ---- Descargatodo: el móvil manda el enlace; el PC descarga con yt-dlp ---- */
-var dlTimer = 0;
-var dlInfo = null;
-var dlUrl = "";
-var dlSent = {};
-
-function dlEl(id) {
-  return document.querySelector(id);
-}
-
-function dlSize(bytes) {
-  if (!bytes) return "";
-  if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + " KB";
-  if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-  return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
-}
-
-function dlTime(sec) {
-  if (!sec) return "";
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = String(sec % 60).padStart(2, "0");
-  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
-}
-
-function dlStop() {
-  clearInterval(dlTimer);
-  dlTimer = 0;
-}
-
-async function dlOpen() {
-  dlStop();
-  await dlTools();
-  await dlPoll();
-  dlTimer = setInterval(dlPoll, 1200);
-}
-
-async function dlTools() {
-  try {
-    const t = await api("/api/dl/tools", null, "GET");
-    const box = dlEl("#dl-tools");
-    const missing = !t.ytdlp || (!t.ffmpeg && t.ffmpeg_can_install) || (!t.deno && t.deno_can_install);
-    box.hidden = !missing && !t.old && t.install.state !== "instalando";
-    const parts = [];
-    if (!t.ytdlp) parts.push("yt-dlp");
-    if (!t.ffmpeg) parts.push("ffmpeg");
-    if (!t.deno) parts.push("deno (YouTube lo necesita)");
-    dlEl("#dl-tools-msg").textContent = parts.length
-      ? `Falta ${parts.join(", ")}. Se descarga del sitio oficial y se comprueba su huella.`
-      : t.old
-        ? `Tu yt-dlp (${t.version}) es viejo y YouTube suele rechazarlo. Pulsa «Actualizar yt-dlp».`
-        : "Herramientas listas.";
-    dlEl("#dl-install").hidden = !missing;
-    dlEl("#dl-install").textContent = t.ytdlp ? "Instalar lo que falta" : "Instalar herramientas (una vez)";
-    dlEl("#dl-version").textContent =
-      (t.ytdlp ? `yt-dlp ${t.version || ""}` : "yt-dlp no instalado") +
-      (t.deno ? " · deno listo" : "") +
-      (t.ffmpeg ? " · ffmpeg listo" : t.ffmpeg_hint ? " · " + t.ffmpeg_hint : " · sin ffmpeg (sin MP3 ni unir vídeo+audio)") +
-      ` · Se guarda en ${t.folder}`;
-    dlEl("#dl-update").hidden = !t.ytdlp;
-    dlShowInstall(t.install);
-    return t;
-  } catch (err) {
-    say(err.message);
-    return null;
-  }
-}
-
-function dlShowInstall(inst) {
-  const bar = dlEl("#dl-install-bar");
-  if (!inst || !inst.state) {
-    bar.hidden = true;
-    return;
-  }
-  if (inst.state === "instalando") {
-    bar.hidden = false;
-    const pct = inst.total ? Math.round((inst.done * 100) / inst.total) : 5;
-    dlEl("#dl-install-fill").style.width = pct + "%";
-    dlEl("#dl-tools-msg").textContent = `Instalando ${inst.what || ""}… ${dlSize(inst.done)}${inst.total ? " de " + dlSize(inst.total) : ""}`;
-    dlEl("#dl-install").hidden = true;
-  } else {
-    bar.hidden = true;
-    if (inst.state === "error") dlEl("#dl-tools-msg").textContent = "No se pudo instalar: " + inst.error;
-  }
-}
-
-var dlWasInstalling = false;
-
-async function dlPoll() {
-  if (document.hidden) return;
-  try {
-    const data = await api("/api/dl/status", null, "GET");
-    const inst = data.install || {};
-    if (inst.state === "instalando") {
-      dlWasInstalling = true;
-      dlEl("#dl-tools").hidden = false;
-      dlShowInstall(inst);
-    } else if (dlWasInstalling) {
-      dlWasInstalling = false;
-      dlTools();
-    }
-    dlRenderJobs(data.jobs || []);
-  } catch (_err) {}
-}
-
-// La lista se actualiza cada 1,2 s. Antes se borraba y se volvía a pintar entera, así que
-// un toque en «Enviar al móvil» o «Cancelar» justo en ese momento se perdía. Ahora cada
-// fila se conserva (por id) y solo cambian los textos.
-var dlRows = {};
-var dlBusy = {};
-
-function dlRow(job) {
-  let r = dlRows[job.id];
-  if (r) return r;
-  const row = document.createElement("li");
-  row.className = "dl-job";
-  const name = document.createElement("p");
-  name.className = "dl-job-name";
-  const stat = document.createElement("p");
-  stat.className = "hint";
-  const err = document.createElement("p");
-  err.className = "dl-err";
-  const track = document.createElement("div");
-  track.className = "xfer-track";
-  const fill = document.createElement("div");
-  fill.className = "dl-fill";
-  track.append(fill);
-  const actions = document.createElement("div");
-  actions.className = "dl-row";
-  const send = document.createElement("button");
-  send.type = "button";
-  send.className = "primary";
-  send.addEventListener("click", () => dlReceive(dlRows[job.id].job, send));
-  const save = document.createElement("a");
-  save.className = "dl-save";
-  save.hidden = true;
-  save.textContent = "Guardar archivo";
-  const upd = document.createElement("button");
-  upd.type = "button";
-  upd.className = "primary";
-  upd.textContent = "Actualizar yt-dlp";
-  upd.addEventListener("click", dlUpdate);
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.className = "dl-cancel";
-  cancel.addEventListener("click", async () => {
-    row.remove();
-    delete dlRows[job.id];
-    try {
-      await api("/api/dl/cancel", { id: job.id });
-      dlPoll();
-    } catch (e) {
-      say(e.message);
-    }
-  });
-  actions.append(send, save, upd, cancel);
-  row.append(name, stat, err, track, actions);
-  r = { row, name, stat, err, track, fill, send, save, upd, cancel, job };
-  dlRows[job.id] = r;
-  return r;
-}
-
-function dlRenderJobs(jobs) {
-  const list = dlEl("#dl-jobs");
-  const shown = jobs.slice(0, 12);
-  const keep = {};
-  shown.forEach((job, i) => {
-    const r = dlRow(job);
-    r.job = job;
-    keep[job.id] = true;
-    r.name.textContent = job.name || job.title;
-    let text = `${job.label} · ${job.state === "preparando" ? "preparando…" : job.state}`;
-    if (job.state === "descargando") {
-      text += job.pct ? ` ${job.pct}%` : job.got ? ` ${dlSize(job.got)}` : " (preparando…)";
-      if (job.speed) text += ` · ${dlSize(job.speed)}/s`;
-      if (job.eta) text += ` · quedan ${dlTime(job.eta)}`;
-    }
-    if (job.state === "hecha") text += ` · ${dlSize(job.size)} · guardado en el PC`;
-    if (job.note && job.state !== "hecha" && job.state !== "error") text += ` · ${job.note}`;
-    r.stat.textContent = text;
-    r.err.textContent = job.error || "";
-    r.err.hidden = !job.error;
-    const active = ["en cola", "preparando", "descargando", "procesando"].includes(job.state);
-    r.track.hidden = !active;
-    r.fill.style.width = (job.state === "procesando" ? 100 : job.pct || 0) + "%";
-    r.track.classList.toggle("busy", active && !job.pct && job.state !== "procesando");
-    r.send.hidden = job.state !== "hecha";
-    if (!dlBusy[job.id]) r.send.textContent = dlSent[job.id] ? "Enviar otra vez" : "Enviar al móvil";
-    r.upd.hidden = !(job.state === "error" && job.update);
-    r.cancel.textContent = active ? "Cancelar" : "Quitar";
-    if (list.children[i] !== r.row) list.insertBefore(r.row, list.children[i] || null);
-  });
-  for (const id of Object.keys(dlRows)) {
-    if (!keep[id] && !dlBusy[id]) {
-      dlRows[id].row.remove();
-      delete dlRows[id];
-    }
-  }
-}
-
-async function dlUpdate() {
-  try {
-    const res = await api("/api/dl/update", {});
-    say(res.detail || "Actualizando…");
-    dlEl("#dl-tools").hidden = false;
-    dlWasInstalling = true;
-    dlPoll();
-  } catch (err) {
-    say(err.message);
-  }
-}
-
-async function dlReceive(job, button) {
-  if (dlBusy[job.id]) return;
-  dlBusy[job.id] = true;
-  button.disabled = true;
-  button.textContent = "Recibiendo…";
-  try {
-    const info = await receiveChunked("dl", job.id, job.name || "descarga", (got, size) => {
-      button.textContent = `Recibiendo… ${Math.round((got / Math.max(1, size)) * 100)}%`;
-    });
-    dlSent[job.id] = true;
-    button.textContent = "Enviado ✓";
-    // Algunos móviles ignoran la descarga automática tras una espera larga: dejamos un
-    // enlace real para tocarlo a mano.
-    const r = dlRows[job.id];
-    if (r && info && info.blobUrl) {
-      r.save.href = info.blobUrl;
-      r.save.download = info.name || job.name || "descarga";
-      r.save.hidden = false;
-      r.save.textContent = "¿No se guardó? Toca aquí";
-    }
-    say("Listo: mira las descargas del móvil");
-  } catch (err) {
-    button.textContent = "Enviar al móvil";
-    say(err.message);
-  } finally {
-    button.disabled = false;
-    delete dlBusy[job.id];
-  }
-}
-
-function dlChoiceButton(id, label, detail, extra) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = extra || "";
-  button.textContent = label;
-  if (detail) {
-    const small = document.createElement("small");
-    small.textContent = " " + detail;
-    button.append(small);
-  }
-  button.addEventListener("click", async () => {
-    try {
-      await api("/api/dl/start", { url: dlUrl, choice: id, title: dlInfo ? dlInfo.title : "", playlist: dlEl("#dl-playlist").checked });
-      dlPoll();
-    } catch (err) {
-      say(err.message);
-    }
-  });
-  return button;
-}
-
-function dlRenderInfo(info) {
-  dlInfo = info;
-  dlEl("#dl-card").hidden = false;
-  dlEl("#dl-title").textContent = info.title;
-  const meta = [];
-  if (info.uploader) meta.push(info.uploader);
-  if (info.duration) meta.push(dlTime(info.duration));
-  if (info.playlist) meta.push(`${info.count} vídeos`);
-  dlEl("#dl-meta").textContent = meta.join(" · ");
-  const box = dlEl("#dl-choices");
-  box.replaceChildren();
-  info.choices.forEach((c, i) => {
-    const off = c.ffmpeg && !info.ffmpeg;
-    const button = dlChoiceButton(c.id, c.label, off ? "(necesita ffmpeg)" : c.detail, i === 0 ? "primary" : "");
-    button.disabled = off;
-    box.append(button);
-  });
-  const list = dlEl("#dl-formats");
-  list.replaceChildren();
-  list.hidden = true;
-  dlEl("#dl-adv-open").hidden = !info.formats.length;
-  info.formats
-    .slice()
-    .reverse()
-    .forEach((f) => {
-      const row = document.createElement("li");
-      const id = f.kind === "solo vídeo" && info.ffmpeg ? f.id + "+bestaudio" : f.id;
-      const label = `${f.id} · ${f.res || "-"} · ${f.ext} · ${f.kind}${f.size ? " · ~" + dlSize(f.size) : ""}`;
-      row.append(dlChoiceButton(id.replace("+bestaudio", "+ba"), label, f.note, ""));
-      list.append(row);
-    });
-}
-
-dlEl("#dl-adv-open").addEventListener("click", () => {
-  const list = dlEl("#dl-formats");
-  list.hidden = !list.hidden;
-});
-
-dlEl("#dl-paste").addEventListener("click", async () => {
-  try {
-    const text = await navigator.clipboard.readText();
-    if (text) dlEl("#dl-url").value = text.trim();
-  } catch (_err) {
-    dlEl("#dl-url").focus();
-    say("Mantén pulsado el campo y elige Pegar");
-  }
-});
-
-dlEl("#dl-form").addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const url = dlEl("#dl-url").value.trim();
-  if (!/^https?:\/\//i.test(url)) {
-    say("El enlace tiene que empezar por http:// o https://");
-    return;
-  }
-  const find = dlEl("#dl-find");
-  find.disabled = true;
-  find.textContent = "Buscando…";
-  dlEl("#dl-card").hidden = true;
-  try {
-    dlUrl = url;
-    const info = await api("/api/dl/info", { url, playlist: dlEl("#dl-playlist").checked });
-    dlRenderInfo(info);
-    say(info.title);
-  } catch (err) {
-    say(err.message);
-  } finally {
-    find.disabled = false;
-    find.textContent = "Buscar formatos";
-  }
-});
-
-dlEl("#dl-install").addEventListener("click", async () => {
-  try {
-    await api("/api/dl/install", { what: "all" });
-    dlWasInstalling = true;
-    dlEl("#dl-install").hidden = true;
-    dlEl("#dl-install-bar").hidden = false;
-  } catch (err) {
-    say(err.message);
-  }
-});
-
-dlEl("#dl-update").addEventListener("click", async () => {
-  try {
-    await api("/api/dl/update", {});
-    dlWasInstalling = true;
-  } catch (err) {
-    say(err.message);
-  }
-});
-
 /* Sobre LaZoo */
 function aboutSafeUrl(url) {
   return typeof url === "string" && /^https?:\/\/[^\s<>"'`\\]+$/i.test(url) ? url : "";
@@ -2619,6 +2334,7 @@ async function aboutOpen() {
       list.append(li);
     });
     aboutDonations(data.donations || []);
+    aboutDevices();
   } catch (_err) {
     say("No se pudo leer Sobre LaZoo");
   }
@@ -2635,7 +2351,7 @@ function aboutDonations(items) {
     return;
   }
   const warn = document.createElement("p");
-  warn.className = "dl-notice";
+  warn.className = "notice";
   warn.textContent = "Comprueba la dirección en el repo oficial antes de enviar.";
   box.append(warn);
   items.forEach((item) => {
@@ -2671,6 +2387,54 @@ function aboutDonations(items) {
   });
 }
 
+const DEV_STATES = { aprobado: "conectado", pendiente: "esperando aprobación", rechazado: "rechazado" };
+
+async function aboutDevices() {
+  const list = document.querySelector("#about-devs");
+  let data;
+  try {
+    data = await api("/api/dispositivos", null, "GET");
+  } catch (_err) {
+    return;
+  }
+  const devices = data.devices || [];
+  list.replaceChildren();
+  devices.forEach((d) => {
+    const li = document.createElement("li");
+    const text = document.createElement("span");
+    text.textContent = `${d.label} · ${d.ip} · ${DEV_STATES[d.state] || d.state}${d.id === data.me ? " (este)" : ""}`;
+    li.append(text);
+    if (d.state === "aprobado") {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = "Expulsar";
+      b.addEventListener("click", async () => {
+        await api("/api/dispositivos/expulsar", { id: d.id }).catch((err) => say(err.message));
+        if (d.id !== data.me) aboutDevices();
+        else refreshStatus();
+      });
+      li.append(b);
+    }
+    list.append(li);
+  });
+  if (!devices.length) {
+    const li = document.createElement("li");
+    li.textContent = "Solo este PC.";
+    list.append(li);
+  }
+}
+
+document.querySelector("#about-kick-all").addEventListener("click", async () => {
+  const ok = await askConfirm("¿Expulsar a todos?", "Todos los dispositivos, también este móvil, tendrán que volver a ser aprobados en el PC.", "Expulsar a todos");
+  if (!ok) return;
+  try {
+    await api("/api/dispositivos/expulsar", { all: true });
+  } catch (err) {
+    say(err.message);
+  }
+  refreshStatus();
+});
+
 document.querySelector("#about-check").addEventListener("click", async (ev) => {
   const button = ev.currentTarget;
   const out = document.querySelector("#about-update");
@@ -2694,7 +2458,6 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden || app.hidden) return;
   refreshStatus();
   syncClipboard();
-  if (tab === "dl") dlPoll();
   if (tab === "youtube" || tab === "spotify") mediaPoll();
 });
 
@@ -2719,7 +2482,7 @@ function qrLoadLib() {
   if (qrLib) return qrLib;
   qrLib = new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "/jsqr.js?v=0.41";
+    s.src = "/jsqr.js?v=0.42";
     s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error("No se pudo cargar el lector de QR")));
     s.onerror = () => {
       qrLib = null;

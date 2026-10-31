@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import socket
@@ -18,16 +19,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+import aprobacion
 import control
-import descargas
 import protocol
 import puente
 import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.41"
+VERSION = "0.42"
 PAIRING = protocol.Pairing()
+APPROVALS = aprobacion.Approvals()
+APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
+REJECTS = aprobacion.RejectLog()
 PORT = 8787
 VISITS: list[str] = []
 VISITS_LOCK = threading.Lock()
@@ -35,7 +39,7 @@ MESA_OPENED = False
 SCHEME = "http"
 UPLOADS = puente.Uploads(control.received_dir)
 UP_PATH = re.compile(r"/api/up/([0-9a-f]{20})/(\d{1,7}|done|cancel)")
-GET_PATH = re.compile(r"/api/get/(nube|dl)/([0-9A-Za-z_-]{1,40})/(\d{1,7}|info)")
+GET_PATH = re.compile(r"/api/get/(nube)/([0-9A-Za-z_-]{1,40})/(\d{1,7}|info)")
 IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 
@@ -57,15 +61,6 @@ ACTIONS = {
     "tabs": lambda body: control.window_tabs(str(body.get("id", ""))),
     "tab": lambda body: control.tab_action(str(body.get("id", "")), str(body.get("action", "")), body.get("index")),
     "screen": lambda body: control.window_to_screen(str(body.get("id", "")), body.get("screen", 0)),
-}
-
-DL_ACTIONS = {
-    "/api/dl/info": lambda body: descargas.get_info(body.get("url", ""), bool(body.get("playlist"))),
-    "/api/dl/start": lambda body: descargas.QUEUE.start(body.get("url", ""), str(body.get("choice", "")), str(body.get("title", "")), bool(body.get("playlist"))),
-    "/api/dl/cancel": lambda body: descargas.QUEUE.cancel(str(body.get("id", ""))),
-    "/api/dl/install": lambda body: descargas.install(str(body.get("what", "all"))),
-    "/api/dl/update": lambda _body: descargas.update(),
-    "/api/dl/open": lambda _body: descargas.open_folder(),
 }
 
 
@@ -301,14 +296,16 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.41</p>
+      <p class="ver">0.42</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
       {''.join(blocks)}
       <p id="ayuda" class="note">Misma Wi-Fi. Si el navegador dice que no es segura, es la dirección de casa.</p>
     </div>
+    <p id="pending" class="note" hidden><a href="/mesa">Un dispositivo nuevo quiere entrar: acéptalo o recházalo aquí</a></p>
     <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a></p>
+    <p class="note">Solo acepta conexiones de tu red local.</p>
   </main>
   <script>
     async function tick() {{
@@ -319,6 +316,7 @@ def connect_page() -> bytes:
         document.body.classList.toggle("on", on);
         bar.dataset.link = on ? "on" : "off";
         document.querySelector("#link-label").textContent = on ? "Móvil conectado" : "Sin conexión";
+        document.querySelector("#pending").hidden = !(data.pending || []).length;
       }} catch (_err) {{}}
     }}
     tick();
@@ -327,6 +325,20 @@ def connect_page() -> bytes:
 </body>
 </html>"""
     return page.encode()
+
+
+def client_ip(request, client_address) -> str:
+    """IP real del socket. X-Forwarded-For no se mira nunca: LaZoo no va detrás de un proxy."""
+    return str(client_address[0])
+
+
+class LazoServer(ThreadingHTTPServer):
+    def verify_request(self, request, client_address) -> bool:  # antes de leer nada
+        ip = client_ip(request, client_address)
+        if aprobacion.allowed(ip):
+            return True
+        REJECTS.note(ip)
+        return False
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -354,7 +366,7 @@ class Handler(BaseHTTPRequestHandler):
             return found
         return self.client_address[0]
 
-    def _authed(self, ws: bool = False) -> bool:
+    def _authed(self, ws: bool = False, allow_pending: bool = False) -> bool:
         """El PC se fía de sí mismo, pero no de una web abierta en su navegador: pide la
         cabecera `X-Lazo-Local` (una web ajena no puede ponerla) y un Host de este PC. El
         móvil firma cada petición con la clave del QR; ver protocol.py."""
@@ -379,7 +391,14 @@ class Handler(BaseHTTPRequestHandler):
         self.denied = PAIRING.verify(self.command, path, length, *got)
         if self.denied != "ok":
             return False
-        PAIRING.note_phone(self._who(ws))
+        who = self._who(ws)
+        if not allow_pending:
+            state = APPROVALS.check(who, self.headers.get("User-Agent", ""), self.client_address[0])
+            if state != "ok":
+                self.denied = state
+                maybe_open_mesa()
+                return False
+        PAIRING.note_phone(who)
         maybe_open_mesa()
         return True
 
@@ -401,7 +420,11 @@ class Handler(BaseHTTPRequestHandler):
     def _unauth(self) -> None:
         self.close_connection = True
         self._drain()
-        if self.denied == "hora":
+        if self.denied == "pendiente":
+            self._send(403, {"error": "Pendiente de aprobación", "pending": True})
+        elif self.denied == "rechazado":
+            self._send(403, {"error": "El PC rechazó este dispositivo", "rejected": True})
+        elif self.denied == "hora":
             self._send(401, {"error": "El reloj del móvil no coincide con el del PC", "clock": True})
         else:
             self._send(401, {"error": "Entra con el QR"})
@@ -482,7 +505,7 @@ class Handler(BaseHTTPRequestHandler):
             if not (_local_pc(self.client_address[0]) and self._host_ok()):
                 self._send(404, {"error": "no está"})
                 return
-            self._send(200, {"visits": list(VISITS), "paired": PAIRING.phone_online()})
+            self._send(200, {"visits": list(VISITS), "paired": PAIRING.phone_online(), "pending": [d for d in APPROVALS.listing() if d["state"] == "pendiente"]})
             return
         if path == "/api/windows":
             self._guard(lambda _body: control.windows_with_icons())
@@ -499,21 +522,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/photos":
             self._guard(lambda _body: control.list_photos())
             return
-        if path == "/api/dl/tools":
-            self._guard(lambda _body: descargas.tools_status())
-            return
-        if path == "/api/dl/status":
-            self._guard(lambda _body: descargas.QUEUE.status())
-            return
-        if path.startswith("/api/dl/file/"):
-            self._dl_file(path.rsplit("/", 1)[-1])
-            return
         match = GET_PATH.fullmatch(path)
         if match:
             self._get_chunk(*match.groups())
             return
         if path.startswith("/api/files/"):
             self._download(path.rsplit("/", 1)[-1])
+            return
+        if path == "/api/aprobacion":
+            if not self._authed(allow_pending=True):
+                self._unauth()
+                return
+            who = self._who()
+            state = APPROVALS.state(who) if self.remote else "aprobado"
+            if state == "nuevo":
+                state = {"ok": "aprobado"}.get(APPROVALS.check(who, self.headers.get("User-Agent", ""), self.client_address[0]), "pendiente")
+            self._send(200, {"state": state})
+            return
+        if path == "/api/dispositivos":
+            self._guard(lambda _body: {"devices": APPROVALS.listing(), "me": self._who() if self.remote else ""})
             return
         if path == "/api/status":
             self._guard(lambda _body: {**control.status(), "version": VERSION})
@@ -543,7 +570,14 @@ class Handler(BaseHTTPRequestHandler):
         sock.settimeout(None)
         who = self._who(ws=True)
         try:
-            protocol.pointer_loop(sock, PAIRING, control.move_mouse, who, require_seal=self.remote)
+            remote = self.remote
+
+            def move(dx: int, dy: int) -> object:
+                if remote and not APPROVALS.is_ok(who):
+                    raise OSError("expulsado")
+                return control.move_mouse(dx, dy)
+
+            protocol.pointer_loop(sock, PAIRING, move, who, require_seal=remote)
         except control.ControlError:
             pass
         finally:
@@ -591,11 +625,14 @@ class Handler(BaseHTTPRequestHandler):
             PAIRING.phone_gone(parse_qs(urlsplit(self.path).query).get("i", [self._who()])[0])
             self._send(200, {"ok": True})
             return
+        if path == "/api/dispositivos/decidir":
+            self._local_only(lambda body: {"ok": APPROVALS.decide(str(body.get("id", "")), bool(body.get("ok")))})
+            return
+        if path == "/api/dispositivos/expulsar":
+            self._guard(self._kick)
+            return
         if path == "/api/about/check":
             self._guard(lambda _body: sobre.check_update(VERSION))
-            return
-        if path in DL_ACTIONS:
-            self._guard(DL_ACTIONS[path])
             return
         action = path.removeprefix("/api/")
         if action not in ACTIONS:
@@ -672,6 +709,27 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, result)
         else:
             self._send(200, {"ok": True, "detail": result or ""})
+
+    def _local_only(self, fn) -> None:
+        """Solo desde la pantalla de este PC: un móvil no puede aprobarse a sí mismo."""
+        if not self._loopback():
+            self._drain()
+            self._send(403, {"error": "Solo desde la pantalla del PC"})
+            return
+        self._guard(fn)
+
+    def _kick(self, body: dict) -> dict:
+        if body.get("all"):
+            count = APPROVALS.kick_all()
+            PAIRING.forget_phones()
+            print(f"  Expulsados todos los dispositivos ({count}).", flush=True)
+            return {"ok": True, "count": count}
+        who = str(body.get("id", ""))
+        done = APPROVALS.kick(who)
+        PAIRING.phone_gone(who)
+        if done:
+            print(f"  Dispositivo {who[:4]} expulsado.", flush=True)
+        return {"ok": done}
 
     def _push_clip(self) -> None:
         if not self._authed():
@@ -757,9 +815,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, {"error": str(exc)})
 
     def _get_target(self, kind: str, item: str) -> tuple[Path, str, dict]:
-        if kind == "dl":
-            target = descargas.QUEUE.file(item)
-            return target, target.name, {}
         row, target = control.file_path(item)
         return target, row["name"], row
 
@@ -899,40 +954,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _dl_file(self, job_id: str) -> None:
-        """Manda al móvil un archivo del Descargatodo, sellado como el puente."""
-        if not self._authed():
-            self._unauth()
-            return
-        try:
-            target = descargas.QUEUE.file(job_id)
-            size = target.stat().st_size
-        except (control.ControlError, OSError) as exc:
-            self._send(404, {"error": str(exc) or "ese archivo ya no está"})
-            return
-        sealed = self.headers.get("X-Seal") == "1"
-        if self.remote and not sealed:
-            self._send(400, {"error": "hace falta cifrado"})
-            return
-        if sealed and size > descargas.SEND_CAP:
-            self._send(413, {"error": "Pasa de 400 MB: cógelo en la carpeta Descargas/LaZoo del PC"})
-            return
-        self.send_response(200)
-        self.send_header("Content-Type", "application/octet-stream")
-        if sealed:
-            data = PAIRING.seal(target.read_bytes())
-            self.send_header("Content-Length", str(len(data)))
-        else:
-            self.send_header("Content-Length", str(size))
-        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(target.name)}")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        if sealed:
-            self.wfile.write(data)
-            return
-        with target.open("rb") as src:
-            shutil.copyfileobj(src, self.wfile, 256 * 1024)
-
     def do_DELETE(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
         if not path.startswith("/api/files/"):
@@ -1003,15 +1024,15 @@ def open_local(url: str) -> None:
 
 
 def listen(host: str, port: int) -> tuple[ThreadingHTTPServer, int]:
-    ThreadingHTTPServer.allow_reuse_address = True
+    LazoServer.allow_reuse_address = True
     try:
-        return ThreadingHTTPServer((host, port), Handler), port
+        return LazoServer((host, port), Handler), port
     except OSError:
         print()
         print(f"  El puerto {port} ya está cogido.")
         print("  Cierra la otra ventana negra de Lazo y abre iniciar.bat otra vez.")
         print("  Mientras, uso otro puerto para que la página sí salga.")
-        server = ThreadingHTTPServer((host, 0), Handler)
+        server = LazoServer((host, 0), Handler)
         return server, server.server_address[1]
 
 
@@ -1023,7 +1044,26 @@ def main() -> None:
     parser.add_argument("--pin", default="")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument("--max-gb", type=float, default=0, help="Tope por archivo del puente (8 por defecto)")
+    parser.add_argument("--permitir-ip", action="append", default=[], metavar="CIDR",
+                        help="Acepta también este rango (p. ej. una VPN 100.64.0.0/10). Repetible.")
+    parser.add_argument("--auto-aprobar", action="store_true", help=argparse.SUPPRESS)  # solo pruebas
     args = parser.parse_args()
+    extra = list(args.permitir_ip) + [part for part in os.environ.get("LAZO_ALLOW", "").replace(";", ",").split(",") if part.strip()]
+    for cidr in extra:
+        try:
+            net = aprobacion.add_allowed(cidr)
+        except ValueError:
+            print(f"  Rango no válido, lo ignoro: {cidr}")
+            continue
+        print(f"  Aviso: amplías el acceso a {net}. Cualquiera en ese rango puede intentar el PIN.")
+    APPROVALS.auto = args.auto_aprobar or os.environ.get("LAZO_AUTOAPPROVE") == "1"
+    if APPROVALS.auto:
+        print("  Aviso: modo de pruebas, los dispositivos nuevos entran sin aprobación.")
+    else:
+        if sys.stdin is not None and sys.stdin.isatty():
+            APPROVALS.on_new.append(aprobacion.ConsolePrompt(APPROVALS))
+        if sys.platform == "win32":
+            APPROVALS.on_new.append(aprobacion.windows_dialog(APPROVALS))
     if args.max_gb > 0:
         puente.set_max_gb(args.max_gb)
     try:
@@ -1050,7 +1090,8 @@ def main() -> None:
     for label, ip in lan_targets():
         print(f"  {label}: {plain_url(ip)}")
     print("  Al entrar el móvil se abre el puente Wi-Fi. No pasa por internet.")
-    print("  No abras este puerto en el router.")
+    print("  No abras este puerto en el router. Solo acepta conexiones de tu red local.")
+    print("  Cada móvil nuevo hay que aceptarlo en este PC la primera vez.")
     print()
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:

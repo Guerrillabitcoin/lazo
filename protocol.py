@@ -234,6 +234,10 @@ class Pairing:
         with self._lock:
             self._seen.pop(who, None)
 
+    def forget_phones(self) -> None:
+        with self._lock:
+            self._seen.clear()
+
     def phone_count(self) -> int:
         with self._lock:
             now = time.time()

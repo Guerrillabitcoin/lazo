@@ -512,28 +512,8 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
   button:active { transform: none; }
 }
 
-/* Descargatodo */
-.dl-deck { display: grid; gap: 10px; align-content: start; }
-.dl-notice { margin: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--copper); color: var(--copper); font-size: 12px; }
-.dl-form { display: grid; gap: 8px; }
-.dl-form input[type="url"] { width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 12px; border: 1px solid #4a4036; background: var(--pad); color: inherit; font: inherit; }
-.dl-row { display: flex; gap: 8px; }
-.dl-row > button { flex: 1; min-height: 46px; }
-.dl-check { display: flex; gap: 8px; align-items: center; color: var(--fog); font-size: 13px; }
-.dl-tools { display: grid; gap: 8px; }
-.dl-tools button { min-height: 52px; }
-.dl-card { display: grid; gap: 8px; padding: 10px; border-radius: 14px; background: var(--pad); }
-.dl-title { margin: 0; font-weight: 650; }
-.dl-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.dl-choices button { min-height: 54px; }
-.dl-choices button:first-child { grid-column: 1 / -1; }
-.dl-choices small { color: inherit; opacity: 0.75; }
-.dl-adv-open { min-height: 40px; }
-.dl-formats button { font-size: 12px; text-align: left; }
-.dl-job { display: grid; gap: 6px; padding: 10px; border-radius: 12px; background: var(--pad); margin-bottom: 8px; }
-.dl-job-name { margin: 0; word-break: break-word; }
-.dl-job .hint { margin: 0; }
-.dl-fill { height: 100%; background: var(--copper); transition: width 0.4s ease; }
+/* Avisos */
+.notice { margin: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--copper); color: var(--copper); font-size: 12px; }
 
 .about-deck { display: grid; gap: 10px; align-content: start; flex: none; overflow-wrap: anywhere; }
 .about-head { display: flex; gap: 12px; align-items: center; }
@@ -598,8 +578,6 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 button[data-cursor] { min-height: 44px; }
 .about-links a { display: inline-block; padding: 13px 0; }
 
-.xfer-track.busy .dl-fill { width: 30% !important; animation: dlbusy 1.4s ease-in-out infinite; }
-@keyframes dlbusy { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
 
 /* 0.40: reproductores con iconos, título en una línea fija que no mueve el mando */
 .now.now-line { font-size: 16px; line-height: 22px; height: 22px; margin: 0 0 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -641,9 +619,7 @@ button[data-cursor] { min-height: 44px; }
 .win-acts .win-close { background: #8f2a20; color: #fff; }
 .win-panel .win-move { margin-top: 8px; }
 .win-acts button { white-space: normal; line-height: 1.15; text-align: center; overflow: visible; text-overflow: clip; }
-.dl-err { margin: 0; color: #ff8f7a; font-size: 0.86rem; word-break: break-word; }
-.dl-save { color: var(--copper); align-self: center; text-decoration: underline; }
-.dl-job [hidden] { display: none !important; }
+.warn-err { margin: 0; color: #ff8f7a; font-size: 0.86rem; word-break: break-word; }
 /* Escanear QR (pantalla de PIN / sin conexión) */
 .qr-box { display: grid; gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,0.08); }
 .qr-btn { min-height: 52px; font-size: 1.05rem; }
@@ -653,3 +629,10 @@ button[data-cursor] { min-height: 44px; }
 .qr-live[hidden] { display: none !important; }
 .qr-live { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,0.92); display: grid; place-content: center; gap: 12px; padding: 16px; text-align: center; }
 .qr-live video { width: min(92vw, 420px); aspect-ratio: 1; object-fit: cover; border-radius: 16px; border: 2px solid var(--copper, #e07a3d); }
+
+.wait { display: grid; gap: 12px; text-align: center; padding: 28px 18px; }
+.wait-title { margin: 0; font-size: 1.15rem; font-weight: 650; color: var(--copper); }
+.wait[data-state="rechazado"] .wait-title { color: #ff8f7a; }
+.about-devs { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 8px; }
+.about-devs li { display: flex; gap: 8px; align-items: center; justify-content: space-between; font-size: 13px; }
+.about-devs li button { min-height: 40px; padding: 0 12px; flex: none; }

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.41</title>
-    <link rel="stylesheet" href="/app.css?v=0.41" />
+    <title>LaZoo 0.42</title>
+    <link rel="stylesheet" href="/app.css?v=0.42" />
   </head>
   <body>
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.41</p>
+          <p class="ver">0.42</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -30,6 +30,11 @@
           <p id="qr-msg" class="hint" aria-live="polite"></p>
           <p class="hint">También puedes abrir la app de cámara del móvil y apuntar al QR de la pantalla del PC: abrirá LaZoo directamente con la clave.</p>
         </div>
+      </section>
+      <section id="wait" class="panel wait" hidden aria-live="polite">
+        <p id="wait-title" class="wait-title">Esperando aprobación en el PC…</p>
+        <p id="wait-text" class="hint"></p>
+        <button id="wait-retry" type="button">Comprobar otra vez</button>
       </section>
       <div id="qr-live" class="qr-live" hidden>
         <video id="qr-video" playsinline muted></video>
@@ -166,7 +171,7 @@
               <label id="send-dir-label" class="file-label">Carpeta<input id="send-dir" type="file" webkitdirectory multiple hidden /></label>
             </div>
             <p class="hint">«Archivos» abre el selector de archivos del móvil (PDF, ZIP, APK, documentos… de cualquier tamaño). Si se abre en «Recientes», toca ☰ arriba a la izquierda y elige «Descargas», «Documentos» o la memoria del móvil. «Carpeta» manda una carpeta entera; algunos navegadores de móvil no lo permiten y entonces solo deja elegir archivos sueltos.</p>
-            <p id="send-dir-warn" class="hint dl-err" hidden></p>
+            <p id="send-dir-warn" class="hint warn-err" hidden></p>
             <div id="xfer" class="xfer" hidden>
               <div class="xfer-track" role="progressbar" aria-label="Progreso total" aria-valuemin="0" aria-valuemax="100"><div id="xfer-bar"></div></div>
               <div class="xfer-head">
@@ -213,37 +218,6 @@
             <p class="sys-title">SESIÓN</p>
             <button id="sys-lock" type="button" class="lock-red">Bloquear PC</button>
             <p id="sys-na" class="screen-note" hidden></p>
-          </article>
-        </div>
-
-        <div id="view-dl" class="view" hidden>
-          <article class="deck dl-deck">
-            <p class="dl-notice">Solo para uso personal. Respeta los derechos de autor y las normas de cada web.</p>
-            <div id="dl-tools" class="dl-tools" hidden>
-              <p id="dl-tools-msg" class="hint">Faltan las herramientas (yt-dlp y ffmpeg).</p>
-              <button id="dl-install" type="button" class="primary">Instalar herramientas (una vez)</button>
-              <div id="dl-install-bar" class="xfer" hidden><div class="xfer-track"><div id="dl-install-fill"></div></div></div>
-            </div>
-            <form id="dl-form" class="dl-form">
-              <input id="dl-url" type="url" inputmode="url" maxlength="2048" autocomplete="off" placeholder="Pega un enlace de YouTube, Instagram, TikTok, X…" />
-              <div class="dl-row">
-                <button id="dl-paste" type="button">Pegar</button>
-                <button id="dl-find" type="submit" class="primary">Buscar formatos</button>
-              </div>
-              <label class="dl-check"><input id="dl-playlist" type="checkbox" /> Lista completa</label>
-            </form>
-            <div id="dl-card" class="dl-card" hidden>
-              <p id="dl-title" class="dl-title"></p>
-              <p id="dl-meta" class="hint"></p>
-              <div id="dl-choices" class="dl-choices"></div>
-              <button id="dl-adv-open" type="button" class="dl-adv-open">Avanzado</button>
-              <ul id="dl-formats" class="list dl-formats" hidden></ul>
-            </div>
-            <ul id="dl-jobs" class="list dl-jobs"></ul>
-            <div class="dl-row dl-foot">
-              <button id="dl-update" type="button">Actualizar yt-dlp</button>
-            </div>
-            <p id="dl-version" class="hint"></p>
           </article>
         </div>
 
@@ -302,7 +276,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.41</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.42</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -312,7 +286,7 @@
             <p id="about-update" class="hint about-update"></p>
             <section class="about-box">
               <h3>Qué es</h3>
-              <p>LaZoo convierte el móvil en mando del PC: ratón, ventanas, YouTube, Spotify, notas, puente de archivos y descargas. Funciona solo en tu red local, sin cuentas, sin nube y sin rastreadores.</p>
+              <p>LaZoo convierte el móvil en mando del PC: ratón, ventanas, YouTube, Spotify, notas y puente de archivos. Funciona solo en tu red local, sin cuentas, sin nube y sin rastreadores.</p>
             </section>
             <section class="about-box">
               <h3>Datos técnicos</h3>
@@ -322,7 +296,14 @@
                 <li>Ese cifrado no lo ha auditado nadie externo.</li>
                 <li>Sin cámara, entras con un PIN de 6 dígitos. Tras varios fallos se bloquea un rato.</li>
                 <li>La clave cambia cada vez que reinicias LaZoo en el PC.</li>
+                <li>Solo acepta conexiones de tu red local.</li>
+                <li>Cada móvil nuevo hay que aceptarlo en el PC la primera vez.</li>
               </ul>
+            </section>
+            <section class="about-box">
+              <h3>Dispositivos conectados</h3>
+              <ul id="about-devs" class="about-devs"></ul>
+              <button id="about-kick-all" type="button" class="lock-red">Expulsar a todos</button>
             </section>
             <section class="about-box">
               <h3>Enlaces</h3>
@@ -349,7 +330,7 @@
         </div>
       </section>
     </main>
-    <script src="/seal.js?v=0.41"></script>
-    <script src="/app.js?v=0.41"></script>
+    <script src="/seal.js?v=0.42"></script>
+    <script src="/app.js?v=0.42"></script>
   </body>
 </html>
