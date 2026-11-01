@@ -1,6 +1,6 @@
-# LaZoo 0.43
+# LaZoo 0.44
 
-Beta de la fase 2: icono en la bandeja de Windows (`LaZoo.pyw`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
+Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
 Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada sale a internet. En Windows el portapapeles y los archivos de la mesa se guardan cifrados para tu usuario.
 
@@ -23,6 +23,10 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir la ventana del PC, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Ventana del PC (nuevo en 0.44):** al arrancar `LaZoo.pyw` o el `.exe` (también con «Iniciar con Windows») se abre la ventana del PC. Mientras no haya ningún móvil conectado, arriba sale el panel «Conecta tu móvil» con el QR, el PIN, la dirección y botones (QR a pantalla completa, Puente Wi-Fi, Dispositivos). Al unirse un móvil aprobado, el panel se oculta y queda el puente. Si no queda ninguno (expulsado, cerrado o sin señal), vuelve solo. «Conectado» = un móvil aprobado que ha hablado con el PC en los últimos 5 segundos (la app lo hace sola cada pocos segundos). Para arrancar sin abrir la ventana: `LaZoo.pyw --sin-ventana`.
+
+**Android (nuevo en 0.44):** instala `LaZoo-0.44.apk` (permite «instalar apps desconocidas»; está firmada con una clave propia de pruebas, no viene de Google Play). Al abrirla sale el escáner de QR: apunta al QR de la ventana del PC y entra. Sin servicios de Google, vale en GrapheneOS. Solo abre direcciones de tu red local. «Atrás» vuelve al escáner, que tiene «Volver al último PC» y un campo para escribir la dirección. Cómo compilarla: `android/README.md`.
 
 **macOS y Linux:** en la carpeta descomprimida:
 

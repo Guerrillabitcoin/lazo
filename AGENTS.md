@@ -46,6 +46,11 @@ Una fase por encargo. No empieces la siguiente si la anterior no arranca.
 
 Después, y solo después: fluidez del ratón, barra de subida del puente, ignorar IPs `172.*` virtuales, y la copia local de fotos. No son el primer trabajo.
 
+## Estado (0.44)
+
+- Fase 2: `LaZoo.pyw`/`bandeja.py` + `.exe` (`construir_exe.bat`). Al arrancar abre `/mesa`, que enseña QR+PIN (`/api/conexion`, solo desde el propio PC) cuando `PAIRING.phone_count() == 0` (móviles aprobados vistos en `ALIVE_SECONDS`).
+- Fase 4 empezada: `android/` (WebView + escáner jsQR en `https://appassets.androidplatform.net/assets/escaner.html`, sin Gradle ni Google). `android/construir_apk.sh`. Falta: descargas `blob:` del puente en el WebView, icono adaptativo, firma estable de publicación.
+
 ## Cómo trabajar
 
 Diff corto. No cambies el puerto ni el nombre. No añadas una dependencia si la biblioteca estándar basta. Si publicas, el zip se llama `LaZoo-X.Y.zip` y la APK, cuando exista, `LaZoo-X.Y.apk`.

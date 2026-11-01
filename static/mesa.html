@@ -110,6 +110,17 @@
       .ask .card .row button { flex: 1; min-height: 48px; }
       button.danger { background: #b3261e; color: #fff; }
       .devs .jobs li { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+      .conn { border: 2px solid #e07a3d; border-radius: 16px; background: #1d1915; padding: 18px; margin: 0 0 22px; display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; }
+      .conn[hidden] { display: none; }
+      .conn .qr { width: 240px; height: 240px; background: #fff; padding: 12px; border-radius: 8px; }
+      .conn .qr svg { width: 100%; height: 100%; display: block; }
+      .conn h2 { margin: 0 0 8px; color: #e07a3d; font-size: 1.3rem; }
+      .conn .pin { font-size: 2.4rem; letter-spacing: 0.2em; color: #fff; margin: 4px 0 8px; font-weight: 600; }
+      .conn .url { font-size: 1.15rem; color: #fff; word-break: break-all; margin: 0 0 4px; }
+      .conn .menu { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+      .conn .menu a, .conn .menu button { min-height: 40px; padding: 0 14px; border-radius: 10px; display: inline-grid; place-items: center; background: #3a332b; color: #f3eee6; text-decoration: none; border: 0; font: inherit; cursor: pointer; }
+      .conn .menu .primary { background: #e07a3d; color: #141210; }
+      @media (max-width: 640px) { .conn { grid-template-columns: 1fr; justify-items: center; text-align: center; } }
       @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
     </style>
   </head>
@@ -118,11 +129,26 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.43</p>
+          <p class="ver">0.44</p>
         </div>
         <p id="link-label">Sin conexión</p>
       </header>
       <div id="ask" class="ask" hidden></div>
+      <section id="conexion" class="conn" aria-label="Conectar un móvil" hidden>
+        <div id="conn-qr" class="qr" aria-label="Código QR para conectar"></div>
+        <div>
+          <h2>Conecta tu móvil</h2>
+          <p>Escanea el QR con la app LaZoo o la cámara del móvil. Si escribes la dirección a mano, usa este PIN:</p>
+          <p id="conn-pin" class="pin"></p>
+          <div id="conn-urls"></div>
+          <p><small>Misma Wi-Fi. Este panel se oculta al conectar un móvil y vuelve cuando no queda ninguno.</small></p>
+          <div class="menu">
+            <a class="primary" href="/conectar" target="_blank" rel="noopener">QR a pantalla completa</a>
+            <button id="conn-puente" type="button">Puente Wi-Fi</button>
+            <button id="conn-devs" type="button">Dispositivos</button>
+          </div>
+        </div>
+      </section>
       <h1>Puente Wi-Fi</h1>
       <p>Solo la Wi-Fi de esta casa. Nada de esto sale a internet. Si el móvil entró con el QR, quien escuche la red ve el tráfico cifrado, no el texto ni los archivos. Lo que ya estaba copiado al abrir no se guarda: pégalo si lo quieres en las notas.</p>
       <div class="grid">
@@ -188,6 +214,30 @@
           document.querySelector("#link-label").textContent = data.paired ? "Móvil conectado" : "Sin conexión";
         } catch (_err) {}
       }
+
+      let connShown = null;
+      async function watchConn() {
+        try {
+          const data = await fetch("/api/conexion").then((res) => res.json());
+          const show = !(data.connected > 0);
+          const box = document.querySelector("#conexion");
+          if (show) {
+            const qr = document.querySelector("#conn-qr");
+            if (qr.dataset.svg !== data.qr) { qr.innerHTML = data.qr || ""; qr.dataset.svg = data.qr || ""; }
+            document.querySelector("#conn-pin").textContent = data.pin || "";
+            const urls = document.querySelector("#conn-urls");
+            urls.replaceChildren(...(data.targets || []).map((t) => {
+              const p = document.createElement("p");
+              p.className = "url";
+              p.textContent = t.url + "  (" + t.label + ")";
+              return p;
+            }));
+          }
+          if (show !== connShown) { box.hidden = !show; connShown = show; }
+        } catch (_err) {}
+      }
+      document.querySelector("#conn-puente").addEventListener("click", () => document.querySelector("#puente").scrollIntoView({ behavior: "smooth" }));
+      document.querySelector("#conn-devs").addEventListener("click", () => document.querySelector("#dispositivos").scrollIntoView({ behavior: "smooth" }));
 
       async function watchClipboard() {
         try {
@@ -405,6 +455,8 @@
       });
       loadDevices();
       setInterval(loadDevices, 1000);
+      watchConn();
+      setInterval(watchConn, 1500);
       load();
       watchLink();
       setInterval(() => { if (!document.hidden) load(); }, 2000);

@@ -446,6 +446,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="LaZoo en la bandeja de Windows")
     parser.add_argument("--port", type=int, default=8787)
+    parser.add_argument("--sin-ventana", action="store_true", help="no abrir la ventana del PC al arrancar")
     args, extra = parser.parse_known_args(argv)
     tray = Tray(args.port, extra)
     if not tray.single():
@@ -455,6 +456,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     tray.create()
     tray.balloon("LaZoo está en marcha", f"Puerto {tray.lazo.PORT}. Clic derecho en el icono para el menú; doble clic abre la ventana del PC.")
+    if not args.sin_ventana:
+        # 0.44: al arrancar (también con Windows) se abre la ventana del PC con el QR y el PIN.
+        tray.open(tray.url("/mesa"))
     tray.loop()
     tray._stop_server()
     return 0

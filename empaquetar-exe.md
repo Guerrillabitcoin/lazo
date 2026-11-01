@@ -42,4 +42,8 @@ No se puede construir desde Linux: PyInstaller solo genera ejecutables del siste
 - En el .exe, las notas y la carpeta `nube` se guardan dentro de `_internal`; `Fotos` ya va junto al .exe.
   Moverlo todo a `%LOCALAPPDATA%\LaZoo` en una versión próxima.
 - Bandeja en Linux y macOS (fase 3). Hoy `bandeja.py` solo avisa ahí; se usa `iniciar.sh`.
-- APK de Android con lector de QR al abrir (fase 4).
+- APK de Android: primera versión en 0.44 (`android/`).
+
+## 0.44
+
+- Al arrancar se abre la ventana del PC con QR y PIN mientras no haya móvil conectado (`--sin-ventana` para no abrirla).

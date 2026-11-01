@@ -27,7 +27,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.43"
+VERSION = "0.44"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -212,6 +212,35 @@ def note_visit(ip: str) -> None:
         del VISITS[:-6]
 
 
+_QR_CACHE: dict[str, str] = {}
+
+
+def connection_info() -> dict:
+    """Panel de conexión de la ventana del PC (0.44). `connected` cuenta los móviles
+    aprobados que han dado señal en los últimos protocol.ALIVE_SECONDS segundos
+    (cualquier petición firmada o el WebSocket del ratón). Con 0, la ventana enseña QR y PIN."""
+    targets = lan_targets()[:3]
+    qr = ""
+    if targets:
+        url = phone_url(targets[0][1])
+        qr = _QR_CACHE.get(url, "")
+        if not qr:
+            try:
+                qr = qr_svg(url)
+            except Exception:
+                qr = ""
+            _QR_CACHE.clear()
+            _QR_CACHE[url] = qr
+    return {
+        "connected": PAIRING.phone_count(),
+        "alive_seconds": protocol.ALIVE_SECONDS,
+        "pin": PAIRING.pin,
+        "qr": qr,
+        "targets": [{"label": label, "ip": ip, "url": plain_url(ip)} for label, ip in targets],
+        "pending": len([d for d in APPROVALS.listing() if d["state"] == "pendiente"]),
+    }
+
+
 def connect_page() -> bytes:
     targets = lan_targets()[:3]
     blocks: list[str] = []
@@ -296,7 +325,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.43</p>
+      <p class="ver">{VERSION}</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -497,6 +526,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(404, {"error": "no está"})
                 return
             self._send(200, body=connect_page(), content_type="text/html; charset=utf-8")
+            return
+        if path == "/api/conexion":
+            if not (_local_pc(self.client_address[0]) and self._host_ok()):
+                self._send(404, {"error": "no está"})
+                return
+            self._send(200, connection_info(), seal=False)
             return
         if path == "/api/time":
             self._send(200, {"t": int(time.time() * 1000)}, seal=False)
