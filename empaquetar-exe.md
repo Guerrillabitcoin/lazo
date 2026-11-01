@@ -17,7 +17,7 @@ Hoja de ruta para pasar de `iniciar.bat` (con consola) a un programa con icono e
 
 En Windows, con Python 3.10+ en el PATH, doble clic en `construir_exe.bat`. Hace esto:
 
-1. Crea una venv temporal en `%TEMP%\lazoo-exe-venv` e instala PyInstaller ahí (no en tu Python).
+1. Crea una venv temporal en `%TEMP%\lazoo-exe-venv` e instala PyInstaller y `requirements.txt` (pynput, segno) ahí, no en tu Python. (Desde 0.44: antes el .exe podía salir sin pynput.)
 2. `pyinstaller --noconsole --onedir --name LaZoo --icon static\lazoo.ico --add-data "static;static" ... LaZoo.pyw`
 3. Deja el resultado en `dist\LaZoo\` y borra la venv.
 

@@ -5,7 +5,7 @@ setlocal
 cd /d "%~dp0"
 set "VENV=%TEMP%\lazoo-exe-venv"
 python -m venv "%VENV%" || goto :fail
-"%VENV%\Scripts\python.exe" -m pip install --quiet --disable-pip-version-check pyinstaller || goto :fail
+"%VENV%\Scripts\python.exe" -m pip install --quiet --disable-pip-version-check pyinstaller -r requirements.txt || goto :fail
 "%VENV%\Scripts\pyinstaller.exe" --noconfirm --clean --noconsole --onedir --name LaZoo ^
   --icon static\lazoo.ico ^
   --add-data "static;static" --add-data "VERSION.txt;." --add-data "medios.ps1;." ^

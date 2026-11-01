@@ -2398,6 +2398,8 @@ def _physical_mouse_loop() -> None:
     _hook_proc = hook_type(_proc)
     user32.SetWindowsHookExW.restype = ctypes.c_void_p
     user32.SetWindowsHookExW(14, _hook_proc, None, 0)
+    import ctypes.wintypes
+
     msg = ctypes.wintypes.MSG()
     while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
         user32.TranslateMessage(ctypes.byref(msg))

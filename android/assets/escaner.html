@@ -105,6 +105,7 @@
     b.addEventListener("click", () => tryOpen(last));
   }
   document.querySelector("#retry").addEventListener("click", () => { busy = false; start(); });
+  document.querySelector("#manual").addEventListener("keydown", (e) => { if (e.key === "Enter") document.querySelector("#go").click(); });
   document.querySelector("#go").addEventListener("click", () => {
     let t = document.querySelector("#manual").value.trim();
     if (t && !/^https?:\/\//.test(t)) t = "http://" + t;
