@@ -1,6 +1,6 @@
-# LaZoo 0.42
+# LaZoo 0.43
 
-Beta de la fase 1 (protocolo en `protocol.py`). La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
+Beta de la fase 2: icono en la bandeja de Windows (`LaZoo.pyw`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
 Mando abierto para controlar **tu** PC desde el móvil, en la misma Wi-Fi. Nada sale a internet. En Windows el portapapeles y los archivos de la mesa se guardan cifrados para tu usuario.
 
@@ -21,6 +21,8 @@ No es una web suelta. El navegador del móvil no puede mover el ratón del orden
 Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add python.exe to PATH**.
 
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
+
+**Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir la ventana del PC, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
 
 **macOS y Linux:** en la carpeta descomprimida:
 
@@ -73,7 +75,7 @@ Los enlaces y las direcciones de donación (solo Bitcoin: Lightning, BOLT12, pag
 - **Solo red local.** LaZoo solo acepta conexiones de tu red local: el propio PC (127.x, `::1`), direcciones privadas (10.x, 172.16–31.x, 192.168.x), link-local (169.254.x, `fe80::`), IPv6 local (`fc00::/7`) y esas mismas en forma `::ffff:a.b.c.d`. Cualquier otra se corta antes de leer nada y la consola dice «Rechazada conexión desde fuera de la red local: …» (una vez por minuto y dirección como mucho).
 - No publiques LaZoo detrás de un proxy inverso: no está soportado. La cabecera `X-Forwarded-For` se ignora siempre.
 - Para entrar por una VPN propia (por ejemplo Tailscale, 100.64.0.0/10), añade el rango: `python lazo.py --permitir-ip 100.64.0.0/10` (se puede repetir) o la variable `LAZO_ALLOW=100.64.0.0/10,otro/rango`. La consola avisa de que amplías el acceso.
-- **Dispositivos nuevos.** La primera vez que un móvil entra (con QR o PIN), queda «Esperando aprobación en el PC…». En el PC se pregunta en la consola (S/N, 30 s), en Windows con un cuadro Sí/No y en la ventana del PC con Aceptar/Rechazar. Sin respuesta en 60 s, se rechaza. Rechazado = bloqueado 5 minutos. Lo aprobado vale hasta que cierras LaZoo.
+- **Dispositivos nuevos.** La primera vez que un móvil entra (con QR o PIN), queda «Esperando aprobación en el PC…». En el PC se pregunta en la consola (S/N, 30 s), en Windows con un cuadro Sí/No y en la ventana del PC con Aceptar/Rechazar y en el menú del icono de la bandeja. Al aceptar, el móvil entra solo: con el QR no vuelve a pedir el PIN. Sin respuesta en 60 s, se rechaza. Rechazado = bloqueado 5 minutos. Lo aprobado vale hasta que cierras LaZoo.
 - En la ventana del PC y en «Sobre LaZoo» hay una lista de dispositivos con «Expulsar» y «Expulsar a todos». Un expulsado tiene que volver a ser aprobado.
 - Solo para pruebas automáticas: `LAZO_AUTOAPPROVE=1` (o `--auto-aprobar`) deja entrar sin preguntar. Nunca está activo por defecto; no lo uses en el día a día.
 

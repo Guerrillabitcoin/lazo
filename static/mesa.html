@@ -118,7 +118,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.42</p>
+          <p class="ver">0.43</p>
         </div>
         <p id="link-label">Sin conexión</p>
       </header>
@@ -140,13 +140,13 @@
           <ul id="files"></ul>
         </section>
       </div>
-      <section class="fotos">
+      <section id="puente" class="fotos">
         <h2>Recibido del móvil</h2>
         <p id="fotos-path">Todavía no ha llegado nada.</p>
         <button id="open-fotos" type="button">Abrir carpeta</button>
         <ul id="fotos"></ul>
       </section>
-      <section class="fotos devs">
+      <section id="dispositivos" class="fotos devs">
         <h2>Dispositivos</h2>
         <p><small>Solo acepta conexiones de tu red local. Cada móvil nuevo hay que aceptarlo aquí la primera vez.</small></p>
         <ul id="devs" class="jobs"></ul>
@@ -410,6 +410,13 @@
       setInterval(() => { if (!document.hidden) load(); }, 2000);
       setInterval(() => { if (!document.hidden) watchLink(); }, 2000);
       setInterval(() => { if (!document.hidden) watchClipboard(); }, 2000);
-    </script>
+    
+    // La bandeja abre /mesa#pastilla=puente o #pastilla=dispositivos.
+    (() => {
+      const want = new URLSearchParams(location.hash.slice(1)).get("pastilla");
+      const box = want && document.getElementById(want);
+      if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+    })();
+</script>
   </body>
 </html>

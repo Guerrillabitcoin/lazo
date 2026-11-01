@@ -27,7 +27,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.42"
+VERSION = "0.43"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -296,7 +296,7 @@ def connect_page() -> bytes:
   <main>
     <header id="status" class="top" data-link="off">
       <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-      <p class="ver">0.42</p>
+      <p class="ver">0.43</p>
       <p id="link-label">Sin conexión</p>
     </header>
     <div id="pair">
@@ -1018,7 +1018,10 @@ def _local_pc(host: str) -> bool:
 
 def open_local(url: str) -> None:
     if sys.platform == "win32":
-        subprocess.Popen(f'start "" "{url}"', shell=True)
+        try:
+            os.startfile(url)  # sin cmd.exe: desde la bandeja no parpadea ninguna consola
+        except OSError:
+            subprocess.Popen(f'start "" "{url}"', shell=True)
         return
     webbrowser.open(url)
 
@@ -1036,7 +1039,8 @@ def listen(host: str, port: int) -> tuple[ThreadingHTTPServer, int]:
         return server, server.server_address[1]
 
 
-def main() -> None:
+def start(argv: list[str] | None = None, console: bool = True):
+    """Arranca el servidor en un hilo y devuelve (server, home). Lo usan main() y la bandeja."""
     global PORT
     parser = argparse.ArgumentParser(description="Mando Lazo para este PC")
     parser.add_argument("--host", default="0.0.0.0")
@@ -1047,7 +1051,7 @@ def main() -> None:
     parser.add_argument("--permitir-ip", action="append", default=[], metavar="CIDR",
                         help="Acepta también este rango (p. ej. una VPN 100.64.0.0/10). Repetible.")
     parser.add_argument("--auto-aprobar", action="store_true", help=argparse.SUPPRESS)  # solo pruebas
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     extra = list(args.permitir_ip) + [part for part in os.environ.get("LAZO_ALLOW", "").replace(";", ",").split(",") if part.strip()]
     for cidr in extra:
         try:
@@ -1060,7 +1064,7 @@ def main() -> None:
     if APPROVALS.auto:
         print("  Aviso: modo de pruebas, los dispositivos nuevos entran sin aprobación.")
     else:
-        if sys.stdin is not None and sys.stdin.isatty():
+        if console and sys.stdin is not None and sys.stdin.isatty():
             APPROVALS.on_new.append(aprobacion.ConsolePrompt(APPROVALS))
         if sys.platform == "win32":
             APPROVALS.on_new.append(aprobacion.windows_dialog(APPROVALS))
@@ -1079,7 +1083,8 @@ def main() -> None:
         print("  No pude abrir la página en este PC.")
         print(f"  {exc}")
         print("  Cierra las ventanas negras de Lazo y vuelve a abrir iniciar.bat.")
-        return
+        return None, ""
+    PORT = server.server_address[1] or PORT
     home = f"http://127.0.0.1:{PORT}/conectar"
     print()
     print(f"  LaZoo {VERSION}")
@@ -1104,6 +1109,13 @@ def main() -> None:
         pass
     if not args.no_browser:
         threading.Timer(0.4, lambda: open_local(home)).start()
+    return server, home
+
+
+def main() -> None:
+    server, _home = start()
+    if server is None:
+        return
     try:
         while True:
             time.sleep(0.5)

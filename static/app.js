@@ -208,7 +208,7 @@ function showWait(state) {
   document.querySelector("#wait-title").textContent = rejected ? "El PC rechazó este dispositivo" : "Esperando aprobación en el PC…";
   document.querySelector("#wait-text").textContent = rejected
     ? "Puedes volver a intentarlo dentro de 5 minutos. Si fue un error, pide que lo acepten en el PC."
-    : "En el PC sale un aviso para aceptar este móvil: en la ventana de LaZoo, en la consola o en un cuadro de Windows. Si nadie responde en 60 s, se rechaza.";
+    : "En el PC sale un aviso para aceptar este móvil: en la ventana de LaZoo, en el icono de la bandeja, en la consola o en un cuadro de Windows. Si nadie responde en 60 s, se rechaza.";
   waitPanel.dataset.state = rejected ? "rechazado" : "pendiente";
   setLink("off", rejected ? "Rechazado por el PC" : "Esperando aprobación");
   say(rejected ? "El PC dijo que no" : "Acéptalo en el PC");
@@ -480,7 +480,7 @@ const localHashes = new Map();
 function cryptoCall(msg, transfer) {
   if (!cryptoWorker && !cryptoBroken) {
     try {
-      cryptoWorker = new Worker("/puente-worker.js?v=0.42");
+      cryptoWorker = new Worker("/puente-worker.js?v=0.43");
       cryptoWorker.onmessage = (event) => {
         const wait = cryptoWaits.get(event.data.seq);
         if (!wait) return;
@@ -1127,7 +1127,9 @@ renderDock();
 const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
 const fromQr = hash.get("k") || "";
 const keyFromLink = fromQr || localStorage.getItem("lazo-key") || "";
-if (fromQr) history.replaceState(null, "", location.pathname);
+const fromTray = hash.get("pastilla") || "";
+const onThisPc = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+if (fromQr || fromTray) history.replaceState(null, "", location.pathname);
 if (keyFromLink) {
   try {
     setMasterKey(keyFromLink);
@@ -1137,11 +1139,23 @@ if (keyFromLink) {
     authKey = null;
   }
 }
-if (authKey) {
+if (onThisPc && fromTray && !authKey) {
+  // Abierto desde el icono de la bandeja en este mismo PC: el PC se fía de sí mismo.
+  // Tras cargar todo el script (el ratón usa variables que se declaran más abajo).
+  window.setTimeout(() => {
+    enterApp();
+    if (views[fromTray]) openCube(fromTray);
+  }, 0);
+} else if (authKey) {
   pinPanel.hidden = true;
   say("Conectando…");
   syncClock().then(() => lzFetch("/api/status")).then(async (res) => {
-    const data = await readBody(res);
+    const data = await readBody(res).catch(() => ({}));
+    if (res.status === 403 && (data.pending || data.rejected)) {
+      // QR válido pero dispositivo nuevo: se queda la clave y se espera al PC, sin PIN.
+      showWait(data.rejected ? "rechazado" : "pendiente");
+      return;
+    }
     if (res.status === 401 || !data.platform) {
       localStorage.removeItem("lazo-key");
       wireKey = null;
@@ -2482,7 +2496,7 @@ function qrLoadLib() {
   if (qrLib) return qrLib;
   qrLib = new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "/jsqr.js?v=0.42";
+    s.src = "/jsqr.js?v=0.43";
     s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error("No se pudo cargar el lector de QR")));
     s.onerror = () => {
       qrLib = null;

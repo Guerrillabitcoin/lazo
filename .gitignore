@@ -10,3 +10,6 @@ lazo-cert.pem
 lazo-key.pem
 about.json
 Fotos/
+build/
+dist/
+LaZoo.spec
