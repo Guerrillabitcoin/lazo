@@ -1,4 +1,4 @@
-# LaZoo 0.44
+# LaZoo 0.45
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir la ventana del PC, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Arreglo 0.45:** con la 0.44 en Windows la barra de tareas y Chrome parpadeaban sin parar: la ventana del PC preguntaba cada 1,5 s por la red y LaZoo abría una ventana negra de `ipconfig` cada vez (unas 90 por minuto). Ahora ningún programa auxiliar abre ventana, la red se consulta como mucho cada 30 s y la ventana no pregunta si está oculta.
 
 **Ventana del PC (nuevo en 0.44):** al arrancar `LaZoo.pyw` o el `.exe` (también con «Iniciar con Windows») se abre la ventana del PC. Mientras no haya ningún móvil conectado, arriba sale el panel «Conecta tu móvil» con el QR, el PIN, la dirección y botones (QR a pantalla completa, Puente Wi-Fi, Dispositivos). Al unirse un móvil aprobado, el panel se oculta y queda el puente. Si no queda ninguno (expulsado, cerrado o sin señal), vuelve solo. «Conectado» = un móvil aprobado que ha hablado con el PC en los últimos 5 segundos (la app lo hace sola cada pocos segundos). Para arrancar sin abrir la ventana: `LaZoo.pyw --sin-ventana`.
 

@@ -129,7 +129,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.44</p>
+          <p class="ver">0.45</p>
         </div>
         <p id="link-label">Sin conexión</p>
       </header>
@@ -456,7 +456,8 @@
       loadDevices();
       setInterval(loadDevices, 1000);
       watchConn();
-      setInterval(watchConn, 1500);
+      setInterval(() => { if (!document.hidden) watchConn(); }, 1500);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) watchConn(); });
       load();
       watchLink();
       setInterval(() => { if (!document.hidden) load(); }, 2000);

@@ -46,7 +46,9 @@ Una fase por encargo. No empieces la siguiente si la anterior no arranca.
 
 Después, y solo después: fluidez del ratón, barra de subida del puente, ignorar IPs `172.*` virtuales, y la copia local de fotos. No son el primer trabajo.
 
-## Estado (0.44)
+## Estado (0.45)
+
+- 0.45: en Windows NUNCA lances un proceso sin `CREATE_NO_WINDOW` (`sinventana.install()` lo pone por defecto en todo `subprocess.Popen`; `control._run_raw` y `lazo._ips_from_system_now` lo pasan explícito). Causa del parpadeo de 0.44: `/api/conexion` (cada 1,5 s desde `/mesa`) lanzaba `ipconfig` 3 veces por petición y, bajo `pythonw`/`.exe`, cada uno abría una consola visible. Ahora `ipconfig` se cachea `IPS_TTL` = 30 s y `/mesa` no sondea con la pestaña oculta. Prueba: `test_v045.py`.
 
 - Fase 2: `LaZoo.pyw`/`bandeja.py` + `.exe` (`construir_exe.bat`). Al arrancar abre `/mesa`, que enseña QR+PIN (`/api/conexion`, solo desde el propio PC) cuando `PAIRING.phone_count() == 0` (móviles aprobados vistos en `ALIVE_SECONDS`).
 - Fase 4 empezada: `android/` (WebView + escáner jsQR en `https://appassets.androidplatform.net/assets/escaner.html`, sin Gradle ni Google). `android/construir_apk.sh`. Falta: descargas `blob:` del puente en el WebView, icono adaptativo, firma estable de publicación.

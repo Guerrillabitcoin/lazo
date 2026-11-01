@@ -11,6 +11,7 @@ import secrets
 import shutil
 import re
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -37,6 +38,9 @@ class ControlError(Exception):
     pass
 
 
+_NO_WINDOW = 0x08000000 if sys.platform == "win32" else 0  # 0.45: sin consolas que parpadean
+
+
 def _run(cmd: list[str], timeout: float = 4) -> subprocess.CompletedProcess[str]:
     """Ejecuta sin colgar LaZoo: si el programa no contesta a tiempo, cuenta como fallo."""
     try:
@@ -56,6 +60,8 @@ def _run_raw(cmd: list[str], timeout: float) -> subprocess.CompletedProcess[str]
         errors="replace",
         timeout=timeout,
         check=False,
+        stdin=subprocess.DEVNULL,
+        creationflags=_NO_WINDOW,
     )
 
 
@@ -1145,7 +1151,7 @@ def _launch_spotify_app() -> None:
         if path and os.path.isfile(path):
             subprocess.Popen([path])
             return
-    subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], close_fds=True)
+    subprocess.Popen(["cmd", "/c", "start", "", "spotify:"], close_fds=True, creationflags=_NO_WINDOW)
 
 
 def _windows_action(hwnd: int, action: str) -> str:
@@ -2169,7 +2175,7 @@ def _spotify_search(query: str) -> dict[str, Any]:
         raise ControlError("escribe qué buscar")
     uri = "spotify:search:" + urllib.parse.quote(query)
     if SYSTEM == "Windows":
-        subprocess.Popen(["cmd", "/c", "start", "", uri], close_fds=True)
+        subprocess.Popen(["cmd", "/c", "start", "", uri], close_fds=True, creationflags=_NO_WINDOW)
     elif SYSTEM == "Darwin":
         subprocess.Popen(["open", uri])
     else:

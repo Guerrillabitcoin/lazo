@@ -480,7 +480,7 @@ const localHashes = new Map();
 function cryptoCall(msg, transfer) {
   if (!cryptoWorker && !cryptoBroken) {
     try {
-      cryptoWorker = new Worker("/puente-worker.js?v=0.44");
+      cryptoWorker = new Worker("/puente-worker.js?v=0.45");
       cryptoWorker.onmessage = (event) => {
         const wait = cryptoWaits.get(event.data.seq);
         if (!wait) return;
@@ -2496,7 +2496,7 @@ function qrLoadLib() {
   if (qrLib) return qrLib;
   qrLib = new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "/jsqr.js?v=0.44";
+    s.src = "/jsqr.js?v=0.45";
     s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error("No se pudo cargar el lector de QR")));
     s.onerror = () => {
       qrLib = null;

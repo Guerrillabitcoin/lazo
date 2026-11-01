@@ -19,6 +19,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
 
+import sinventana
+
+sinventana.install()
+
 import aprobacion
 import control
 import protocol
@@ -27,7 +31,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.44"
+VERSION = "0.45"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -126,14 +130,29 @@ def _adapters_from_ipconfig(text: str) -> list[tuple[str, str]]:
     return found
 
 
+_IPS_CACHE: tuple[float, list[tuple[str, str]]] = (0.0, [])
+IPS_TTL = 30.0  # 0.45: la ventana del PC pregunta cada 1,5 s; ipconfig solo cada 30 s
+
+
 def _ips_from_system() -> list[tuple[str, str]]:
+    global _IPS_CACHE
+    now = time.monotonic()
+    if _IPS_CACHE[1] and now - _IPS_CACHE[0] < IPS_TTL:
+        return list(_IPS_CACHE[1])
+    found = _ips_from_system_now()
+    _IPS_CACHE = (now, found)
+    return list(found)
+
+
+def _ips_from_system_now() -> list[tuple[str, str]]:
     if sys.platform == "win32":
         commands = [["ipconfig"]]
     else:
         commands = [["ip", "-4", "-o", "addr"], ["ifconfig"]]
     for cmd in commands:
         try:
-            out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, timeout=3, text=True, errors="replace")
+            out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=3, text=True,
+                                          errors="replace", creationflags=sinventana.flags())
         except (OSError, subprocess.SubprocessError):
             continue
         if sys.platform == "win32":
@@ -1056,7 +1075,7 @@ def open_local(url: str) -> None:
         try:
             os.startfile(url)  # sin cmd.exe: desde la bandeja no parpadea ninguna consola
         except OSError:
-            subprocess.Popen(f'start "" "{url}"', shell=True)
+            subprocess.Popen(f'start "" "{url}"', shell=True, creationflags=sinventana.flags())
         return
     webbrowser.open(url)
 
