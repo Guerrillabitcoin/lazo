@@ -46,7 +46,9 @@ Una fase por encargo. No empieces la siguiente si la anterior no arranca.
 
 Después, y solo después: fluidez del ratón, barra de subida del puente, ignorar IPs `172.*` virtuales, y la copia local de fotos. No son el primer trabajo.
 
-## Estado (0.45)
+## Estado (0.46)
+
+- 0.46: `control.youtube("fullscreen")` alterna pantalla completa: entra con `f`, sale con `escape` (VK 0x1B). Estado real en Windows con `_win_is_fullscreen` (ventana == rcMonitor, `covers_monitor`); en otros sistemas, `_yt["full"]` recordado. `status` devuelve `full`. Botón `#yt-full` en la pastilla (sustituye al antiguo «Pantalla» de Vista). Prueba: `test_v046.py`. El ratón NO cambió.
 
 - 0.45: en Windows NUNCA lances un proceso sin `CREATE_NO_WINDOW` (`sinventana.install()` lo pone por defecto en todo `subprocess.Popen`; `control._run_raw` y `lazo._ips_from_system_now` lo pasan explícito). Causa del parpadeo de 0.44: `/api/conexion` (cada 1,5 s desde `/mesa`) lanzaba `ipconfig` 3 veces por petición y, bajo `pythonw`/`.exe`, cada uno abría una consola visible. Ahora `ipconfig` se cachea `IPS_TTL` = 30 s y `/mesa` no sondea con la pestaña oculta. Prueba: `test_v045.py`.
 

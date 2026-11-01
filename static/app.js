@@ -480,7 +480,7 @@ const localHashes = new Map();
 function cryptoCall(msg, transfer) {
   if (!cryptoWorker && !cryptoBroken) {
     try {
-      cryptoWorker = new Worker("/puente-worker.js?v=0.45");
+      cryptoWorker = new Worker("/puente-worker.js?v=0.46");
       cryptoWorker.onmessage = (event) => {
         const wait = cryptoWaits.get(event.data.seq);
         if (!wait) return;
@@ -2051,6 +2051,7 @@ async function mediaPoll() {
     if (tab === (prefix === "yt" ? "youtube" : "spotify")) {
       if (data.missing) setMediaTitle(prefix, "Abre YouTube en el PC");
       applyMedia(prefix, data);
+      if (prefix === "yt" && typeof data.full === "boolean") setYtFull(data.full);
     }
   } catch (_err) {
     /* sin ruido: el siguiente sondeo lo intenta otra vez */
@@ -2100,7 +2101,6 @@ function mediaButtons(attr, prefix, path, label) {
             back: "YouTube −10 s",
             forward: "YouTube +10 s",
             home: "YouTube inicio",
-            full: "YouTube pantalla",
             theater: "YouTube cine",
             captions: "YouTube subtítulos",
           };
@@ -2116,6 +2116,27 @@ function mediaButtons(attr, prefix, path, label) {
   });
 }
 mediaButtons("yt", "yt", "/api/youtube", "YouTube");
+
+/* 0.46: Pantalla completa del vídeo en el PC, con alternar para salir. */
+function setYtFull(on) {
+  const b = document.querySelector("#yt-full");
+  b.classList.toggle("on", on);
+  b.setAttribute("aria-pressed", on ? "true" : "false");
+  document.querySelector("#yt-full-label").textContent = on ? "Salir de pantalla completa" : "Pantalla completa";
+}
+document.querySelector("#yt-full").addEventListener("click", async () => {
+  const b = document.querySelector("#yt-full");
+  b.disabled = true;
+  try {
+    const data = await api("/api/youtube", { action: "fullscreen" });
+    setYtFull(Boolean(data.full));
+    say(data.full ? "YouTube a pantalla completa" : "YouTube sin pantalla completa");
+  } catch (err) {
+    say(err.message);
+  } finally {
+    b.disabled = false;
+  }
+});
 mediaButtons("sp", "sp", "/api/spotify", "Spotify");
 setPlay("yt", false);
 setPlay("sp", false);
@@ -2496,7 +2517,7 @@ function qrLoadLib() {
   if (qrLib) return qrLib;
   qrLib = new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "/jsqr.js?v=0.45";
+    s.src = "/jsqr.js?v=0.46";
     s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error("No se pudo cargar el lector de QR")));
     s.onerror = () => {
       qrLib = null;

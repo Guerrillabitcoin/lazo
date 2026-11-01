@@ -336,6 +336,9 @@ def _chord(parts: list[str]) -> None:
             elif part == "down":
                 keyboard.press(Key.down)
                 keyboard.release(Key.down)
+            elif part == "escape":
+                keyboard.press(Key.esc)
+                keyboard.release(Key.esc)
             elif len(part) == 1:
                 keyboard.press(part)
                 keyboard.release(part)
@@ -1445,6 +1448,8 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         return _youtube_volume(int(extra.get("level", _levels["youtube"])))
     if action == "speed":
         return _youtube_speed(extra.get("rate", _levels["youtube_speed"]))
+    if action == "fullscreen":
+        return _youtube_fullscreen()
     actions = {
         "play": ["k"],
         "mute": ["m"],
@@ -1470,7 +1475,10 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
     state = _yt_state(row)
     if action == "status":
-        return {"detail": "", "title": row["title"], "level": _levels["youtube"], **state}
+        real = _win_is_fullscreen(row["id"])
+        if real is not None:
+            _yt["full"] = real
+        return {"detail": "", "title": row["title"], "level": _levels["youtube"], "full": _yt["full"], **state}
     detail = "YouTube"
     if action == "prev":
         # Como un reproductor: si ya lleva más de 5 s, vuelve al 0:00; si no, al anterior.
@@ -1511,7 +1519,81 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
     return {"detail": detail, "title": row["title"], "level": _levels["youtube"], **state}
 
 
-_yt: dict[str, Any] = {"title": "", "since": 0.0, "restart": 0.0, "playing": None}
+_yt: dict[str, Any] = {"title": "", "since": 0.0, "restart": 0.0, "playing": None, "full": False}
+
+
+def covers_monitor(win: tuple[int, int, int, int], mon: tuple[int, int, int, int]) -> bool:
+    """0.46: pantalla completa = la ventana ocupa EXACTAMENTE su monitor (izq, arr, der, abajo).
+    Una ventana maximizada no cuenta: deja la barra de tareas y sobresale unos píxeles."""
+    return tuple(win) == tuple(mon) and mon[2] > mon[0] and mon[3] > mon[1]
+
+
+def _win_is_fullscreen(window_id: str) -> bool | None:
+    """True/False si Windows lo sabe; None si no se puede saber (otros sistemas)."""
+    if SYSTEM != "Windows":
+        return None
+    try:
+        from ctypes import wintypes
+
+        user32 = _user32()
+        handle = _hwnd(int(window_id))
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT),
+                        ("rcWork", wintypes.RECT), ("dwFlags", wintypes.DWORD)]
+
+        user32.GetWindowRect.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        user32.MonitorFromWindow.argtypes = [ctypes.c_void_p, wintypes.DWORD]
+        user32.MonitorFromWindow.restype = ctypes.c_void_p
+        user32.GetMonitorInfoW.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        user32.IsZoomed.argtypes = [ctypes.c_void_p]
+        user32.IsZoomed.restype = ctypes.c_bool
+        if user32.IsZoomed(handle):
+            # Maximizada en un monitor sin barra de tareas ocupa todo el monitor, pero
+            # NO es pantalla completa (visto en un segundo monitor real).
+            return False
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(handle, ctypes.byref(rect)):
+            return None
+        info = MONITORINFO()
+        info.cbSize = ctypes.sizeof(MONITORINFO)
+        mon = user32.MonitorFromWindow(handle, 2)
+        if not mon or not user32.GetMonitorInfoW(mon, ctypes.byref(info)):
+            return None
+        m = info.rcMonitor
+        return covers_monitor((rect.left, rect.top, rect.right, rect.bottom), (m.left, m.top, m.right, m.bottom))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def fullscreen_keys(is_full: bool) -> list[str]:
+    """Entrar con «f» (atajo de YouTube); salir con Esc, que sale siempre aunque el
+    foco no esté en el reproductor y no escribe nada si ya estaba fuera."""
+    return ["escape"] if is_full else ["f"]
+
+
+def _youtube_fullscreen() -> dict[str, Any]:
+    with _lock:
+        row = _find_youtube_unlocked()
+        if row is None:
+            raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
+    real = _win_is_fullscreen(row["id"])
+    is_full = _yt["full"] if real is None else real
+    if not _focus_for_keys(row["id"]):
+        raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
+    time.sleep(0.18)
+    with _lock:
+        _yt_keys(fullscreen_keys(is_full))
+    _yt["full"] = not is_full
+    if SYSTEM == "Windows":
+        time.sleep(0.35)
+        after = _win_is_fullscreen(row["id"])
+        if after is not None:
+            _yt["full"] = after
+    return {
+        "detail": "Pantalla completa" if _yt["full"] else "Salir de pantalla completa",
+        "title": row["title"], "level": _levels["youtube"], "full": _yt["full"],
+    }
 
 
 def _yt_state(row: dict[str, str]) -> dict[str, Any]:
@@ -1532,7 +1614,7 @@ def _yt_state(row: dict[str, str]) -> dict[str, Any]:
     return {"playing": _yt["playing"], "pos": None, "len": 0, "real": False}
 
 
-_WIN_VK = {"shift": 0x10, "ctrl": 0x11, "alt": 0x12, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28}
+_WIN_VK = {"escape": 0x1B, "shift": 0x10, "ctrl": 0x11, "alt": 0x12, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28}
 
 
 def _yt_keys(keys: list[str]) -> None:
