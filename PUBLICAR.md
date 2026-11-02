@@ -29,4 +29,4 @@ Subir commits normales a `beta` NO lo lanza.
 
 - La APK va firmada con una clave de **pruebas** nueva en cada construcción. Android pedirá «instalar apps desconocidas» y, si ya tenías otra LaZoo instalada con otra clave, tendrás que desinstalarla antes. Para una firma fija hace falta guardar una clave en los secretos del repositorio (todavía no se hace).
 - El `.exe` no está firmado: Windows mostrará «Windows protegió su PC» (Más información → Ejecutar de todas formas).
-- No usa contraseñas ni secretos. Las versiones de las herramientas están fijadas (Python 3.12, PyInstaller 6.11.1, Java 17, Android 34).
+- No usa contraseñas ni secretos. Las versiones de las herramientas están fijadas (Python 3.12, PyInstaller 6.22.3, Java 17, Android 34).
