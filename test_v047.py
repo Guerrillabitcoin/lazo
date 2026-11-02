@@ -99,6 +99,8 @@ class Interfaz(unittest.TestCase):
 
     def test_workflow(self) -> None:
         wf = ROOT / ".github" / "workflows" / "construir.yml"
+        if not wf.exists():
+            wf = ROOT / "ci" / "construir.yml"  # hasta activarlo en GitHub (PUBLICAR.md)
         self.assertTrue(wf.exists())
         text = wf.read_text(encoding="utf-8")
         self.assertIn("workflow_dispatch", text)
