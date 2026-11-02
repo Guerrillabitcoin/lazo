@@ -183,7 +183,15 @@ class Smoother:
         self._thread: threading.Thread | None = None
 
     def set(self, on: bool) -> bool:
-        self.on = bool(on)
+        on = bool(on)
+        if on != self.on and SYSTEM == "Windows":
+            # 0.48: sin esto Windows duerme ~15 ms en vez de 5. Solo mientras está activo.
+            try:
+                winmm = ctypes.windll.winmm
+                (winmm.timeBeginPeriod if on else winmm.timeEndPeriod)(1)
+            except Exception:
+                pass
+        self.on = on
         if not self.on:
             self.flush()
         return self.on
@@ -233,7 +241,16 @@ class Smoother:
                     _dispatch_move(*step)
             except Exception:
                 pass
-            time.sleep(self.STEP)
+            _pause(self.STEP)
+
+
+def _pause(seconds: float) -> None:
+    """Pausa corta y precisa: duerme casi todo y apura el último milisegundo."""
+    end = time.perf_counter() + seconds
+    if seconds > 0.0015:
+        time.sleep(seconds - 0.0015)
+    while time.perf_counter() < end:
+        time.sleep(0)
 
 
 SMOOTHER = Smoother()
@@ -549,6 +566,10 @@ def set_cursor_mode(mode: str) -> dict[str, Any]:
     with _lock:
         detail = _apply_cursor_size(_cursor_target(mode))
         _cursor_mode = mode
+    try:
+        VIGILANTE.sync()  # 0.48: el gancho solo vive mientras el cursor no es normal
+    except Exception:
+        pass
     labels = {"normal": "Cursor normal", "large": "Cursor grande", "huge": "Cursor enorme"}
     return {"mode": mode, "label": labels[mode], "detail": detail}
 
@@ -2531,59 +2552,143 @@ def _windows_clipboard() -> str:
 
 
 _injected_until = 0.0
-_hook_proc = None
-
-
 def _mark_injected() -> None:
     global _injected_until
     _injected_until = time.time() + 0.2
 
 
-def watch_physical_mouse() -> None:
-    if SYSTEM != "Windows":
-        return
-    threading.Thread(target=_physical_mouse_loop, name="lazo-mouse", daemon=True).start()
+class Vigilante:
+    """Vigilante del ratón del PC (solo Windows).
 
+    Qué hace: si pusiste el cursor grande o enorme desde el móvil y alguien mueve el
+    ratón de verdad del PC, lo devuelve a tamaño normal. Para saberlo pone un gancho
+    global de ratón (WH_MOUSE_LL) por el que Windows hace pasar TODOS los movimientos,
+    también los del móvil. Al apagarlo solo se pierde esa vuelta automática al cursor
+    normal: el ratón del móvil, los clics y el resto siguen igual.
 
-def _physical_mouse_loop() -> None:
-    global _hook_proc
-    user32 = ctypes.windll.user32
-    user32.CallNextHookEx.restype = ctypes.c_long
-    user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t, ctypes.c_void_p]
+    0.48: el gancho solo está puesto mientras el cursor NO es normal (antes estaba
+    siempre). El callback no hace nada pesado: mira una bandera y avisa a otro hilo,
+    que es el que cambia el cursor. Se puede apagar en caliente o al arrancar con
+    `--sin-vigilante` o `LAZO_SIN_VIGILANTE=1`."""
 
-    class POINT(ctypes.Structure):
-        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+    def __init__(self) -> None:
+        import os
 
-    class MSLLHOOKSTRUCT(ctypes.Structure):
-        _fields_ = [
-            ("pt", POINT),
-            ("mouseData", ctypes.c_ulong),
-            ("flags", ctypes.c_ulong),
-            ("time", ctypes.c_ulong),
-            ("dwExtraInfo", ctypes.c_size_t),
-        ]
+        self.enabled = os.environ.get("LAZO_SIN_VIGILANTE", "") not in ("1", "si", "sí", "true")
+        self.always = os.environ.get("LAZO_VIGILANTE_SIEMPRE") == "1"  # pruebas: gancho puesto aunque el cursor sea normal
+        self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
+        self._tid = 0
+        self.installed = False
+        self.events = 0
+        self.real_events = 0
+        self.cost_ns = 0
+        self.cost_max_ns = 0
+        self._wake = threading.Event()
+        self._worker: threading.Thread | None = None
 
-    def _proc(code, wparam, lparam):
-        if code >= 0 and lparam:
-            flags = ctypes.cast(lparam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents.flags
-            real = not (flags & 0x01 or flags & 0x02)
-            if real and time.time() > _injected_until and _cursor_mode != "normal":
-                try:
+    def wanted(self) -> bool:
+        return SYSTEM == "Windows" and self.enabled and (self.always or _cursor_mode != "normal")
+
+    def set(self, on: bool) -> dict:
+        self.enabled = bool(on)
+        self.sync()
+        return self.status()
+
+    def status(self) -> dict:
+        n = self.events
+        return {
+            "enabled": self.enabled,
+            "installed": self.installed,
+            "available": SYSTEM == "Windows",
+            "events": n,
+            "real_events": self.real_events,
+            "avg_us": round(self.cost_ns / n / 1000, 1) if n else None,
+            "max_us": round(self.cost_max_ns / 1000, 1) if n else None,
+        }
+
+    def sync(self) -> None:
+        if SYSTEM != "Windows":
+            return
+        with self._lock:
+            alive = self._thread is not None and self._thread.is_alive()
+            if self.wanted() and not alive:
+                ready = threading.Event()
+                self._thread = threading.Thread(target=self._loop, args=(ready,), name="lazo-mouse", daemon=True)
+                self._thread.start()
+                ready.wait(2)
+            elif not self.wanted() and alive:
+                ctypes.windll.user32.PostThreadMessageW(self._tid, 0x0012, 0, 0)  # WM_QUIT
+                self._thread.join(2)
+
+    def _restore(self) -> None:
+        while True:
+            self._wake.wait()
+            self._wake.clear()
+            try:
+                if _cursor_mode != "normal":
                     set_cursor_mode("normal")
-                except ControlError:
-                    pass
-        return user32.CallNextHookEx(None, code, wparam, lparam)
+            except Exception:
+                pass
 
-    hook_type = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_int, ctypes.c_size_t, ctypes.c_void_p)
-    _hook_proc = hook_type(_proc)
-    user32.SetWindowsHookExW.restype = ctypes.c_void_p
-    user32.SetWindowsHookExW(14, _hook_proc, None, 0)
-    import ctypes.wintypes
+    def _loop(self, ready: threading.Event) -> None:
+        import ctypes.wintypes as wt
 
-    msg = ctypes.wintypes.MSG()
-    while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
-        user32.TranslateMessage(ctypes.byref(msg))
-        user32.DispatchMessageW(ctypes.byref(msg))
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        LRESULT = ctypes.c_ssize_t
+        user32.CallNextHookEx.restype = LRESULT
+        user32.CallNextHookEx.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t]
+        user32.SetWindowsHookExW.restype = ctypes.c_void_p
+        user32.UnhookWindowsHookEx.argtypes = [ctypes.c_void_p]
+        flags_at = 8 + 4  # MSLLHOOKSTRUCT: POINT pt (8), DWORD mouseData (4), DWORD flags
+        read_u32 = ctypes.c_uint32.from_address
+        clock = time.perf_counter_ns
+        if self._worker is None:
+            self._worker = threading.Thread(target=self._restore, name="lazo-cursor", daemon=True)
+            self._worker.start()
+
+        def _proc(code, wparam, lparam):
+            t0 = clock()
+            if code >= 0 and lparam:
+                if not (read_u32(lparam + flags_at).value & 0x03):  # 0x01/0x02: inyectado
+                    self.real_events += 1
+                    if _cursor_mode != "normal" and time.time() > _injected_until:
+                        self._wake.set()  # el trabajo pesado va en otro hilo
+            spent = clock() - t0
+            self.events += 1
+            self.cost_ns += spent
+            if spent > self.cost_max_ns:
+                self.cost_max_ns = spent
+            return user32.CallNextHookEx(None, code, wparam, lparam)
+
+        proc = ctypes.WINFUNCTYPE(LRESULT, ctypes.c_int, ctypes.c_size_t, ctypes.c_ssize_t)(_proc)
+        self._tid = kernel32.GetCurrentThreadId()
+        msg = wt.MSG()
+        user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 0)  # crea la cola antes de avisar
+        hook = user32.SetWindowsHookExW(14, proc, None, 0)
+        self.installed = bool(hook)
+        ready.set()
+        try:
+            while hook and user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                user32.TranslateMessage(ctypes.byref(msg))
+                user32.DispatchMessageW(ctypes.byref(msg))
+        finally:
+            if hook:
+                user32.UnhookWindowsHookEx(hook)
+            self.installed = False
+            del proc
+
+
+VIGILANTE = Vigilante()
+
+
+def set_vigilante(on) -> dict:
+    return VIGILANTE.set(bool(on))
+
+
+def watch_physical_mouse() -> None:
+    VIGILANTE.sync()
 
 
 _files_dir = Path(__file__).with_name("nube")

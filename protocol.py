@@ -297,20 +297,77 @@ def ws_send(sock: socket.socket, opcode: int, payload: bytes) -> None:
     sock.sendall(bytes([0x80 | opcode, len(payload)]) + payload)
 
 
+class Arrivals:
+    """0.48: diagnóstico de llegada. Guarda solo el instante de cada trama de movimiento
+    (una suma a una cola, nada más por trama). Los números se calculan al pedirlos."""
+
+    def __init__(self, keep: int = 1200) -> None:
+        import collections
+
+        self._t = collections.deque(maxlen=keep)
+        self._lock = threading.Lock()
+        self.total = 0
+
+    def note(self, t: float | None = None) -> None:
+        self._t.append(time.perf_counter() if t is None else t)
+        self.total += 1
+
+    def reset(self) -> None:
+        with self._lock:
+            self._t.clear()
+
+    def snapshot(self, window: float = 3.0, now: float | None = None) -> dict:
+        now = time.perf_counter() if now is None else now
+        with self._lock:
+            times = [t for t in list(self._t) if now - t <= window]
+        gaps = [(b - a) * 1000 for a, b in zip(times, times[1:])]
+        out = {"frames": len(times), "fps": round(len(times) / window, 1), "total": self.total,
+               "median_ms": None, "p95_ms": None, "max_ms": None,
+               "gaps50": 0, "gaps100": 0, "gaps250": 0, "burst": 0, "burst_max": 0}
+        if gaps:
+            ordered = sorted(gaps)
+            out["median_ms"] = round(ordered[len(ordered) // 2], 1)
+            out["p95_ms"] = round(ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))], 1)
+            out["max_ms"] = round(ordered[-1], 1)
+            # Un hueco solo cuenta si hay movimiento a los dos lados (no al levantar el dedo).
+            moving = [g for g in gaps if g < 1000]
+            out["gaps50"] = sum(1 for g in moving if g > 50)
+            out["gaps100"] = sum(1 for g in moving if g > 100)
+            out["gaps250"] = sum(1 for g in moving if g > 250)
+            run = best = 1
+            bursty = 0
+            for g in gaps:
+                if g < 2:
+                    run += 1
+                    bursty += 1
+                else:
+                    run = 1
+                best = max(best, run)
+            out["burst"] = round(bursty / len(gaps), 2)  # parte de tramas pegadas a la anterior
+            out["burst_max"] = best if best > 1 else 0
+        return out
+
+
+ARRIVALS = Arrivals()
+
+
 def pointer_loop(
     sock: socket.socket,
     pairing: Pairing,
     move: Callable[[int, int], object],
     who: str = "",
     require_seal: bool = True,
+    arrivals: "Arrivals | None" = None,
 ) -> None:
     """Lee tramas del mando hasta que cierra. Cada una llama a `move(dx, dy)`.
 
     Con `require_seal` solo vale lo sellado: cualquier otra trama corta la conexión.
     """
+    arrivals = ARRIVALS if arrivals is None else arrivals
     try:
         while True:
             opcode, payload = ws_read(sock)
+            got = time.perf_counter()
             pairing.note_phone(who)
             if opcode == 0x8:
                 break
@@ -321,10 +378,15 @@ def pointer_loop(
                 raise ProtocolError("trama sin sellar")
             if opcode == 0x2 and payload.startswith(MAGIC):
                 payload = pairing.open(payload)
+            if opcode == 0x2 and len(payload) == 12 and payload[:4] == b"PIN2":
+                # 0.48: eco con la hora del PC al recibir y al contestar, para separar red y proceso.
+                ws_send(sock, 0x2, payload + struct.pack("<dd", got * 1000, time.perf_counter() * 1000))
+                continue
             if opcode == 0x2 and len(payload) == 12 and payload[:4] == b"PING":
                 ws_send(sock, 0x2, payload)  # 0.47: eco para medir el retraso (solo una marca de tiempo)
                 continue
             if opcode == 0x2 and len(payload) >= 8:
+                arrivals.note(got)
                 move(*struct.unpack_from("<ii", payload))
             elif opcode == 0x1:
                 parts = payload.decode("ascii", "ignore").split()

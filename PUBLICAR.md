@@ -16,11 +16,11 @@ Los archivos se guardan 30 días.
 
 ## Con una etiqueta
 
-Si subes una etiqueta que empiece por `v` (por ejemplo `v0.47.0`), se construye solo:
+Si subes una etiqueta que empiece por `v` (por ejemplo `v0.48.0`), se construye solo:
 
 ```
-git tag v0.47.0
-git push origin v0.47.0
+git tag v0.48.0
+git push origin v0.48.0
 ```
 
 Subir commits normales a `beta` NO lo lanza.

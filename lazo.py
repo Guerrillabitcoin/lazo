@@ -31,7 +31,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.47"
+VERSION = "0.48"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -53,6 +53,7 @@ ACTIONS = {
     "down": lambda body: control.mouse_down(body.get("button", "left")),
     "up": lambda body: control.mouse_up(body.get("button", "left")),
     "smooth": lambda body: control.set_smoothing(body.get("on", False)),
+    "vigilante": lambda body: control.set_vigilante(body.get("on", True)),
     "scroll": lambda body: control.scroll_mouse(body.get("dy", 0)),
     "key": lambda body: control.press_key(body.get("key", "")),
     "text": lambda body: control.type_text(body.get("text", "")),
@@ -603,6 +604,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/about":
             self._guard(lambda _body: sobre.about(ROOT, VERSION, qr_svg))
             return
+        if path == "/api/diag/raton":
+            self._guard(lambda _body: mouse_diag())
+            return
         if path == "/api/caret":
             self._guard(lambda _body: {"typing": control.typing_focus()})
             return
@@ -623,6 +627,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         sock = self.connection
         sock.settimeout(None)
+        try:  # 0.48: sin Nagle, cada eco sale al momento
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
         who = self._who(ws=True)
         try:
             remote = self.remote
@@ -1094,6 +1102,16 @@ def listen(host: str, port: int) -> tuple[ThreadingHTTPServer, int]:
         return server, server.server_address[1]
 
 
+def mouse_diag() -> dict:
+    """0.48: lo que ve el PC del ratón del móvil (llegadas) y el estado del vigilante."""
+    return {
+        "llegada": protocol.ARRIVALS.snapshot(),
+        "vigilante": control.VIGILANTE.status(),
+        "suavizado": control.SMOOTHER.on,
+        "reloj_ms": time.perf_counter() * 1000,
+    }
+
+
 def start(argv: list[str] | None = None, console: bool = True):
     """Arranca el servidor en un hilo y devuelve (server, home). Lo usan main() y la bandeja."""
     global PORT
@@ -1105,6 +1123,8 @@ def start(argv: list[str] | None = None, console: bool = True):
     parser.add_argument("--max-gb", type=float, default=0, help="Tope por archivo del puente (8 por defecto)")
     parser.add_argument("--permitir-ip", action="append", default=[], metavar="CIDR",
                         help="Acepta también este rango (p. ej. una VPN 100.64.0.0/10). Repetible.")
+    parser.add_argument("--sin-vigilante", action="store_true",
+                        help="No pone el vigilante del ratón del PC (igual que LAZO_SIN_VIGILANTE=1)")
     parser.add_argument("--auto-aprobar", action="store_true", help=argparse.SUPPRESS)  # solo pruebas
     args = parser.parse_args(argv)
     extra = list(args.permitir_ip) + [part for part in os.environ.get("LAZO_ALLOW", "").replace(";", ",").split(",") if part.strip()]
@@ -1115,6 +1135,8 @@ def start(argv: list[str] | None = None, console: bool = True):
             print(f"  Rango no válido, lo ignoro: {cidr}")
             continue
         print(f"  Aviso: amplías el acceso a {net}. Cualquiera en ese rango puede intentar el PIN.")
+    if args.sin_vigilante:
+        control.VIGILANTE.enabled = False
     APPROVALS.auto = args.auto_aprobar or os.environ.get("LAZO_AUTOAPPROVE") == "1"
     if APPROVALS.auto:
         print("  Aviso: modo de pruebas, los dispositivos nuevos entran sin aprobación.")

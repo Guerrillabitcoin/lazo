@@ -480,7 +480,7 @@ const localHashes = new Map();
 function cryptoCall(msg, transfer) {
   if (!cryptoWorker && !cryptoBroken) {
     try {
-      cryptoWorker = new Worker("/puente-worker.js?v=0.47");
+      cryptoWorker = new Worker("/puente-worker.js?v=0.48");
       cryptoWorker.onmessage = (event) => {
         const wait = cryptoWaits.get(event.data.seq);
         if (!wait) return;
@@ -1261,39 +1261,115 @@ function gainFor(dx, dy) {
   return (lvl.lo + (2.2 - lvl.lo) * slow + 3.5 * curve) * lvl.k;
 }
 
-/* 0.47: diagnóstico del ratón (pastilla Pruebas). */
-const diag = { frames: 0, ws: 0, http: 0, rtt: [], log: [], fps: 0, big: 0 };
+/* 0.47/0.48: diagnóstico del ratón (pastilla Pruebas). */
+const diag = { frames: 0, ws: 0, http: 0, rtt: [], net: [], proc: [], log: [], fps: 0, big: 0, sealSum: 0, sealN: 0, seal: null, lagMax: 0, lagSum: 0, lagN: 0, lag: null, lagPeak: null, pc: null, lastMove: 0 };
 window.__lzDiag = diag;
 function diagNote(dx, dy, via) {
   diag.frames += 1;
   diag[via] += 1;
+  diag.lastMove = performance.now();
   diag.log.push([dx, dy]);
   if (diag.log.length > 400) diag.log.shift();
+}
+const avg = (list) => (list.length ? list.reduce((a, b) => a + b, 0) / list.length : null);
+const fmt = (v, d = 0) => (v === null || v === undefined ? "—" : Number(v).toFixed(d));
+/* Retraso del hilo principal: un reloj que debería saltar cada 16 ms. Solo con Pruebas abierta. */
+let lagTimer = 0;
+let lagLast = 0;
+function lagWatch(on) {
+  if (on && !lagTimer) {
+    lagLast = performance.now();
+    lagTimer = window.setInterval(() => {
+      const now = performance.now();
+      const late = Math.max(0, now - lagLast - 16);
+      lagLast = now;
+      diag.lagSum += late;
+      diag.lagN += 1;
+      if (late > diag.lagMax) diag.lagMax = late;
+    }, 16);
+  } else if (!on && lagTimer) {
+    window.clearInterval(lagTimer);
+    lagTimer = 0;
+  }
+}
+function diagVerdict(phoneFps, pc, rtt, net, proc) {
+  const out = [];
+  const moving = performance.now() - diag.lastMove < 1500;
+  if (diag.lag !== null && (diag.lag > 8 || diag.lagPeak > 50)) out.push("El móvil va justo: su navegador tarda en atender (cierra otras apps o pestañas).");
+  if (pc && moving && phoneFps > 10) {
+    const ratio = pc.fps / Math.max(1, phoneFps);
+    if (pc.burst > 0.25) out.push("Llegan a ráfagas al PC → la Wi-Fi o el móvil las retienen y las sueltan de golpe.");
+    else if (pc.gaps100 > 0) out.push("Llegan con huecos de más de 100 ms → si no paraste el dedo, la Wi-Fi o el móvil los retienen.");
+    else if (ratio < 0.7) out.push("Al PC llegan menos de las que manda el móvil → se pierden o se juntan en el camino.");
+    else out.push("Llegan bien al PC → si aun así va a saltos, el problema está en el PC.");
+  }
+  if (rtt !== null && pc && pc.median_ms && rtt > pc.median_ms * 3 && rtt > 40) out.push("El eco tarda mucho más que el ritmo de llegada → eco lento en la red, no tiene por qué notarse en el ratón.");
+  if (proc !== null && proc > 5) out.push("El PC tarda en contestar.");
+  return out.length ? out.join("\n") : moving ? "Todo bien" : "Mueve el dedo unos segundos para medir.";
 }
 window.setInterval(() => {
   diag.fps = diag.frames;
   diag.frames = 0;
+  diag.seal = diag.sealN ? diag.sealSum / diag.sealN : diag.seal;
+  diag.sealSum = 0;
+  diag.sealN = 0;
+  diag.lag = diag.lagN ? diag.lagSum / diag.lagN : null;
+  diag.lagPeak = diag.lagN ? diag.lagMax : null;
+  diag.lagSum = 0;
+  diag.lagN = 0;
+  diag.lagMax = 0;
   const box = document.querySelector("#diag-out");
-  if (!box || box.offsetParent === null) return;
+  const visible = !!box && box.offsetParent !== null;
+  lagWatch(visible);
+  if (!visible) return;
   const sock = pointerSocket && pointerSocket.readyState === 1;
-  const ms = diag.rtt.length ? Math.round(diag.rtt.reduce((a, b) => a + b, 0) / diag.rtt.length) : null;
-  const warn = [];
-  if (!sock) warn.push("Va por el método lento (HTTP): el ratón irá a saltos.");
-  if (ms !== null && ms > 60) warn.push("La Wi-Fi tarda mucho: acércate al router o usa 5 GHz.");
+  const rtt = avg(diag.rtt);
+  const net = avg(diag.net);
+  const proc = avg(diag.proc);
+  const pc = diag.pc && diag.pc.llegada;
+  const vig = diag.pc && diag.pc.vigilante;
   box.textContent =
-    `Conexión del ratón: ${sock ? "directa (WebSocket)" : "lenta (HTTP)"}\n` +
+    `Conexión del ratón: ${sock ? "directa (WebSocket)" : "lenta (HTTP)"}${sock ? "" : " — irá a saltos"}\n` +
+    `\nMÓVIL (lo que envía)\n` +
     `Movimientos por segundo: ${diag.fps}\n` +
-    `Retraso ida y vuelta: ${ms === null ? "—" : ms + " ms"}\n` +
+    `Preparar y cifrar cada uno: ${fmt(diag.seal, 2)} ms\n` +
+    `Retraso del navegador: ${fmt(diag.lag, 1)} ms de media, pico ${fmt(diag.lagPeak, 0)} ms\n` +
     `Enviados: ${diag.ws} directos · ${diag.http} lentos\n` +
-    (warn.length ? "Aviso: " + warn.join(" ") : "Todo bien");
+    `\nPC (lo que recibe, últimos 3 s)\n` +
+    (pc
+      ? `Recibidos por segundo: ${fmt(pc.fps, 0)}\n` +
+        `Entre uno y otro: ${fmt(pc.median_ms, 0)} ms normal, ${fmt(pc.p95_ms, 0)} ms en los peores\n` +
+        `Huecos: ${pc.gaps50} >50 ms · ${pc.gaps100} >100 ms · ${pc.gaps250} >250 ms\n` +
+        `Ráfagas: ${Math.round(pc.burst * 100)} % pegados, hasta ${pc.burst_max} juntos\n`
+      : "Sin datos del PC todavía\n") +
+    `\nECO (ida y vuelta)\n` +
+    `Total: ${fmt(rtt, 0)} ms = red ${fmt(net, 0)} ms + PC ${fmt(proc, 2)} ms\n` +
+    (vig && vig.available ? `Vigilante del ratón del PC: ${vig.enabled ? (vig.installed ? "encendido y activo" : "encendido, en espera") : "apagado"}${vig.avg_us !== null ? ` (${fmt(vig.avg_us, 0)} µs por evento, máx ${fmt(vig.max_us, 0)})` : ""}\n` : "") +
+    `\n` + diagVerdict(diag.fps, pc, rtt, net, proc);
+  api("/api/diag/raton", null, "GET").then((data) => {
+    diag.pc = data;
+    const vigBox = document.querySelector("#diag-vigilante");
+    if (vigBox && data.vigilante) {
+      vigBox.disabled = !data.vigilante.available;
+      if (document.activeElement !== vigBox) vigBox.checked = !!data.vigilante.enabled;
+    }
+  }).catch(() => {});
   if (sock) {
     const view = new DataView(new ArrayBuffer(12));
-    [80, 73, 78, 71].forEach((c, i) => view.setUint8(i, c));
+    [80, 73, 78, 50].forEach((c, i) => view.setUint8(i, c)); // "PIN2": el PC añade sus horas
     view.setFloat64(4, performance.now(), true);
     const frame = new Uint8Array(view.buffer);
     pointerSocket.send(wireKey ? sealBytes(frame, wireKey) : frame);
   }
 }, 1000);
+const vigBox = document.querySelector("#diag-vigilante");
+if (vigBox) {
+  vigBox.addEventListener("change", () => {
+    api("/api/vigilante", { on: vigBox.checked }).then((st) => {
+      if (diag.pc) diag.pc.vigilante = st;
+    }).catch(() => {});
+  });
+}
 
 function queueMove(dx, dy) {
   raw.x += dx;
@@ -1326,9 +1402,16 @@ function connectPointer() {
   sock.onopen = () => flushPointer();
   sock.onmessage = (ev) => {
     const data = new DataView(ev.data);
-    if (data.byteLength === 12 && data.getUint8(0) === 80) {
-      diag.rtt.push(performance.now() - data.getFloat64(4, true));
+    if (data.byteLength >= 12 && data.getUint8(0) === 80) {
+      const total = performance.now() - data.getFloat64(4, true);
+      diag.rtt.push(total);
       if (diag.rtt.length > 10) diag.rtt.shift();
+      if (data.byteLength === 28) {
+        const proc = Math.max(0, data.getFloat64(20, true) - data.getFloat64(12, true));
+        diag.proc.push(proc);
+        diag.net.push(total - proc);
+        if (diag.proc.length > 10) { diag.proc.shift(); diag.net.shift(); }
+      }
     }
   };
   sock.onclose = () => {
@@ -1345,11 +1428,15 @@ function flushPointer() {
   if (pointerSocket && pointerSocket.readyState === 1) {
     acc.x -= dx;
     acc.y -= dy;
+    const t0 = performance.now();
     const view = new DataView(new ArrayBuffer(8));
     view.setInt32(0, dx, true);
     view.setInt32(4, dy, true);
     const frame = new Uint8Array(view.buffer);
-    pointerSocket.send(wireKey ? sealBytes(frame, wireKey) : frame);
+    const wire = wireKey ? sealBytes(frame, wireKey) : frame;
+    diag.sealSum += performance.now() - t0;
+    diag.sealN += 1;
+    pointerSocket.send(wire);
     diagNote(dx, dy, "ws");
     return;
   }

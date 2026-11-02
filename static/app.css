@@ -651,3 +651,6 @@ button[data-cursor] { min-height: 44px; }
 .diag-out { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; background: #111; border: 1px solid #333; border-radius: 10px; padding: 8px; margin: 0 0 8px; color: #ddd; }
 .diag-smooth { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 10px; }
 #view-lab .deck { flex: none; margin-bottom: 8px; }
+.diag-help { font-size: 12px; color: #bbb; margin-bottom: 10px; }
+.diag-help summary { color: #e07a3d; cursor: pointer; }
+.diag-help p { margin: 4px 0; }
