@@ -1,4 +1,4 @@
-# LaZoo 0.46
+# LaZoo 0.47
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir la ventana del PC, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.47:** el ratón va píxel a píxel cuando mueves el dedo muy despacio (antes saltaba de 2 en 2), y a velocidad normal o rápida va igual que antes. En la pastilla Ratón hay «Precisión»: Fina, Normal o Rápida (se guarda en el móvil). En Pruebas hay un «Diagnóstico del ratón» (movimientos por segundo, retraso de la Wi-Fi, si va por la conexión directa o por la lenta) y la opción «Suavizado en el PC», que reparte cada movimiento en pasos pequeños de 5 ms. Para construir el `.exe` y la APK en GitHub sin usar tu PC, mira `PUBLICAR.md`.
 
 **Novedad 0.46:** la pastilla de YouTube tiene un botón grande «Pantalla completa». Pone el vídeo del PC a pantalla completa (tecla `f` de YouTube) y, al volver a pulsarlo, sale (tecla Esc). En Windows LaZoo mira si la ventana ocupa todo el monitor para saber en qué estado está.
 

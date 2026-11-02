@@ -20,8 +20,8 @@ class PantallaCompleta(unittest.TestCase):
         control._yt["full"] = False
 
     def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.46")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.46")
+        self.assertGreaterEqual(tuple(int(x) for x in lazo.VERSION.split(".")), (0, 46))
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), lazo.VERSION)
 
     def test_covers_monitor(self) -> None:
         self.assertTrue(control.covers_monitor((0, 0, 1920, 1080), (0, 0, 1920, 1080)))

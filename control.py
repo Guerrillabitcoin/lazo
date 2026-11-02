@@ -151,8 +151,96 @@ def move_mouse(dx: int, dy: int) -> None:
     if _move_hook is not None:
         _move_hook(dx, dy)
         return
+    if SMOOTHER.on and SMOOTHER.push(dx, dy):
+        return
     with _mouse_lock:
         _dispatch_move(dx, dy)
+
+
+def split_move(dx: int, dy: int, parts: int) -> list[tuple[int, int]]:
+    """0.47: reparte (dx, dy) en `parts` pasos enteros que suman exactamente lo mismo."""
+    out, px, py = [], 0, 0
+    for i in range(1, parts + 1):
+        nx, ny = round(dx * i / parts), round(dy * i / parts)
+        if nx != px or ny != py:
+            out.append((nx - px, ny - py))
+        px, py = nx, ny
+    return out
+
+
+class Smoother:
+    """0.47: suavizado opcional en el PC. Cada movimiento se reparte en 2-4 micro-pasos
+    cada STEP s. Sin retraso acumulado: si llega otro antes de acabar, lo pendiente se
+    aplica de golpe primero. Clic, arrastre y rueda llaman a flush() antes, así el orden se
+    mantiene."""
+
+    STEP = 0.005
+
+    def __init__(self) -> None:
+        self.on = False
+        self._cv = threading.Condition()
+        self._steps: list[tuple[int, int]] = []
+        self._thread: threading.Thread | None = None
+
+    def set(self, on: bool) -> bool:
+        self.on = bool(on)
+        if not self.on:
+            self.flush()
+        return self.on
+
+    def push(self, dx: int, dy: int) -> bool:
+        parts = max(1, min(4, max(abs(dx), abs(dy))))
+        if parts == 1:
+            self.flush()
+            return False
+        with self._cv:
+            rest = self._steps
+            self._steps = []
+            if rest:
+                rx, ry = sum(a for a, _ in rest), sum(b for _, b in rest)
+                with _mouse_lock:
+                    _dispatch_move(rx, ry)
+            first, *more = split_move(dx, dy, parts)
+            with _mouse_lock:
+                _dispatch_move(*first)
+            self._steps = more
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = threading.Thread(target=self._run, name="lazoo-suave", daemon=True)
+                self._thread.start()
+            self._cv.notify()
+        return True
+
+    def flush(self) -> None:
+        with self._cv:
+            rest = self._steps
+            self._steps = []
+        if rest:
+            rx, ry = sum(a for a, _ in rest), sum(b for _, b in rest)
+            if rx or ry:
+                with _mouse_lock:
+                    _dispatch_move(rx, ry)
+
+    def _run(self) -> None:
+        while True:
+            with self._cv:
+                while not self._steps:
+                    if not self._cv.wait(30):
+                        self._thread = None
+                        return
+                step = self._steps.pop(0)
+            try:
+                with _mouse_lock:
+                    _dispatch_move(*step)
+            except Exception:
+                pass
+            time.sleep(self.STEP)
+
+
+SMOOTHER = Smoother()
+
+
+def set_smoothing(on) -> dict:
+    return {"smooth": SMOOTHER.set(bool(on))}
 
 
 def _dispatch_move(dx: int, dy: int) -> None:
@@ -246,18 +334,21 @@ def _linux_xtest(dx: int, dy: int) -> bool:
 
 def mouse_click(button: str, count: int = 1) -> None:
     count = max(1, min(3, int(count)))
+    SMOOTHER.flush()
     with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.click(_button(button), count)
 
 
 def mouse_down(button: str) -> None:
+    SMOOTHER.flush()
     with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.press(_button(button))
 
 
 def mouse_up(button: str) -> None:
+    SMOOTHER.flush()
     with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.release(_button(button))
@@ -277,6 +368,7 @@ def scroll_mouse(dy: int) -> None:
     steps = scroll_steps(dy)
     if steps == 0:
         return
+    SMOOTHER.flush()
     with _mouse_lock:
         mouse, _keyboard = _input()
         mouse.scroll(0, steps)

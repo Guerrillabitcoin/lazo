@@ -46,7 +46,9 @@ Una fase por encargo. No empieces la siguiente si la anterior no arranca.
 
 Después, y solo después: fluidez del ratón, barra de subida del puente, ignorar IPs `172.*` virtuales, y la copia local de fotos. No son el primer trabajo.
 
-## Estado (0.46)
+## Estado (0.47)
+
+- 0.47: ratón. `gainFor` (app.js) sube de `lo` (~1,0) a 2,2 entre 0,02 y 0,3 px/ms y después igual que 0.46 (2,2 → 5,7); `AIM_LEVELS` fina/normal/rapida en `localStorage["lazo-aim"]`. Diagnóstico en Pruebas (`#diag-out`, `window.__lzDiag`): trama WS de 12 bytes `PING`+float64, `protocol.pointer_loop` la devuelve tal cual y no mueve. `control.Smoother` (opcional, `/api/smooth`, `localStorage["lazo-smooth"]`) reparte en ≤4 pasos cada 5 ms; lo pendiente se vacía antes de otro movimiento, clic, botón o rueda. Medido en Windows (16 núcleos): reposo 0 % CPU, ~21 MB, 2 hilos; móvil a ~57 tramas/s + sondeos: 0,56 % de un núcleo, ~23 MB, 5 hilos. `.github/workflows/construir.yml` (etiqueta `v*` o a mano) construye exe y APK de pruebas; ver `PUBLICAR.md`. Prueba: `test_v047.py`.
 
 - 0.46: `control.youtube("fullscreen")` alterna pantalla completa: entra con `f`, sale con `escape` (VK 0x1B). Estado real en Windows con `_win_is_fullscreen` (ventana == rcMonitor, `covers_monitor`); en otros sistemas, `_yt["full"]` recordado. `status` devuelve `full`. Botón `#yt-full` en la pastilla (sustituye al antiguo «Pantalla» de Vista). Prueba: `test_v046.py`. El ratón NO cambió.
 

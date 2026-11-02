@@ -1,0 +1,63 @@
+# LaZoo: construye LaZoo.exe (Windows) y LaZoo.apk (Android) y los deja como artefactos.
+# Se lanza al subir una etiqueta v* (por ejemplo v0.47.0) o a mano desde la pestaña Actions.
+# No usa secretos: la APK va firmada con una clave de PRUEBAS creada en cada ejecución.
+name: Construir LaZoo
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exe:
+    name: LaZoo.exe (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: PyInstaller (igual que construir_exe.bat)
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pyinstaller==6.11.1 -r requirements.txt
+          pyinstaller --noconfirm --clean --noconsole --onedir --name LaZoo `
+            --icon static\lazoo.ico `
+            --add-data "static;static" --add-data "VERSION.txt;." --add-data "medios.ps1;." `
+            --add-data "permitir.ps1;." --add-data "about.example.json;." `
+            --distpath dist --workpath build LaZoo.pyw
+          if (-not (Test-Path dist\LaZoo\LaZoo.exe)) { throw "No salió LaZoo.exe" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LaZoo-windows
+          path: dist/LaZoo
+          retention-days: 30
+
+  apk:
+    name: LaZoo.apk (Android, firma de pruebas)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK (platform 34, build-tools 34.0.0)
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" >/dev/null
+          echo "ANDROID_SDK=$SDK" >> "$GITHUB_ENV"
+      - name: Construir
+        env:
+          LAZOO_KEYSTORE: ${{ runner.temp }}/lazoo-pruebas.jks
+        run: |
+          chmod +x android/construir_apk.sh
+          android/construir_apk.sh "$PWD/LaZoo.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LaZoo-android-pruebas
+          path: LaZoo.apk
+          retention-days: 30

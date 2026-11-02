@@ -644,3 +644,10 @@ button[data-cursor] { min-height: 44px; }
 .yt-full.on .fs-in { display: none; }
 .yt-full.on .fs-out { display: inline; }
 .yt-full span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 0.47: precisión y diagnóstico del ratón */
+.aim-row { grid-template-columns: auto repeat(3, 1fr); align-items: center; }
+.aim-row .mini-label { margin: 0 4px 0 2px; font-size: 12px; }
+.diag-out { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; background: #111; border: 1px solid #333; border-radius: 10px; padding: 8px; margin: 0 0 8px; color: #ddd; }
+.diag-smooth { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-bottom: 10px; }
+#view-lab .deck { flex: none; margin-bottom: 8px; }

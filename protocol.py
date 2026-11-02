@@ -321,6 +321,9 @@ def pointer_loop(
                 raise ProtocolError("trama sin sellar")
             if opcode == 0x2 and payload.startswith(MAGIC):
                 payload = pairing.open(payload)
+            if opcode == 0x2 and len(payload) == 12 and payload[:4] == b"PING":
+                ws_send(sock, 0x2, payload)  # 0.47: eco para medir el retraso (solo una marca de tiempo)
+                continue
             if opcode == 0x2 and len(payload) >= 8:
                 move(*struct.unpack_from("<ii", payload))
             elif opcode == 0x1:

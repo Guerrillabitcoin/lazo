@@ -480,7 +480,7 @@ const localHashes = new Map();
 function cryptoCall(msg, transfer) {
   if (!cryptoWorker && !cryptoBroken) {
     try {
-      cryptoWorker = new Worker("/puente-worker.js?v=0.46");
+      cryptoWorker = new Worker("/puente-worker.js?v=0.47");
       cryptoWorker.onmessage = (event) => {
         const wait = cryptoWaits.get(event.data.seq);
         if (!wait) return;
@@ -1242,16 +1242,58 @@ let aimFrame = 0;
 
 let smoothSpeed = 0;
 
+/* 0.47: ganancia según velocidad. Muy despacio ~1 (píxel a píxel); desde ~0,3 px/ms
+   igual que antes (2,2 → 5,7). «Precisión» cambia los extremos y se guarda en el móvil. */
+const AIM_LEVELS = { fina: { lo: 0.8, k: 0.8 }, normal: { lo: 1.0, k: 1.0 }, rapida: { lo: 1.6, k: 1.2 } };
+let aimLevel = AIM_LEVELS[localStorage.getItem("lazo-aim")] ? localStorage.getItem("lazo-aim") : "normal";
+
 function gainFor(dx, dy) {
   const now = performance.now();
   const dt = Math.min(32, Math.max(8, lastSample ? now - lastSample : 16));
   lastSample = now;
   const speed = Math.hypot(dx, dy) / dt;
   smoothSpeed = smoothSpeed * 0.72 + speed * 0.28;
+  const lvl = AIM_LEVELS[aimLevel];
+  const s = Math.min(1, Math.max(0, (smoothSpeed - 0.02) / 0.28));
+  const slow = s * s * (3 - 2 * s);
   const t = Math.min(1, Math.max(0, (smoothSpeed - 0.02) / 0.8));
   const curve = t * t * (3 - 2 * t);
-  return 2.2 + 3.5 * curve;
+  return (lvl.lo + (2.2 - lvl.lo) * slow + 3.5 * curve) * lvl.k;
 }
+
+/* 0.47: diagnóstico del ratón (pastilla Pruebas). */
+const diag = { frames: 0, ws: 0, http: 0, rtt: [], log: [], fps: 0, big: 0 };
+window.__lzDiag = diag;
+function diagNote(dx, dy, via) {
+  diag.frames += 1;
+  diag[via] += 1;
+  diag.log.push([dx, dy]);
+  if (diag.log.length > 400) diag.log.shift();
+}
+window.setInterval(() => {
+  diag.fps = diag.frames;
+  diag.frames = 0;
+  const box = document.querySelector("#diag-out");
+  if (!box || box.offsetParent === null) return;
+  const sock = pointerSocket && pointerSocket.readyState === 1;
+  const ms = diag.rtt.length ? Math.round(diag.rtt.reduce((a, b) => a + b, 0) / diag.rtt.length) : null;
+  const warn = [];
+  if (!sock) warn.push("Va por el método lento (HTTP): el ratón irá a saltos.");
+  if (ms !== null && ms > 60) warn.push("La Wi-Fi tarda mucho: acércate al router o usa 5 GHz.");
+  box.textContent =
+    `Conexión del ratón: ${sock ? "directa (WebSocket)" : "lenta (HTTP)"}\n` +
+    `Movimientos por segundo: ${diag.fps}\n` +
+    `Retraso ida y vuelta: ${ms === null ? "—" : ms + " ms"}\n` +
+    `Enviados: ${diag.ws} directos · ${diag.http} lentos\n` +
+    (warn.length ? "Aviso: " + warn.join(" ") : "Todo bien");
+  if (sock) {
+    const view = new DataView(new ArrayBuffer(12));
+    [80, 73, 78, 71].forEach((c, i) => view.setUint8(i, c));
+    view.setFloat64(4, performance.now(), true);
+    const frame = new Uint8Array(view.buffer);
+    pointerSocket.send(wireKey ? sealBytes(frame, wireKey) : frame);
+  }
+}, 1000);
 
 function queueMove(dx, dy) {
   raw.x += dx;
@@ -1282,6 +1324,13 @@ function connectPointer() {
   pointerSocket = sock;
   sock.binaryType = "arraybuffer";
   sock.onopen = () => flushPointer();
+  sock.onmessage = (ev) => {
+    const data = new DataView(ev.data);
+    if (data.byteLength === 12 && data.getUint8(0) === 80) {
+      diag.rtt.push(performance.now() - data.getFloat64(4, true));
+      if (diag.rtt.length > 10) diag.rtt.shift();
+    }
+  };
   sock.onclose = () => {
     if (pointerSocket === sock) pointerSocket = null;
     window.setTimeout(refreshStatus, 600);
@@ -1301,12 +1350,14 @@ function flushPointer() {
     view.setInt32(4, dy, true);
     const frame = new Uint8Array(view.buffer);
     pointerSocket.send(wireKey ? sealBytes(frame, wireKey) : frame);
+    diagNote(dx, dy, "ws");
     return;
   }
   if (moveFlight) return;
   acc.x -= dx;
   acc.y -= dy;
   moveFlight = true;
+  diagNote(dx, dy, "http");
   api("/api/move", { dx, dy })
     .catch(() => {})
     .finally(() => {
@@ -2517,7 +2568,7 @@ function qrLoadLib() {
   if (qrLib) return qrLib;
   qrLib = new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "/jsqr.js?v=0.46";
+    s.src = "/jsqr.js?v=0.47";
     s.onload = () => (window.jsQR ? resolve(window.jsQR) : reject(new Error("No se pudo cargar el lector de QR")));
     s.onerror = () => {
       qrLib = null;
@@ -2700,4 +2751,24 @@ for (const sel of ["#qr-cam", "#qr-photo"]) {
     event.target.value = "";
     qrFromFile(file);
   });
+}
+
+/* 0.47: precisión del ratón y suavizado en el PC (se guardan en el móvil). */
+document.querySelectorAll("[data-aim]").forEach((button) => {
+  button.classList.toggle("on", button.dataset.aim === aimLevel);
+  button.addEventListener("click", () => {
+    aimLevel = button.dataset.aim;
+    localStorage.setItem("lazo-aim", aimLevel);
+    document.querySelectorAll("[data-aim]").forEach((b) => b.classList.toggle("on", b === button));
+  });
+});
+const smoothBox = document.querySelector("#aim-smooth");
+if (smoothBox) {
+  smoothBox.checked = localStorage.getItem("lazo-smooth") === "1";
+  const pushSmooth = () => api("/api/smooth", { on: smoothBox.checked }).catch(() => {});
+  smoothBox.addEventListener("change", () => {
+    localStorage.setItem("lazo-smooth", smoothBox.checked ? "1" : "0");
+    pushSmooth();
+  });
+  if (smoothBox.checked) window.setTimeout(pushSmooth, 1500);
 }
