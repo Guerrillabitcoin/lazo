@@ -1,4 +1,4 @@
-# LaZoo 0.49
+# LaZoo 0.50
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir la ventana del PC, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.50:** el ratón va más fluido aunque el Wi-Fi llegue a ráfagas. El móvil manda como máximo 60 movimientos por segundo y, si la red se atasca, junta los pendientes en uno solo (sin perder nada). El PC, con «Movimiento continuo» (activado por defecto, en Ratón), reparte lo recibido en pasos pequeños a unos 200 por segundo con un colchón de ~30 ms que se adapta solo. La APK mantiene el Wi-Fi del móvil despierto y en baja latencia mientras está abierta. Modo stats añade: movimiento continuo, colchón, pasos/s, cola pendiente máx. y fusionados.
 
 **Novedad 0.49:** las estadísticas del ratón están ahora en la pestaña **Ratón**. Activa «Modo stats» debajo del touchpad y verás los números de fondo, semitransparentes, sin que estorben al dedo. Se guardan los últimos 15 segundos: mueve el ratón, suelta y pulsa «Copiar stats» (elige 5, 10 o 15 s). Copia un resumen en texto con versión, precisión, vigilante, eco mínimo/medio/máximo/p95, huecos y ráfagas. «Congelar» (o «Congelar al soltar el dedo») deja fijos los datos para leerlos con calma. El suavizado y el vigilante también están ahí.
 

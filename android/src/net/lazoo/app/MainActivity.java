@@ -5,6 +5,8 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.net.Uri;
 import android.os.Bundle;
 import android.webkit.JavascriptInterface;
@@ -31,6 +33,7 @@ public class MainActivity extends Activity {
     static final int REQ_CAMERA = 1, REQ_FILE = 2;
 
     WebView web;
+    WifiManager.WifiLock wifiLock;
     PermissionRequest pendingPermission;
     ValueCallback<Uri[]> pendingFiles;
 
@@ -50,6 +53,45 @@ public class MainActivity extends Activity {
         web.setWebChromeClient(new Chrome());
         if (state != null) web.restoreState(state);
         else web.loadUrl(SCANNER);
+    }
+
+    // 0.50: Wi-Fi despierto y en baja latencia solo mientras la app está delante.
+    @SuppressWarnings("deprecation")
+    void holdWifi(boolean on) {
+        try {
+            if (on) {
+                if (wifiLock == null) {
+                    WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+                    if (wm == null) return;
+                    int mode = Build.VERSION.SDK_INT >= 29 ? WifiManager.WIFI_MODE_FULL_LOW_LATENCY : WifiManager.WIFI_MODE_FULL_HIGH_PERF;
+                    wifiLock = wm.createWifiLock(mode, "LaZoo:raton");
+                    wifiLock.setReferenceCounted(false);
+                }
+                if (!wifiLock.isHeld()) wifiLock.acquire();
+            } else if (wifiLock != null && wifiLock.isHeld()) {
+                wifiLock.release();
+            }
+        } catch (Exception e) {
+            // sin bloqueo: la app sigue igual
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        holdWifi(true);
+    }
+
+    @Override
+    protected void onPause() {
+        holdWifi(false);
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        holdWifi(false);
+        super.onDestroy();
     }
 
     @Override

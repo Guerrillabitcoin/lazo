@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections
 import ctypes
 import hashlib
 import os
@@ -151,6 +152,9 @@ def move_mouse(dx: int, dy: int) -> None:
     if _move_hook is not None:
         _move_hook(dx, dy)
         return
+    if CONTINUO.on:
+        CONTINUO.push(dx, dy)
+        return
     if SMOOTHER.on and SMOOTHER.push(dx, dy):
         return
     with _mouse_lock:
@@ -256,6 +260,174 @@ def _pause(seconds: float) -> None:
 SMOOTHER = Smoother()
 
 
+class Continuo:
+    """0.50: movimiento continuo. Lo que llega por la red (a ráfagas) se guarda y se
+    reparte en pasos pequeños cada TICK s, vaciando la cola en ~`buffer` s. El colchón
+    se adapta: sube si hay huecos/ráfagas, baja despacio si va estable. Nunca se pierde
+    desplazamiento: se sueltan enteros y el resto se guarda. Tope: si lo pendiente supera
+    MAX_LAG s de colchón, se vacía más deprisa."""
+
+    TICK = 0.005          # 200 Hz
+    MIN_BUF, MAX_BUF, DEFAULT_BUF = 0.010, 0.120, 0.030
+    MAX_LAG = 0.150
+
+    def __init__(self, dispatch=None, clock=None) -> None:
+        self.on = True
+        self.buffer = self.DEFAULT_BUF
+        self._dispatch = dispatch
+        self._clock = clock or time.perf_counter
+        self._cv = threading.Condition()
+        self._px = 0.0   # pendiente (float, con sub-píxeles de los pasos)
+        self._py = 0.0
+        self._last_in = None
+        self._last_tick = None
+        self._rate = 0.0  # px/s de entrada (últimos 0,5 s), para el tope de retraso
+        self._hist = collections.deque()
+        self._thread = None
+        self._steps = 0
+        self._sec_start = self._clock()
+        self._stats = {"pasos_s": 0, "cola_max_ms": 0.0}
+        self._qmax = 0.0
+
+    def _send(self, dx: int, dy: int) -> None:
+        if self._dispatch is not None:
+            self._dispatch(dx, dy)
+            return
+        with _mouse_lock:
+            _dispatch_move(dx, dy)
+
+    def set(self, on: bool) -> bool:
+        self.on = bool(on)
+        if not self.on:
+            self.flush()
+        return self.on
+
+    def pending(self) -> tuple[float, float]:
+        return self._px, self._py
+
+    def push(self, dx: int, dy: int, now: float | None = None, start: bool = True) -> None:
+        now = self._clock() if now is None else now
+        with self._cv:
+            if self._last_in is not None:
+                gap = now - self._last_in
+                if gap > self.buffer * 1.2 and gap < 0.5:
+                    self.buffer = min(self.MAX_BUF, self.buffer * 0.6 + gap * 0.5)
+                elif gap < 0.5:
+                    self.buffer = max(self.MIN_BUF, self.buffer * 0.995)
+            else:
+                self._hist.clear()
+            self._last_in = now
+            self._hist.append((now, abs(dx) + abs(dy)))
+            while self._hist and now - self._hist[0][0] > 0.5:
+                self._hist.popleft()
+            self._rate = sum(m for _, m in self._hist) / 0.5
+            if abs(self._px) + abs(self._py) < 0.5:
+                self._last_tick = now  # arranca de cero, sin «deuda» de tiempo
+            self._px += dx
+            self._py += dy
+            if start and (self._thread is None or not self._thread.is_alive()):
+                self._thread = threading.Thread(target=self._run, name="lazoo-continuo", daemon=True)
+                self._thread.start()
+            self._cv.notify()
+
+    def tick(self, now: float | None = None) -> tuple[int, int]:
+        """Suelta un paso. Devuelve lo enviado (enteros)."""
+        now = self._clock() if now is None else now
+        with self._cv:
+            px, py = self._px, self._py
+            mag = abs(px) + abs(py)
+            if mag < 0.5:
+                return 0, 0
+            dt = max(0.0, now - (self._last_tick if self._last_tick is not None else now)) or self.TICK
+            self._last_tick = now
+            buf = self.buffer
+            # tope: si a este ritmo la cola equivale a más de MAX_LAG, vaciar más deprisa
+            if self._rate > 0 and mag / self._rate > self.MAX_LAG:
+                buf = min(buf, self.TICK)
+            frac = min(1.0, dt / buf) if buf > 0 else 1.0
+            idle = self._last_in is None or now - self._last_in > 0.25
+            if idle or mag * frac < 1.0 and mag <= 2:
+                frac = 1.0
+            sx, sy = px * frac, py * frac
+            ix, iy = int(round(sx)), int(round(sy))
+            if frac >= 1.0:
+                ix, iy = int(round(px)), int(round(py))
+            if ix == 0 and iy == 0:
+                # avanza al menos un píxel en el eje más largo, para no estancarse
+                if abs(px) >= abs(py):
+                    ix = 1 if px > 0 else -1
+                else:
+                    iy = 1 if py > 0 else -1
+            self._px -= ix
+            self._py -= iy
+            if self._rate > 0:
+                self._qmax = max(self._qmax, (abs(self._px) + abs(self._py)) / self._rate * 1000)
+            self._steps += 1
+            if now - self._sec_start >= 1.0:
+                self._stats = {"pasos_s": round(self._steps / (now - self._sec_start)), "cola_max_ms": round(self._qmax, 1)}
+                self._steps, self._qmax, self._sec_start = 0, 0.0, now
+        if ix or iy:
+            self._send(ix, iy)
+        return ix, iy
+
+    def flush(self) -> None:
+        with self._cv:
+            ix, iy = int(round(self._px)), int(round(self._py))
+            self._px -= ix
+            self._py -= iy
+        if ix or iy:
+            self._send(ix, iy)
+
+    def status(self) -> dict:
+        now = self._clock()
+        st = dict(self._stats)
+        if now - self._sec_start > 2.0:
+            st = {"pasos_s": 0, "cola_max_ms": 0.0}
+        return {"on": self.on, "colchon_ms": round(self.buffer * 1000, 1), **st}
+
+    def _run(self) -> None:
+        hi = False
+        try:
+            while True:
+                with self._cv:
+                    while abs(self._px) + abs(self._py) < 0.5:
+                        if hi:
+                            _hires(False)
+                            hi = False
+                        if not self._cv.wait(30):
+                            self._thread = None
+                            return
+                if not hi:
+                    _hires(True)
+                    hi = True
+                try:
+                    self.tick()
+                except Exception:
+                    pass
+                _pause(self.TICK)
+        finally:
+            if hi:
+                _hires(False)
+
+
+def _hires(on: bool) -> None:
+    """Temporizador de 1 ms en Windows solo mientras hay movimiento pendiente."""
+    if SYSTEM != "Windows":
+        return
+    try:
+        winmm = ctypes.windll.winmm
+        (winmm.timeBeginPeriod if on else winmm.timeEndPeriod)(1)
+    except Exception:
+        pass
+
+
+CONTINUO = Continuo()
+
+
+def set_continuo(on) -> dict:
+    return {"continuo": CONTINUO.set(bool(on))}
+
+
 def set_smoothing(on) -> dict:
     return {"smooth": SMOOTHER.set(bool(on))}
 
@@ -351,6 +523,7 @@ def _linux_xtest(dx: int, dy: int) -> bool:
 
 def mouse_click(button: str, count: int = 1) -> None:
     count = max(1, min(3, int(count)))
+    CONTINUO.flush()
     SMOOTHER.flush()
     with _mouse_lock:
         mouse, _keyboard = _input()
@@ -358,6 +531,7 @@ def mouse_click(button: str, count: int = 1) -> None:
 
 
 def mouse_down(button: str) -> None:
+    CONTINUO.flush()
     SMOOTHER.flush()
     with _mouse_lock:
         mouse, _keyboard = _input()
@@ -365,6 +539,7 @@ def mouse_down(button: str) -> None:
 
 
 def mouse_up(button: str) -> None:
+    CONTINUO.flush()
     SMOOTHER.flush()
     with _mouse_lock:
         mouse, _keyboard = _input()
@@ -385,6 +560,7 @@ def scroll_mouse(dy: int) -> None:
     steps = scroll_steps(dy)
     if steps == 0:
         return
+    CONTINUO.flush()
     SMOOTHER.flush()
     with _mouse_lock:
         mouse, _keyboard = _input()

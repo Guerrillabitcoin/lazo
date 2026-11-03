@@ -1262,7 +1262,7 @@ function gainFor(dx, dy) {
 }
 
 /* 0.47-0.49: diagnóstico del ratón («Modo stats» en Ratón). */
-const diag = { frames: 0, ws: 0, http: 0, rtt: [], net: [], proc: [], log: [], fps: 0, big: 0, sealSum: 0, sealN: 0, seal: null, lagMax: 0, lagSum: 0, lagN: 0, lag: null, lagPeak: null, pc: null, lastMove: 0, hist: [], frozen: null };
+const diag = { frames: 0, ws: 0, http: 0, rtt: [], net: [], proc: [], log: [], fps: 0, big: 0, sealSum: 0, sealN: 0, seal: null, lagMax: 0, lagSum: 0, lagN: 0, lag: null, lagPeak: null, pc: null, lastMove: 0, hist: [], frozen: null, merged: 0, mergedS: 0 };
 window.__lzDiag = diag;
 function diagNote(dx, dy, via) {
   diag.frames += 1;
@@ -1313,7 +1313,11 @@ function diagSample(rtt, net, proc, pc, vig) {
   diag.hist.push({ t: Date.now(), fps: diag.fps, seal: diag.seal, lag: diag.lag, lagPeak: diag.lagPeak, rtt, net, proc,
     pcFps: pc ? pc.fps : null, med: pc ? pc.median_ms : null, p95: pc ? pc.p95_ms : null,
     g50: pc ? pc.gaps50 : null, g100: pc ? pc.gaps100 : null, g250: pc ? pc.gaps250 : null,
-    burst: pc ? pc.burst : null, burstMax: pc ? pc.burst_max : null,
+    burst: pc ? pc.burst : null, burstMax: pc ? pc.burst_max : null, merged: diag.mergedS,
+    cont: diag.pc && diag.pc.continuo ? diag.pc.continuo : null,
+    buf: diag.pc && diag.pc.continuo ? diag.pc.continuo.colchon_ms : null,
+    steps: diag.pc && diag.pc.continuo ? diag.pc.continuo.pasos_s : null,
+    qmax: diag.pc && diag.pc.continuo ? diag.pc.continuo.cola_max_ms : null,
     vig: vig && vig.available ? (vig.enabled ? (vig.installed ? "encendido y activo" : "encendido, en espera") : "apagado") : "no disponible",
     ws: !!(pointerSocket && pointerSocket.readyState === 1) });
   while (diag.hist.length > DIAG_KEEP) diag.hist.shift();
@@ -1349,6 +1353,11 @@ function diagSummary(hist, secs, meta = {}) {
     `Huecos (suma por segundo): ${sum("g50")} >50 ms · ${sum("g100")} >100 ms · ${sum("g250")} >250 ms`,
     line("Ráfagas (% pegados)", "burst", 2),
     line("Ráfaga más larga", "burstMax"),
+    `Movimiento continuo: ${last.cont ? (last.cont.on ? "sí" : "no") : "?"}`,
+    line("Colchón del PC", "buf", 0, " ms"),
+    line("Pasos aplicados/s en el PC", "steps"),
+    line("Cola pendiente máx.", "qmax", 0, " ms"),
+    line("Fusionados en el móvil/s", "merged"),
     "",
     "Por segundo (móvil/s, PC/s, eco ms, huecos>100):",
     rows.map((r) => `${r.fps}/${fmt(r.pcFps)}/${fmt(r.rtt)}/${r.g100 ?? "—"}`).join("  "),
@@ -1358,6 +1367,8 @@ window.__lzDiagSummary = diagSummary;
 window.setInterval(() => {
   diag.fps = diag.frames;
   diag.frames = 0;
+  diag.mergedS = diag.merged;
+  diag.merged = 0;
   diag.seal = diag.sealN ? diag.sealSum / diag.sealN : diag.seal;
   diag.sealSum = 0;
   diag.sealN = 0;
@@ -1390,7 +1401,8 @@ window.setInterval(() => {
       ? `Recibidos por segundo: ${fmt(pc.fps, 0)}\n` +
         `Entre uno y otro: ${fmt(pc.median_ms, 0)} ms normal, ${fmt(pc.p95_ms, 0)} ms en los peores\n` +
         `Huecos: ${pc.gaps50} >50 ms · ${pc.gaps100} >100 ms · ${pc.gaps250} >250 ms\n` +
-        `Ráfagas: ${Math.round(pc.burst * 100)} % pegados, hasta ${pc.burst_max} juntos\n`
+        `Ráfagas: ${Math.round(pc.burst * 100)} % pegados, hasta ${pc.burst_max} juntos\n` +
+        (diag.pc.continuo ? `Movimiento continuo: ${diag.pc.continuo.on ? "sí" : "no"} · colchón ${fmt(diag.pc.continuo.colchon_ms, 0)} ms · ${diag.pc.continuo.pasos_s} pasos/s · cola máx ${fmt(diag.pc.continuo.cola_max_ms, 0)} ms\n` : "")
       : "Sin datos del PC todavía\n") +
     `\nECO (ida y vuelta)\n` +
     `Total: ${fmt(rtt, 0)} ms = red ${fmt(net, 0)} ms + PC ${fmt(proc, 2)} ms\n` +
@@ -1432,7 +1444,7 @@ function diagFreeze(on) {
 function diagMeta() {
   let aim = "normal";
   try { aim = localStorage.getItem("lazo-aim") || "normal"; } catch (_e) { /* nada */ }
-  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.49", aim };
+  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.50", aim };
 }
 if (diagOn) {
   try { diagOn.checked = localStorage.getItem("lazo-diag") === "1"; } catch (_e) { /* nada */ }
@@ -1507,11 +1519,30 @@ function connectPointer() {
   };
 }
 
+/* 0.50: ritmo de envío. Devuelve cuántos ms esperar antes del siguiente mensaje. */
+const SEND_MIN_MS = 1000 / 60;
+let lastSendAt = 0;
+let sendTimer = 0;
+function sendWait(now, buffered, last = lastSendAt, rtt = avg(diag.rtt)) {
+  let gap = SEND_MIN_MS;
+  if (buffered > 256) gap = 40;            // el navegador aún no ha soltado lo anterior
+  else if (rtt !== null && rtt > 120) gap = 25; // eco alto: menos mensajes, más grandes
+  return Math.max(0, Math.ceil(last + gap - now));
+}
 function flushPointer() {
   const dx = Math.trunc(acc.x);
   const dy = Math.trunc(acc.y);
   if (!dx && !dy) return;
   if (pointerSocket && pointerSocket.readyState === 1) {
+    // 0.50: tasa fija (máx. 60/s) y freno si la red se atasca. Mientras espera, lo que
+    // llega se suma en acc (nada se pierde) y sale en un solo mensaje.
+    const wait = sendWait(performance.now(), pointerSocket.bufferedAmount);
+    if (wait > 0) {
+      if (!sendTimer) sendTimer = window.setTimeout(() => { sendTimer = 0; flushPointer(); }, wait);
+      diag.merged += 1;
+      return;
+    }
+    lastSendAt = performance.now();
     acc.x -= dx;
     acc.y -= dy;
     const t0 = performance.now();
@@ -2944,4 +2975,16 @@ if (smoothBox) {
     pushSmooth();
   });
   if (smoothBox.checked) window.setTimeout(pushSmooth, 1500);
+}
+
+/* 0.50: «Movimiento continuo» en el PC (activado por defecto). */
+const contBox = document.querySelector("#aim-continuo");
+if (contBox) {
+  contBox.checked = localStorage.getItem("lazo-continuo") !== "0";
+  const pushCont = () => api("/api/continuo", { on: contBox.checked }).catch(() => {});
+  contBox.addEventListener("change", () => {
+    localStorage.setItem("lazo-continuo", contBox.checked ? "1" : "0");
+    pushCont();
+  });
+  if (!contBox.checked) window.setTimeout(pushCont, 1500);
 }

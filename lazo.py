@@ -31,7 +31,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.49"
+VERSION = "0.50"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -53,6 +53,7 @@ ACTIONS = {
     "down": lambda body: control.mouse_down(body.get("button", "left")),
     "up": lambda body: control.mouse_up(body.get("button", "left")),
     "smooth": lambda body: control.set_smoothing(body.get("on", False)),
+    "continuo": lambda body: control.set_continuo(body.get("on", True)),
     "vigilante": lambda body: control.set_vigilante(body.get("on", True)),
     "scroll": lambda body: control.scroll_mouse(body.get("dy", 0)),
     "key": lambda body: control.press_key(body.get("key", "")),
@@ -1108,6 +1109,7 @@ def mouse_diag() -> dict:
         "llegada": protocol.ARRIVALS.snapshot(),
         "vigilante": control.VIGILANTE.status(),
         "suavizado": control.SMOOTHER.on,
+        "continuo": control.CONTINUO.status(),
         "reloj_ms": time.perf_counter() * 1000,
     }
 
