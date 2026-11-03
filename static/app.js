@@ -311,11 +311,11 @@ function clipTime(at) {
   return `${two(d.getDate())}/${two(d.getMonth() + 1)}/${two(d.getFullYear() % 100)} · ${two(d.getHours())}:${two(d.getMinutes())}`;
 }
 
-async function copyToPhone(text) {
+async function copyToPhone(text, okMsg = "Nota copiada") {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
-      say("Nota copiada");
+      say(okMsg);
       return;
     }
   } catch (_err) {
@@ -331,7 +331,7 @@ async function copyToPhone(text) {
   area.select();
   const ok = document.execCommand("copy");
   area.remove();
-  say(ok ? "Nota copiada" : "Mantén pulsado el texto para copiarlo");
+  say(ok ? okMsg : "Mantén pulsado el texto para copiarlo");
 }
 
 let clipsShown = "";
@@ -1261,8 +1261,8 @@ function gainFor(dx, dy) {
   return (lvl.lo + (2.2 - lvl.lo) * slow + 3.5 * curve) * lvl.k;
 }
 
-/* 0.47/0.48: diagnóstico del ratón (pastilla Pruebas). */
-const diag = { frames: 0, ws: 0, http: 0, rtt: [], net: [], proc: [], log: [], fps: 0, big: 0, sealSum: 0, sealN: 0, seal: null, lagMax: 0, lagSum: 0, lagN: 0, lag: null, lagPeak: null, pc: null, lastMove: 0 };
+/* 0.47-0.49: diagnóstico del ratón («Modo stats» en Ratón). */
+const diag = { frames: 0, ws: 0, http: 0, rtt: [], net: [], proc: [], log: [], fps: 0, big: 0, sealSum: 0, sealN: 0, seal: null, lagMax: 0, lagSum: 0, lagN: 0, lag: null, lagPeak: null, pc: null, lastMove: 0, hist: [], frozen: null };
 window.__lzDiag = diag;
 function diagNote(dx, dy, via) {
   diag.frames += 1;
@@ -1307,6 +1307,54 @@ function diagVerdict(phoneFps, pc, rtt, net, proc) {
   if (proc !== null && proc > 5) out.push("El PC tarda en contestar.");
   return out.length ? out.join("\n") : moving ? "Todo bien" : "Mueve el dedo unos segundos para medir.";
 }
+/* 0.49: historial de 15 s (una muestra por segundo) para copiar después de soltar el dedo. */
+const DIAG_KEEP = 15;
+function diagSample(rtt, net, proc, pc, vig) {
+  diag.hist.push({ t: Date.now(), fps: diag.fps, seal: diag.seal, lag: diag.lag, lagPeak: diag.lagPeak, rtt, net, proc,
+    pcFps: pc ? pc.fps : null, med: pc ? pc.median_ms : null, p95: pc ? pc.p95_ms : null,
+    g50: pc ? pc.gaps50 : null, g100: pc ? pc.gaps100 : null, g250: pc ? pc.gaps250 : null,
+    burst: pc ? pc.burst : null, burstMax: pc ? pc.burst_max : null,
+    vig: vig && vig.available ? (vig.enabled ? (vig.installed ? "encendido y activo" : "encendido, en espera") : "apagado") : "no disponible",
+    ws: !!(pointerSocket && pointerSocket.readyState === 1) });
+  while (diag.hist.length > DIAG_KEEP) diag.hist.shift();
+}
+function diagStats(list) {
+  const v = list.filter((x) => x !== null && x !== undefined && !Number.isNaN(x)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  return { min: v[0], avg: v.reduce((a, b) => a + b, 0) / v.length, max: v[v.length - 1], p95: v[Math.min(v.length - 1, Math.ceil(v.length * 0.95) - 1)] };
+}
+function diagSummary(hist, secs, meta = {}) {
+  const rows = hist.slice(-secs);
+  const moving = rows.filter((r) => r.fps > 0);
+  const use = moving.length ? moving : rows;
+  const line = (name, key, d = 0, unit = "") => {
+    const s = diagStats(use.map((r) => r[key]));
+    return `${name}: ${s ? `mín ${fmt(s.min, d)} · media ${fmt(s.avg, d)} · máx ${fmt(s.max, d)} · p95 ${fmt(s.p95, d)}${unit}` : "—"}`;
+  };
+  const sum = (key) => use.reduce((a, r) => a + (r[key] || 0), 0);
+  const last = rows[rows.length - 1] || {};
+  return [
+    `LaZoo ${meta.version || "?"} · stats del ratón · últimos ${rows.length} s (${moving.length} con movimiento)`,
+    `Precisión: ${meta.aim || "?"} · Vigilante: ${last.vig || "?"} · Conexión: ${last.ws ? "directa (WebSocket)" : "lenta (HTTP)"}`,
+    line("Móvil, movimientos/s", "fps"),
+    line("PC, recibidos/s", "pcFps"),
+    line("Eco total (RTT)", "rtt", 0, " ms"),
+    line("Red", "net", 0, " ms"),
+    line("PC contesta", "proc", 2, " ms"),
+    line("Entre uno y otro (mediana)", "med", 0, " ms"),
+    line("Entre uno y otro (p95)", "p95", 0, " ms"),
+    line("Retraso del navegador", "lag", 1, " ms"),
+    line("Pico del navegador", "lagPeak", 0, " ms"),
+    line("Cifrar cada uno", "seal", 2, " ms"),
+    `Huecos (suma por segundo): ${sum("g50")} >50 ms · ${sum("g100")} >100 ms · ${sum("g250")} >250 ms`,
+    line("Ráfagas (% pegados)", "burst", 2),
+    line("Ráfaga más larga", "burstMax"),
+    "",
+    "Por segundo (móvil/s, PC/s, eco ms, huecos>100):",
+    rows.map((r) => `${r.fps}/${fmt(r.pcFps)}/${fmt(r.rtt)}/${r.g100 ?? "—"}`).join("  "),
+  ].join("\n");
+}
+window.__lzDiagSummary = diagSummary;
 window.setInterval(() => {
   diag.fps = diag.frames;
   diag.frames = 0;
@@ -1319,7 +1367,7 @@ window.setInterval(() => {
   diag.lagN = 0;
   diag.lagMax = 0;
   const box = document.querySelector("#diag-out");
-  const visible = !!box && box.offsetParent !== null;
+  const visible = !!box && !box.hidden && box.offsetParent !== null;
   lagWatch(visible);
   if (!visible) return;
   const sock = pointerSocket && pointerSocket.readyState === 1;
@@ -1328,6 +1376,8 @@ window.setInterval(() => {
   const proc = avg(diag.proc);
   const pc = diag.pc && diag.pc.llegada;
   const vig = diag.pc && diag.pc.vigilante;
+  diagSample(rtt, net, proc, pc, vig);
+  if (diag.frozen) return;
   box.textContent =
     `Conexión del ratón: ${sock ? "directa (WebSocket)" : "lenta (HTTP)"}${sock ? "" : " — irá a saltos"}\n` +
     `\nMÓVIL (lo que envía)\n` +
@@ -1362,6 +1412,42 @@ window.setInterval(() => {
     pointerSocket.send(wireKey ? sealBytes(frame, wireKey) : frame);
   }
 }, 1000);
+const diagOn = document.querySelector("#diag-on");
+const diagFreezeBtn = document.querySelector("#diag-freeze");
+function diagShow(on) {
+  const box = document.querySelector("#diag-out");
+  if (box) box.hidden = !on;
+  document.querySelector("#diag-tools").hidden = !on;
+  document.querySelector("#diag-extra").hidden = !on;
+  if (!on) { diag.hist = []; diag.frozen = null; }
+  try { localStorage.setItem("lazo-diag", on ? "1" : "0"); } catch (_e) { /* sin almacenamiento */ }
+}
+function diagFreeze(on) {
+  diag.frozen = on ? diag.hist.slice() : null;
+  const box = document.querySelector("#diag-out");
+  if (box) box.classList.toggle("frozen", !!on);
+  if (diagFreezeBtn) diagFreezeBtn.textContent = on ? "Seguir" : "Congelar";
+  if (on && box) box.textContent = "CONGELADO\n" + diagSummary(diag.frozen, Number(document.querySelector("#diag-win").value) || 10, diagMeta());
+}
+function diagMeta() {
+  let aim = "normal";
+  try { aim = localStorage.getItem("lazo-aim") || "normal"; } catch (_e) { /* nada */ }
+  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.49", aim };
+}
+if (diagOn) {
+  try { diagOn.checked = localStorage.getItem("lazo-diag") === "1"; } catch (_e) { /* nada */ }
+  diagShow(diagOn.checked);
+  diagOn.addEventListener("change", () => diagShow(diagOn.checked));
+  diagFreezeBtn.addEventListener("click", () => diagFreeze(!diag.frozen));
+  document.querySelector("#diag-copy").addEventListener("click", () => {
+    const secs = Number(document.querySelector("#diag-win").value) || 10;
+    copyToPhone(diagSummary(diag.frozen || diag.hist, secs, diagMeta()), "Stats copiadas");
+  });
+  document.querySelector("#pad").addEventListener("pointerup", () => {
+    const auto = document.querySelector("#diag-autofreeze");
+    if (diagOn.checked && auto && auto.checked && !diag.frozen) window.setTimeout(() => diagFreeze(true), 1100);
+  });
+}
 const vigBox = document.querySelector("#diag-vigilante");
 if (vigBox) {
   vigBox.addEventListener("change", () => {

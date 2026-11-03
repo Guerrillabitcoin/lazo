@@ -36,12 +36,6 @@ def run_loop(frames, gap_fn):
     return snap, moves
 
 
-class Version(unittest.TestCase):
-    def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.48")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.48")
-
-
 class Llegada(unittest.TestCase):
     def test_60hz_regular(self) -> None:
         snap, moves = run_loop(120, lambda i: 1 / 60)
