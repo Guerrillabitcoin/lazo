@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.52</title>
-    <link rel="stylesheet" href="/app.css?v=0.52" />
+    <title>LaZoo 0.53</title>
+    <link rel="stylesheet" href="/app.css?v=0.53" />
   </head>
   <body>
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.52</p>
+          <p class="ver">0.53</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -59,7 +59,7 @@
             </div>
             <div id="pad" class="pad" role="application" aria-label="Trackpad"><canvas id="trail"></canvas><span id="finger" hidden></span><pre id="diag-out" class="diag-out diag-bg" hidden>Mueve el ratón un poco…</pre></div>
             <div class="diag-bar">
-              <label class="diag-smooth"><input id="diag-on" type="checkbox" /> Modo stats</label>
+              <label class="diag-smooth"><input id="diag-on" type="checkbox" /> Ajuste fino / stats</label>
               <span id="diag-tools" class="diag-tools" hidden>
                 <select id="diag-win" aria-label="Segundos a copiar"><option value="5">5 s</option><option value="10" selected>10 s</option><option value="15">15 s</option></select>
                 <button id="diag-copy" type="button">Copiar stats</button>
@@ -73,6 +73,47 @@
               <label class="diag-smooth"><input id="aim-inercia" type="checkbox" /> Inercia al soltar (desliza un poco como el touchpad de un portátil)
                 <select id="aim-inercia-nivel" aria-label="Intensidad de la inercia"><option value="poca">poca</option><option value="media" selected>media</option><option value="mucha">mucha</option></select></label>
               <label class="diag-smooth"><input id="aim-smooth" type="checkbox" /> Suavizado en el PC (reparte cada movimiento en pasos pequeños)</label>
+              <section id="fino" class="fino" aria-label="Ajuste fino del ratón">
+                <p class="mini-label">Ajuste fino (se guarda en este móvil y se aplica en el PC)</p>
+                <div class="cursor-row fino-presets" role="group" aria-label="Presets">
+                  <button type="button" data-preset="equilibrado">Equilibrado</button>
+                  <button type="button" data-preset="fluidez">Máxima fluidez</button>
+                  <button type="button" data-preset="retraso">Mínimo retraso</button>
+                  <button type="button" data-preset="como050">Como 0.50</button>
+                </div>
+                <p id="fino-estado" class="screen-note">Preset: equilibrado</p>
+                <label class="fino-op">Corrección suave <select data-op="correccion_pasos"><option value="0">no</option><option value="2">2 pasos</option><option value="3">3 pasos</option><option value="4">4 pasos</option></select>
+                  <small>Si el PC predijo de más, vuelve atrás en 2-4 pasos cortos en vez de un salto.</small></label>
+                <label class="fino-op">Mezcla al llegar datos <select data-op="mezcla_ms"><option value="0">no</option><option value="15">15 ms</option><option value="30">30 ms</option><option value="45">45 ms</option><option value="60">60 ms</option></select>
+                  <small>Tras predecir, lo real que falta se reparte en ese tiempo en vez de entrar de golpe.</small></label>
+                <label class="fino-op"><input type="checkbox" data-op="interpolacion" /> Interpolación tras huecos
+                  <small>Solo si hubo un hueco de red: reparte lo que llega en pasos iguales de 5 ms. Con buena red no añade nada.</small></label>
+                <label class="fino-op">Colchón <select data-op="colchon_modo"><option value="adaptativo">adaptativo</option><option value="fijo">fijo</option></select>
+                  <small>Margen que guarda el PC para repartir las ráfagas. Adaptativo: sube con huecos y baja si la red va estable.</small></label>
+                <label class="fino-op">Colchón mín. <select data-op="colchon_min_ms"><option value="10">10 ms</option><option value="15">15 ms</option><option value="20">20 ms</option><option value="25">25 ms</option><option value="30">30 ms</option><option value="40">40 ms</option></select>
+                  <small>Lo menos que puede bajar el colchón adaptativo (menos = menos retraso).</small></label>
+                <label class="fino-op">Colchón máx. <select data-op="colchon_max_ms"><option value="20">20 ms</option><option value="30">30 ms</option><option value="40">40 ms</option><option value="60">60 ms</option><option value="80">80 ms</option><option value="120">120 ms</option></select>
+                  <small>Lo más que puede subir (más = más fluido con mala red, pero más retraso).</small></label>
+                <label class="fino-op">Colchón fijo <select data-op="colchon_fijo_ms"><option value="15">15 ms</option><option value="20">20 ms</option><option value="30">30 ms</option><option value="40">40 ms</option><option value="60">60 ms</option></select>
+                  <small>Solo con colchón «fijo»: siempre el mismo margen.</small></label>
+                <label class="fino-op">Pasos del PC <select data-op="frecuencia_hz"><option value="125">125 Hz</option><option value="200">200 Hz</option><option value="250">250 Hz</option><option value="500">500 Hz</option></select>
+                  <small>Cuántas veces por segundo mueve el cursor el PC. Más = pasos más pequeños; 500 gasta algo más de CPU.</small></label>
+                <label class="fino-op">Predicción máx. <select data-op="pred_max_ms"><option value="50">50 ms</option><option value="100">100 ms</option><option value="150">150 ms</option><option value="200">200 ms</option><option value="300">300 ms</option></select>
+                  <small>Cuánto tiempo sigue el gesto el PC si no llegan datos (necesita «Predicción de movimiento»).</small></label>
+                <label class="fino-op">Frenado de la predicción <select data-op="pred_frenado_ms"><option value="30">rápido (30 ms)</option><option value="60">60 ms</option><option value="90">normal (90 ms)</option><option value="120">120 ms</option><option value="200">lento (200 ms)</option></select>
+                  <small>Lo rápido que se frena lo predicho. Lento = más fluido, pero corrige más si paras de golpe.</small></label>
+                <label class="fino-op"><input type="checkbox" data-op="subpixel" /> Sub-píxeles y redondeo estable
+                  <small>Guarda las fracciones de píxel entre pasos para que los pasos salgan iguales (sin 1-2-1-3).</small></label>
+                <label class="fino-op">Límite de cola <select data-op="cola_max_ms"><option value="60">60 ms</option><option value="100">100 ms</option><option value="150">150 ms</option><option value="200">200 ms</option><option value="300">300 ms</option></select>
+                  <small>Si se acumula más retraso que esto, el PC vacía la cola deprisa.</small></label>
+                <label class="fino-op"><input type="checkbox" data-op="reciente_primero" /> Reciente primero
+                  <small>Si la cola pasa el límite, salta directo a la posición actual (menos retraso, un salto).</small></label>
+                <label class="fino-op"><input type="checkbox" data-op="alta_resolucion" /> Temporizador de alta resolución
+                  <small>En Windows, pasos exactos de 1 ms mientras mueves. Apágalo solo para comparar.</small></label>
+                <label class="fino-op">Envíos del móvil <select data-op="tasa_envio"><option value="30">30/s</option><option value="60">60/s</option><option value="90">90/s</option><option value="120">120/s</option></select>
+                  <small>Máximo de mensajes por segundo. Más = más detalle, pero con Wi-Fi mala puede formar cola.</small></label>
+                <button id="fino-reset" type="button">Restablecer valores</button>
+              </section>
               <label class="diag-smooth"><input id="diag-vigilante" type="checkbox" checked /> Vigilante del ratón del PC (vuelve al cursor normal si usas el ratón de verdad; apágalo para probar si causa los saltos)</label>
               <p class="screen-note">«Copiar stats» copia el resumen de los últimos segundos, aunque ya hayas parado de mover.</p>
               <details class="diag-help"><summary>¿Qué mide cada número?</summary>
@@ -258,7 +299,7 @@
         <div id="view-lab" class="view" hidden>
           <article class="deck">
             <p class="now">Diagnóstico del ratón</p>
-            <p class="screen-note">Ahora está en la pestaña <b>Ratón</b>: activa «Modo stats» debajo del touchpad.</p>
+            <p class="screen-note">Ahora está en la pestaña <b>Ratón</b>: activa «Ajuste fino / stats» debajo del touchpad.</p>
           </article>
           <article class="deck">
             <p class="now">Spotify en prueba</p>
@@ -314,7 +355,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.52</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.53</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -368,7 +409,7 @@
         </div>
       </section>
     </main>
-    <script src="/seal.js?v=0.52"></script>
-    <script src="/app.js?v=0.52"></script>
+    <script src="/seal.js?v=0.53"></script>
+    <script src="/app.js?v=0.53"></script>
   </body>
 </html>

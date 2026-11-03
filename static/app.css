@@ -665,3 +665,12 @@ button[data-cursor] { min-height: 44px; }
 .diag-bar .diag-smooth { margin: 0; }
 .diag-tools { display: flex; gap: 6px; align-items: center; }
 .diag-tools button, .diag-tools select { padding: 6px 10px; font-size: 13px; }
+
+/* 0.53: ajuste fino del ratón */
+.fino { border: 1px solid #333; border-radius: 12px; padding: 10px; margin: 0 0 10px; }
+.fino-presets { flex-wrap: wrap; }
+.fino-presets button { min-height: 44px; }
+.fino-op { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 13px; margin-bottom: 10px; }
+.fino-op select { min-height: 36px; }
+.fino-op small { flex-basis: 100%; color: #999; font-size: 11px; line-height: 1.3; }
+#fino-reset { min-height: 44px; width: 100%; }

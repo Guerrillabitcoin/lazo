@@ -31,7 +31,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.52"
+VERSION = "0.53"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -57,6 +57,7 @@ ACTIONS = {
     "prediccion": lambda body: control.set_prediccion(body.get("on", True)),
     "inercia": lambda body: control.set_inercia(body.get("nivel")),
     "fin": lambda body: control.touch_end(),
+    "ajuste": lambda body: control.set_ajuste(body),
     "vigilante": lambda body: control.set_vigilante(body.get("on", True)),
     "scroll": lambda body: control.scroll_mouse(body.get("dy", 0)),
     "key": lambda body: control.press_key(body.get("key", "")),

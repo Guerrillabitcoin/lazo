@@ -274,7 +274,15 @@ class Continuo:
     llegar datos reales se descuenta de ellos, así que la suma enviada es exactamente la
     real (sin deriva). Si el dedo se paró de verdad (fin de toque o SETTLE s sin datos), la
     deuda se devuelve con suavidad. Con `pred` apagado, todo es idéntico a 0.50.
-    Inercia (opcional): al soltar el dedo, desliza con fricción como un touchpad."""
+    Inercia (opcional): al soltar el dedo, desliza con fricción como un touchpad.
+
+    0.53: ajuste fino (`aplicar`). Corrección suave (lo predicho de más se devuelve en 2-4
+    pasos iguales), mezcla al llegar datos reales tras predecir, interpolación lineal en
+    pasos de TICK solo tras un hueco, colchón adaptativo con rango o fijo, frecuencia de
+    pasos, curva de la predicción, sub-píxel con redondeo estable, límite de cola y modo
+    «reciente primero». Con los valores de clase (preset «Como 0.50» + predicción) todo es
+    como en 0.52 (salvo que, tras devolver lo predicho, no vuelve a predecir hasta que
+    lleguen datos); con «Como 0.50», idéntico a 0.50. La contabilidad no cambia: deriva 0."""
 
     TICK = 0.005          # 200 Hz
     MIN_BUF, MAX_BUF, DEFAULT_BUF = 0.010, 0.120, 0.030
@@ -289,6 +297,7 @@ class Continuo:
     INERCIA = {"poca": 0.10, "media": 0.20, "mucha": 0.35}  # constante de fricción (s)
     GLIDE_MAX = 1.5
     GLIDE_STOP = 15.0     # px/s
+    INTERP_GAP = 0.030    # 0.53: hueco a partir del cual se interpola
 
     def __init__(self, dispatch=None, clock=None) -> None:
         self.on = True
@@ -325,6 +334,64 @@ class Continuo:
         self._pred_px = 0.0
         self._errs: list[float] = []
         self._stats2 = {"predichos_px_s": 0, "error_medio_px": 0.0, "error_max_px": 0.0}
+        # 0.53: ajuste fino (por defecto, el comportamiento de 0.52)
+        self.corr_pasos = 0
+        self.mezcla = 0.0
+        self.interp = False
+        self.subpixel = False
+        self.reciente = False
+        self.hires = True
+        self.colchon_fijo = False
+        self.preset = "personalizado"
+        self.ajustes = dict(PRESETS["como050"], prediccion=True)
+        self._corr = 0
+        self._lin = 0
+        self._settled = False
+        self._cx = self._cy = 0.0
+        self._n_corr = self._n_interp = 0
+        self._stats3 = {"correcciones_s": 0, "pasos_corr_s": 0, "interpolados_s": 0}
+        self._n_corr_ev = 0
+
+    def aplicar(self, opts: dict, preset: str | None = None) -> dict:
+        """0.53: aplica un ajuste ya validado (ver validar_ajuste)."""
+        with self._cv:
+            a = dict(self.ajustes)
+            a.update(opts)
+            self.ajustes = a
+            self.corr_pasos = int(a["correccion_pasos"])
+            self.mezcla = a["mezcla_ms"] / 1000
+            self.interp = bool(a["interpolacion"])
+            self.subpixel = bool(a["subpixel"])
+            self.reciente = bool(a["reciente_primero"])
+            self.hires = bool(a["alta_resolucion"])
+            self.TICK = 1.0 / a["frecuencia_hz"]
+            self.MIN_BUF = a["colchon_min_ms"] / 1000
+            self.MAX_BUF = a["colchon_max_ms"] / 1000
+            self.colchon_fijo = a["colchon_modo"] == "fijo"
+            if self.colchon_fijo:
+                self.buffer = a["colchon_fijo_ms"] / 1000
+            else:
+                self.buffer = max(self.MIN_BUF, min(self.MAX_BUF, self.buffer))
+            self.MAX_LAG = a["cola_max_ms"] / 1000
+            self.PRED_MAX = a["pred_max_ms"] / 1000
+            self.PRED_TAU = a["pred_frenado_ms"] / 1000
+            self.preset = preset if preset in PRESETS else "personalizado"
+            self._cx = self._cy = 0.0
+            if not self.corr_pasos:
+                self._corr = 0
+            if not (self.interp or self.mezcla):
+                self._lin = 0
+        if "prediccion" in opts:
+            self.set_pred(opts["prediccion"])
+        if "inercia" in opts:
+            self.set_inercia(opts["inercia"])
+        return self.ajuste()
+
+    def ajuste(self) -> dict:
+        a = dict(self.ajustes)
+        a["prediccion"] = self.pred
+        a["inercia"] = self.inercia
+        return {"preset": self.preset, "opciones": a}
 
     def _send(self, dx: int, dy: int) -> None:
         self._out_x += dx
@@ -374,12 +441,18 @@ class Continuo:
 
     def _settle_debt(self) -> None:
         """Devuelve lo predicho de más (el dedo se paró). Dentro de _cv."""
+        self._settled = True  # 0.53: no se vuelve a predecir hasta que lleguen datos
         if self._dbx or self._dby:
             self._note_err(math.hypot(self._dbx, self._dby))
             self._px -= self._dbx
             self._py -= self._dby
             self._dbx = self._dby = 0.0
             self._returning = abs(self._px) + abs(self._py) >= 0.5
+            if self._returning and self.corr_pasos:
+                self._returning = False
+                self._corr = self.corr_pasos  # 0.53: corrección suave
+                self._lin = 0
+                self._n_corr_ev += 1
         self._fx = self._fy = 0.0
 
     def push(self, dx: int, dy: int, now: float | None = None, start: bool = True) -> None:
@@ -394,8 +467,11 @@ class Continuo:
                 self._ended = False
             self._real_x += dx
             self._real_y += dy
-            if self._last_in is not None:
-                gap = now - self._last_in
+            gap = None if self._last_in is None else now - self._last_in
+            had_debt = bool(self._dbx or self._dby)
+            if self._last_in is not None and self.colchon_fijo:
+                pass
+            elif self._last_in is not None:
                 if gap > self.buffer * 1.2 and gap < 0.5:
                     self.buffer = min(self.MAX_BUF, self.buffer * 0.6 + gap * 0.5)
                 elif gap < 0.5:
@@ -427,12 +503,24 @@ class Continuo:
                 ex = max(0.0, abs(self._dbx) - abs(dx)) if (self._dbx > 0) == (dx > 0) else abs(self._dbx)
                 ey = max(0.0, abs(self._dby) - abs(dy)) if (self._dby > 0) == (dy > 0) else abs(self._dby)
                 self._note_err(math.hypot(ex, ey))
+            dbx, dby = self._dbx, self._dby
             self._px += dx - self._dbx
             self._py += dy - self._dby
             self._dbx = self._dby = 0.0
             self._fx = self._fy = 0.0
             self._empty_at = None
             self._returning = False
+            self._settled = False
+            # 0.53: cómo se reparte lo que queda
+            self._corr = 0
+            if had_debt and self.corr_pasos and (self._px * dbx < 0 or self._py * dby < 0):
+                self._corr = self.corr_pasos  # se predijo de más: vuelve en 2-4 pasos
+                self._lin = 0
+                self._n_corr_ev += 1
+            elif had_debt and self.mezcla > 0:
+                self._lin = max(1, round(self.mezcla / self.TICK))
+            elif self.interp and gap is not None and self.INTERP_GAP < gap < 0.5:
+                self._lin = max(self._lin, math.ceil(min(gap, self.MAX_BUF) / self.TICK - 1e-9))
             if start and (self._thread is None or not self._thread.is_alive()):
                 self._thread = threading.Thread(target=self._run, name="lazoo-continuo", daemon=True)
                 self._thread.start()
@@ -474,6 +562,9 @@ class Continuo:
             self._stats2 = {"predichos_px_s": round(self._pred_px / el),
                             "error_medio_px": round(sum(errs) / len(errs), 1) if errs else 0.0,
                             "error_max_px": round(max(errs), 1) if errs else 0.0}
+            self._stats3 = {"correcciones_s": round(self._n_corr_ev / el), "pasos_corr_s": round(self._n_corr / el),
+                            "interpolados_s": round(self._n_interp / el)}
+            self._n_corr_ev = self._n_corr = self._n_interp = 0
             self._errs = []
             self._steps, self._qmax, self._sec_start, self._pred_px = 0, 0.0, now, 0.0
 
@@ -498,7 +589,7 @@ class Continuo:
         if (self._dbx or self._dby) and self._last_in is not None and now - self._last_in > self.SETTLE:
             self._settle_debt()
             return 0, 0, False
-        if not self.pred or self._ended or self._last_in is None:
+        if not self.pred or self._ended or self._last_in is None or self._settled:
             return 0, 0, False
         if self._empty_at is None:
             self._empty_at = now
@@ -538,19 +629,47 @@ class Continuo:
                 self._last_tick = now
                 buf = self.buffer
                 # tope: si a este ritmo la cola equivale a más de MAX_LAG, vaciar más deprisa
-                if self._rate > 0 and mag / self._rate > self.MAX_LAG:
-                    buf = min(buf, self.TICK)
+                lagged = self._rate > 0 and mag / self._rate > self.MAX_LAG and not self._corr
+                if lagged:
+                    # 0.53: con corrección suave, el vaciado rápido también va en 2-4 pasos
+                    buf = min(buf, self.TICK * max(1, self.corr_pasos))
+                    self._lin = self._corr = 0
                 if self._returning:
                     buf = self.RETURN_TIME
                 frac = min(1.0, dt / buf) if buf > 0 else 1.0
                 idle = self._last_in is None or now - self._last_in > 0.25
                 if (idle and not self._returning) or mag * frac < 1.0 and mag <= 2:
                     frac = 1.0
+                if lagged and self.reciente:
+                    frac = 1.0  # 0.53: reciente primero, se salta lo viejo de golpe
+                n = 0
+                if self._corr > 0 and not (lagged and self.reciente):
+                    n, self._corr = self._corr, self._corr - 1
+                    self._n_corr += 1
+                    frac = min(frac, 0.999)
+                elif self._lin > 0 and not idle:
+                    n, self._lin = self._lin, self._lin - 1
+                    self._n_interp += 1
                 sx, sy = px * frac, py * frac
                 ix, iy = int(round(sx)), int(round(sy))
+                if n:
+                    ix, iy = _rnd(px / n), _rnd(py / n)
+                elif self.subpixel and frac < 1.0:
+                    # 0.53: acumulador de sub-píxeles y redondeo estable (sin «0,5 al par»)
+                    self._cx += sx
+                    self._cy += sy
+                    ix, iy = _rnd(self._cx), _rnd(self._cy)
+                    ix = max(-_rnd(abs(px)), min(_rnd(abs(px)), ix))
+                    iy = max(-_rnd(abs(py)), min(_rnd(abs(py)), iy))
+                    self._cx -= ix
+                    self._cy -= iy
                 if frac >= 1.0:
                     ix, iy = int(round(px)), int(round(py))
-                if ix == 0 and iy == 0:
+                    self._cx = self._cy = 0.0
+                    self._lin = self._corr = 0
+                if ix == 0 and iy == 0 and (n or self.subpixel):
+                    pass
+                elif ix == 0 and iy == 0:
                     # avanza al menos un píxel en el eje más largo, para no estancarse
                     if abs(px) >= abs(py):
                         ix = 1 if px > 0 else -1
@@ -560,6 +679,8 @@ class Continuo:
                 self._py -= iy
                 if abs(self._px) + abs(self._py) < 0.5:
                     self._returning = False
+                    self._lin = self._corr = 0
+                    self._cx = self._cy = 0.0
                 if self._rate > 0:
                     self._qmax = max(self._qmax, (abs(self._px) + abs(self._py)) / self._rate * 1000)
                 self._steps += 1
@@ -574,6 +695,8 @@ class Continuo:
             self._glide = None
             self._settle_debt()
             self._returning = False
+            self._corr = self._lin = 0
+            self._cx = self._cy = 0.0
             ix, iy = int(round(self._px)), int(round(self._py))
             self._px -= ix
             self._py -= iy
@@ -587,9 +710,12 @@ class Continuo:
         if now - self._sec_start > 2.0:
             st = {"pasos_s": 0, "cola_max_ms": 0.0}
             st2 = {"predichos_px_s": 0, "error_medio_px": 0.0, "error_max_px": 0.0}
+        st3 = dict(self._stats3) if now - self._sec_start <= 2.0 else {"correcciones_s": 0, "pasos_corr_s": 0, "interpolados_s": 0}
         return {"on": self.on, "colchon_ms": round(self.buffer * 1000, 1), **st,
                 "prediccion": self.pred, "inercia": self.inercia, **st2,
-                "deriva_px": round(self.drift(), 2)}
+                "deriva_px": round(self.drift(), 2),
+                "colchon_min_ms": round(self.MIN_BUF * 1000), "colchon_max_ms": round(self.MAX_BUF * 1000),
+                "colchon_modo": "fijo" if self.colchon_fijo else "adaptativo", **st3, **self.ajuste()}
 
     def _run(self) -> None:
         hi = False
@@ -603,7 +729,7 @@ class Continuo:
                         if not self._cv.wait(30):
                             self._thread = None
                             return
-                if not hi:
+                if not hi and self.hires:
                     _hires(True)
                     hi = True
                 try:
@@ -627,7 +753,95 @@ def _hires(on: bool) -> None:
         pass
 
 
+def _rnd(v: float) -> int:
+    """Redondeo estable: siempre la mitad hacia fuera (round() de Python va «al par»)."""
+    return int(math.floor(v + 0.5)) if v >= 0 else -int(math.floor(-v + 0.5))
+
+
+# 0.53: ajuste fino del ratón. Rangos (mín, máx) o valores permitidos.
+AJUSTE_RANGOS: dict[str, Any] = {
+    "correccion_pasos": (0, 2, 3, 4),
+    "mezcla_ms": (0, 60),
+    "interpolacion": bool,
+    "colchon_modo": ("adaptativo", "fijo"),
+    "colchon_min_ms": (10, 60),
+    "colchon_max_ms": (15, 150),
+    "colchon_fijo_ms": (10, 80),
+    "frecuencia_hz": (125, 200, 250, 500),
+    "pred_max_ms": (50, 300),
+    "pred_frenado_ms": (30, 200),
+    "subpixel": bool,
+    "cola_max_ms": (60, 300),
+    "reciente_primero": bool,
+    "alta_resolucion": bool,
+    "tasa_envio": (30, 60, 90, 120),
+    "prediccion": bool,
+    "inercia": (None, "poca", "media", "mucha"),
+}
+_BASE = {"correccion_pasos": 0, "mezcla_ms": 0, "interpolacion": False, "colchon_modo": "adaptativo",
+         "colchon_min_ms": 10, "colchon_max_ms": 120, "colchon_fijo_ms": 30, "frecuencia_hz": 200,
+         "pred_max_ms": 150, "pred_frenado_ms": 90, "subpixel": False, "cola_max_ms": 150,
+         "reciente_primero": False, "alta_resolucion": True, "tasa_envio": 60}
+PRESETS: dict[str, dict[str, Any]] = {
+    "equilibrado": {**_BASE, "correccion_pasos": 3, "mezcla_ms": 30, "interpolacion": True,
+                    "colchon_min_ms": 15, "colchon_max_ms": 40, "subpixel": True, "prediccion": True},
+    "fluidez": {**_BASE, "correccion_pasos": 4, "mezcla_ms": 50, "interpolacion": True,
+                "colchon_min_ms": 25, "colchon_max_ms": 60, "frecuencia_hz": 250, "subpixel": True, "cola_max_ms": 200, "prediccion": True},
+    "retraso": {**_BASE, "correccion_pasos": 2, "colchon_min_ms": 10, "colchon_max_ms": 20,
+                "frecuencia_hz": 500, "pred_max_ms": 100, "pred_frenado_ms": 60, "subpixel": True,
+                "cola_max_ms": 100, "reciente_primero": True, "tasa_envio": 90, "prediccion": True},
+    "como050": {**_BASE, "prediccion": False, "inercia": None},
+}
+
+
+def validar_ajuste(opts: Any) -> dict:
+    """0.53: comprueba tipos y rangos; cualquier cosa rara es un error, no se corrige sola."""
+    if not isinstance(opts, dict) or len(opts) > len(AJUSTE_RANGOS):
+        raise ControlError("Ajuste no válido")
+    out: dict[str, Any] = {}
+    for k, v in opts.items():
+        rule = AJUSTE_RANGOS.get(k)
+        if rule is None:
+            raise ControlError(f"Opción desconocida: {str(k)[:40]}")
+        if rule is bool:
+            if not isinstance(v, bool):
+                raise ControlError(f"{k}: debe ser sí o no")
+        elif k in ("mezcla_ms", "colchon_min_ms", "colchon_max_ms", "colchon_fijo_ms", "pred_max_ms",
+                   "pred_frenado_ms", "cola_max_ms"):
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not rule[0] <= v <= rule[1]:
+                raise ControlError(f"{k}: fuera de rango ({rule[0]}-{rule[1]})")
+            v = int(round(v))
+        elif isinstance(v, bool) or v not in rule:
+            raise ControlError(f"{k}: valor no permitido")
+        out[k] = v
+    return out
+
+
+def set_ajuste(body: Any) -> dict:
+    """POST /api/ajuste: {preset: "equilibrado"} o {opciones: {...}} (se puede mandar ambos)."""
+    if not isinstance(body, dict):
+        raise ControlError("Ajuste no válido")
+    preset = body.get("preset")
+    if preset is None and body.get("opciones") is None:
+        return CONTINUO.ajuste()  # solo consulta
+    opts: dict[str, Any] = {}
+    if preset is not None:
+        if not isinstance(preset, str) or preset not in PRESETS:
+            raise ControlError("Preset desconocido")
+        opts.update(PRESETS[preset])
+    if body.get("opciones") is not None:
+        extra = validar_ajuste(body.get("opciones"))
+        if extra:
+            preset = None
+        opts.update(extra)
+    merged = {**CONTINUO.ajustes, **opts}
+    if merged["colchon_min_ms"] > merged["colchon_max_ms"]:
+        raise ControlError("El colchón mínimo no puede ser mayor que el máximo")
+    return CONTINUO.aplicar(opts, preset)
+
+
 CONTINUO = Continuo()
+CONTINUO.aplicar(PRESETS["equilibrado"], "equilibrado")
 
 
 def set_continuo(on) -> dict:

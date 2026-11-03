@@ -1283,7 +1283,7 @@ function gainFor(dx, dy) {
   return (lvl.lo + (2.2 - lvl.lo) * slow + 3.5 * curve) * lvl.k;
 }
 
-/* 0.47-0.49: diagnóstico del ratón («Modo stats» en Ratón). */
+/* 0.47-0.49: diagnóstico del ratón («Ajuste fino / stats» en Ratón desde 0.53). */
 const diag = { frames: 0, ws: 0, http: 0, rtt: [], net: [], proc: [], log: [], fps: 0, big: 0, sealSum: 0, sealN: 0, seal: null, lagMax: 0, lagSum: 0, lagN: 0, lag: null, lagPeak: null, pc: null, lastMove: 0, hist: [], frozen: null, merged: 0, mergedS: 0 };
 window.__lzDiag = diag;
 function diagNote(dx, dy, via) {
@@ -1344,6 +1344,9 @@ function diagSample(rtt, net, proc, pc, vig) {
     errMed: diag.pc && diag.pc.continuo ? diag.pc.continuo.error_medio_px : null,
     errMax: diag.pc && diag.pc.continuo ? diag.pc.continuo.error_max_px : null,
     drift: diag.pc && diag.pc.continuo ? diag.pc.continuo.deriva_px : null,
+    corr: diag.pc && diag.pc.continuo ? diag.pc.continuo.correcciones_s : null,
+    corrSteps: diag.pc && diag.pc.continuo ? diag.pc.continuo.pasos_corr_s : null,
+    interp: diag.pc && diag.pc.continuo ? diag.pc.continuo.interpolados_s : null,
     vig: vig && vig.available ? (vig.enabled ? (vig.installed ? "encendido y activo" : "encendido, en espera") : "apagado") : "no disponible",
     ws: !!(pointerSocket && pointerSocket.readyState === 1) });
   while (diag.hist.length > DIAG_KEEP) diag.hist.shift();
@@ -1352,6 +1355,16 @@ function diagStats(list) {
   const v = list.filter((x) => x !== null && x !== undefined && !Number.isNaN(x)).sort((a, b) => a - b);
   if (!v.length) return null;
   return { min: v[0], avg: v.reduce((a, b) => a + b, 0) / v.length, max: v[v.length - 1], p95: v[Math.min(v.length - 1, Math.ceil(v.length * 0.95) - 1)] };
+}
+const FINE_NAMES = { equilibrado: "Equilibrado", fluidez: "Máxima fluidez", retraso: "Mínimo retraso", como050: "Como 0.50", personalizado: "Personalizado" };
+const FINE_TEXT = ["colchon_modo"];
+function fineText(c) {
+  if (!c || !c.opciones) return "?";
+  const o = c.opciones;
+  const yes = (v) => (v ? "sí" : "no");
+  return `${FINE_NAMES[c.preset] || c.preset} · corrección ${o.correccion_pasos ? `${o.correccion_pasos} pasos` : "no"} · mezcla ${o.mezcla_ms} ms · interpolación ${yes(o.interpolacion)}` +
+    ` · ${o.frecuencia_hz} Hz · predicción ${yes(o.prediccion)} (${o.pred_max_ms} ms, frenado ${o.pred_frenado_ms} ms) · sub-píxel ${yes(o.subpixel)}` +
+    ` · cola ${o.cola_max_ms} ms · reciente primero ${yes(o.reciente_primero)} · alta resolución ${yes(o.alta_resolucion)} · envíos ${o.tasa_envio}/s · inercia ${o.inercia || "no"}`;
 }
 function diagSummary(hist, secs, meta = {}) {
   const rows = hist.slice(-secs);
@@ -1389,6 +1402,11 @@ function diagSummary(hist, secs, meta = {}) {
     line("Error de predicción medio", "errMed", 1, " px"),
     line("Error de predicción máx.", "errMax", 1, " px"),
     `Deriva acumulada: ${last.drift ?? "—"} px (debe ser ~0)`,
+    `Ajuste fino: ${fineText(last.cont)}`,
+    `Colchón rango: ${last.cont ? `${last.cont.colchon_modo || "?"} ${last.cont.colchon_min_ms ?? "?"}-${last.cont.colchon_max_ms ?? "?"} ms` : "?"}`,
+    line("Correcciones suaves/s", "corr"),
+    line("Pasos de corrección/s", "corrSteps"),
+    line("Pasos interpolados/s", "interp"),
     "",
     "Por segundo (móvil/s, PC/s, eco ms, huecos>100):",
     rows.map((r) => `${r.fps}/${fmt(r.pcFps)}/${fmt(r.rtt)}/${r.g100 ?? "—"}`).join("  "),
@@ -1435,7 +1453,9 @@ window.setInterval(() => {
         `Ráfagas: ${Math.round(pc.burst * 100)} % pegados, hasta ${pc.burst_max} juntos\n` +
         (diag.pc.continuo ? `Movimiento continuo: ${diag.pc.continuo.on ? "sí" : "no"} · colchón ${fmt(diag.pc.continuo.colchon_ms, 0)} ms · ${diag.pc.continuo.pasos_s} pasos/s · cola máx ${fmt(diag.pc.continuo.cola_max_ms, 0)} ms\n` +
           `Predicción de movimiento: ${diag.pc.continuo.prediccion ? "sí" : "no"} · Inercia al soltar: ${diag.pc.continuo.inercia || "no"}\n` +
-          `Píxeles predichos/s: ${diag.pc.continuo.predichos_px_s ?? "—"} · Error de predicción: ${fmt(diag.pc.continuo.error_medio_px, 1)} px medio, ${fmt(diag.pc.continuo.error_max_px, 1)} px máx · Deriva acumulada: ${diag.pc.continuo.deriva_px ?? "—"} px\n` : "")
+          `Píxeles predichos/s: ${diag.pc.continuo.predichos_px_s ?? "—"} · Error de predicción: ${fmt(diag.pc.continuo.error_medio_px, 1)} px medio, ${fmt(diag.pc.continuo.error_max_px, 1)} px máx · Deriva acumulada: ${diag.pc.continuo.deriva_px ?? "—"} px\n` +
+          `Ajuste fino: ${fineText(diag.pc.continuo)}\n` +
+          `Colchón ${diag.pc.continuo.colchon_modo || "?"} ${diag.pc.continuo.colchon_min_ms ?? "?"}-${diag.pc.continuo.colchon_max_ms ?? "?"} ms · correcciones suaves ${diag.pc.continuo.correcciones_s ?? "—"}/s (${diag.pc.continuo.pasos_corr_s ?? "—"} pasos) · interpolados ${diag.pc.continuo.interpolados_s ?? "—"}/s\n` : "")
       : "Sin datos del PC todavía\n") +
     `\nECO (ida y vuelta)\n` +
     `Total: ${fmt(rtt, 0)} ms = red ${fmt(net, 0)} ms + PC ${fmt(proc, 2)} ms\n` +
@@ -1465,7 +1485,7 @@ function diagShow(on) {
   document.querySelector("#diag-tools").hidden = !on;
   document.querySelector("#diag-extra").hidden = !on;
   if (!on) { diag.hist = []; diag.frozen = null; }
-  try { localStorage.setItem("lazo-diag", on ? "1" : "0"); } catch (_e) { /* sin almacenamiento */ }
+  try { localStorage.setItem("lazo-fino", on ? "1" : "0"); } catch (_e) { /* sin almacenamiento */ }
 }
 function diagFreeze(on) {
   diag.frozen = on ? diag.hist.slice() : null;
@@ -1477,10 +1497,16 @@ function diagFreeze(on) {
 function diagMeta() {
   let aim = "normal";
   try { aim = localStorage.getItem("lazo-aim") || "normal"; } catch (_e) { /* nada */ }
-  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.52", aim };
+  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.53", aim };
 }
 if (diagOn) {
-  try { diagOn.checked = localStorage.getItem("lazo-diag") === "1"; } catch (_e) { /* nada */ }
+  try {
+    // 0.53: el antiguo modo de stats pasa a «Ajuste fino / stats»; se migra la clave antigua
+    const old = localStorage.getItem("lazo-diag");
+    if (old !== null && localStorage.getItem("lazo-fino") === null) localStorage.setItem("lazo-fino", old);
+    localStorage.removeItem("lazo-diag");
+    diagOn.checked = localStorage.getItem("lazo-fino") === "1";
+  } catch (_e) { /* nada */ }
   diagShow(diagOn.checked);
   diagOn.addEventListener("change", () => diagShow(diagOn.checked));
   diagFreezeBtn.addEventListener("click", () => diagFreeze(!diag.frozen));
@@ -1554,10 +1580,11 @@ function connectPointer() {
 
 /* 0.50: ritmo de envío. Devuelve cuántos ms esperar antes del siguiente mensaje. */
 const SEND_MIN_MS = 1000 / 60;
+let sendMinMs = SEND_MIN_MS; // 0.53: «Envíos del móvil» en Ajuste fino (30/60/90/120 por segundo)
 let lastSendAt = 0;
 let sendTimer = 0;
 function sendWait(now, buffered, last = lastSendAt, rtt = avg(diag.rtt)) {
-  let gap = SEND_MIN_MS;
+  let gap = sendMinMs;
   if (buffered > 256) gap = 40;            // el navegador aún no ha soltado lo anterior
   else if (rtt !== null && rtt > 120) gap = 25; // eco alto: menos mensajes, más grandes
   return Math.max(0, Math.ceil(last + gap - now));
@@ -3049,4 +3076,71 @@ if (inerBox && inerLvl) {
   inerBox.addEventListener("change", save);
   inerLvl.addEventListener("change", save);
   window.setTimeout(pushIner, 1500);
+}
+
+/* 0.53: ajuste fino del ratón (dentro de «Ajuste fino / stats»). El PC valida cada valor;
+   el móvil solo recuerda la elección y la vuelve a mandar al conectar. */
+function fineShow(st) {
+  if (!st || !st.opciones) return;
+  const o = st.opciones;
+  document.querySelectorAll("[data-op]").forEach((el) => {
+    const v = o[el.dataset.op];
+    if (v === undefined) return;
+    if (el.type === "checkbox") el.checked = !!v;
+    else {
+      if (![...el.options].some((x) => x.value === String(v))) el.add(new Option(String(v), String(v)));
+      el.value = String(v);
+    }
+  });
+  document.querySelectorAll("[data-preset]").forEach((b) => b.classList.toggle("on", b.dataset.preset === st.preset));
+  const est = document.querySelector("#fino-estado");
+  if (est) est.textContent = `Preset: ${FINE_NAMES[st.preset] || st.preset}`;
+  if (o.tasa_envio) sendMinMs = 1000 / o.tasa_envio;
+  const fijo = o.colchon_modo === "fijo";
+  document.querySelectorAll('[data-op="colchon_fijo_ms"]').forEach((el) => { el.disabled = !fijo; });
+  document.querySelectorAll('[data-op="colchon_min_ms"], [data-op="colchon_max_ms"]').forEach((el) => { el.disabled = fijo; });
+  // los presets también fijan predicción (y «Como 0.50» quita la inercia): se reflejan arriba
+  if (typeof o.prediccion === "boolean" && predBox) {
+    predBox.checked = o.prediccion;
+    localStorage.setItem("lazo-pred", o.prediccion ? "1" : "0");
+  }
+  if (inerBox && "inercia" in o) {
+    inerBox.checked = !!o.inercia;
+    if (o.inercia) inerLvl.value = o.inercia;
+    localStorage.setItem("lazo-inercia", o.inercia || "");
+  }
+}
+function fineSave(st) {
+  if (!st || !st.opciones) return;
+  const keep = { ...st.opciones };
+  delete keep.prediccion;
+  delete keep.inercia;
+  try { localStorage.setItem("lazo-ajuste", JSON.stringify({ preset: st.preset, opciones: keep })); } catch (_e) { /* nada */ }
+}
+function fineSend(body) {
+  return api("/api/ajuste", body).then((st) => { fineShow(st); fineSave(st); return st; }).catch((err) => {
+    say(err && err.message ? err.message : "El PC no aceptó el ajuste");
+  });
+}
+function fineCollect() {
+  const o = {};
+  document.querySelectorAll("[data-op]").forEach((el) => {
+    const k = el.dataset.op;
+    if (el.type === "checkbox") o[k] = el.checked;
+    else if (FINE_TEXT.includes(k)) o[k] = el.value;
+    else o[k] = Number(el.value);
+  });
+  return o;
+}
+if (document.querySelector("#fino")) {
+  document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => fineSend({ preset: b.dataset.preset })));
+  document.querySelectorAll("[data-op]").forEach((el) => el.addEventListener("change", () => fineSend({ opciones: fineCollect() })));
+  document.querySelector("#fino-reset").addEventListener("click", () => fineSend({ preset: "equilibrado" }));
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem("lazo-ajuste") || "null"); } catch (_e) { saved = null; }
+  window.setTimeout(() => {
+    if (saved && saved.preset && saved.preset !== "personalizado") fineSend({ preset: saved.preset });
+    else if (saved && saved.opciones) fineSend({ opciones: saved.opciones });
+    else fineSend({});
+  }, 1600);
 }
