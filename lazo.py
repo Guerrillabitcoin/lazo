@@ -31,7 +31,7 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.51"
+VERSION = "0.52"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -804,7 +804,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             body = self._read_json()
-            result = control.clipboard_history(str(body.get("text", "")), auto=bool(body.get("auto")))
+            text = str(body.get("text", ""))
+            result = control.clipboard_history(text, auto=bool(body.get("auto")))
+            if body.get("to_system") is True:
+                result = dict(result, to_system=control.clipboard_to_system(text))
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)})
             return
@@ -1130,6 +1133,8 @@ def start(argv: list[str] | None = None, console: bool = True):
                         help="Acepta también este rango (p. ej. una VPN 100.64.0.0/10). Repetible.")
     parser.add_argument("--sin-vigilante", action="store_true",
                         help="No pone el vigilante del ratón del PC (igual que LAZO_SIN_VIGILANTE=1)")
+    parser.add_argument("--sin-portapapeles", action="store_true",
+                        help="No vigila el portapapeles del PC (igual que LAZO_SIN_PORTAPAPELES=1)")
     parser.add_argument("--auto-aprobar", action="store_true", help=argparse.SUPPRESS)  # solo pruebas
     args = parser.parse_args(argv)
     extra = list(args.permitir_ip) + [part for part in os.environ.get("LAZO_ALLOW", "").replace(";", ",").split(",") if part.strip()]
@@ -1142,6 +1147,8 @@ def start(argv: list[str] | None = None, console: bool = True):
         print(f"  Aviso: amplías el acceso a {net}. Cualquiera en ese rango puede intentar el PIN.")
     if args.sin_vigilante:
         control.VIGILANTE.enabled = False
+    if args.sin_portapapeles:
+        control.CLIP_WATCH.enabled = False
     APPROVALS.auto = args.auto_aprobar or os.environ.get("LAZO_AUTOAPPROVE") == "1"
     if APPROVALS.auto:
         print("  Aviso: modo de pruebas, los dispositivos nuevos entran sin aprobación.")
@@ -1187,6 +1194,10 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         control.watch_physical_mouse()
+    except Exception:
+        pass
+    try:
+        control.watch_clipboard()
     except Exception:
         pass
     if not args.no_browser:

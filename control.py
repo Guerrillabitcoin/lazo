@@ -2947,9 +2947,185 @@ def _windows_clipboard() -> str:
 
 
 _injected_until = 0.0
-def _mark_injected() -> None:
-    global _injected_until
-    _injected_until = time.time() + 0.2
+_clip_injected: tuple[str, float] | None = None  # 0.52: (huella, hasta) de lo que pusimos nosotros
+_CLIP_MARGIN = 0.3
+
+
+def _clip_digest(text: str) -> str:
+    return hashlib.sha256(_clip_norm(text).encode("utf-8", "replace")).hexdigest()
+
+
+def _mark_injected(text: str | None = None) -> None:
+    """Marca algo inyectado por LaZoo. Sin texto: ratón (0,2 s). Con texto: portapapeles,
+    para que el vigilante no lo vuelva a meter en el historial."""
+    global _injected_until, _clip_injected
+    if text is None:
+        _injected_until = time.time() + 0.2
+        return
+    _clip_injected = (_clip_digest(text), time.time() + _CLIP_MARGIN)
+    CLIP_WATCH.seen(text)
+
+
+def _write_clipboard_text(text: str) -> bool:
+    """0.52: escribe texto en el portapapeles del sistema. Devuelve si lo consiguió."""
+    try:
+        if SYSTEM == "Windows":
+            return _windows_set_clipboard(text)
+        if SYSTEM == "Darwin":
+            return _run_input(["pbcopy"], text)
+        if os.environ.get("WAYLAND_DISPLAY") and _which("wl-copy"):
+            if _run_input(["wl-copy"], text):
+                return True
+        if _which("xclip"):
+            return _run_input(["xclip", "-selection", "clipboard", "-i"], text)
+        if _which("xsel"):
+            return _run_input(["xsel", "--clipboard", "--input"], text)
+    except Exception:
+        return False
+    return False
+
+
+def _run_input(cmd: list[str], text: str) -> bool:
+    # xclip/wl-copy se quedan sirviendo el portapapeles: sin esperar su salida.
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=_NO_WINDOW,
+        )
+        assert proc.stdin is not None
+        proc.stdin.write(text.encode("utf-8"))
+        proc.stdin.close()
+        try:
+            return proc.wait(timeout=1.5) == 0
+        except subprocess.TimeoutExpired:
+            return True  # sigue vivo sirviendo la selección
+    except OSError:
+        return False
+
+
+def _windows_set_clipboard(text: str) -> bool:
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+    user32.OpenClipboard.restype = ctypes.c_bool
+    user32.EmptyClipboard.restype = ctypes.c_bool
+    user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+    user32.SetClipboardData.restype = ctypes.c_void_p
+    kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+    data = (text.replace("\r\n", "\n").replace("\n", "\r\n") + "\x00").encode("utf-16-le")
+    handle = kernel32.GlobalAlloc(0x0002, len(data))  # GMEM_MOVEABLE
+    if not handle:
+        return False
+    ptr = kernel32.GlobalLock(handle)
+    if not ptr:
+        kernel32.GlobalFree(handle)
+        return False
+    ctypes.memmove(ptr, data, len(data))
+    kernel32.GlobalUnlock(handle)
+    for _ in range(5):
+        if user32.OpenClipboard(None):
+            break
+        time.sleep(0.03)
+    else:
+        kernel32.GlobalFree(handle)
+        return False
+    try:
+        user32.EmptyClipboard()
+        if not user32.SetClipboardData(13, handle):  # CF_UNICODETEXT; Windows se queda la memoria
+            kernel32.GlobalFree(handle)
+            return False
+        return True
+    finally:
+        user32.CloseClipboard()
+
+
+def clipboard_to_system(text: str) -> bool:
+    """0.52: nota del móvil -> historial + portapapeles del PC, marcada como nuestra."""
+    clean = _clip_norm(text)
+    if not clean:
+        raise ControlError("Nota vacía")
+    _mark_injected(clean)
+    ok = _write_clipboard_text(clean)
+    _mark_injected(clean)  # el margen cuenta desde que ya está escrito
+    return ok
+
+
+class ClipWatch:
+    """0.52: vigila el portapapeles del PC y añade lo nuevo al historial (auto=True).
+
+    No apunta nada en logs ni guarda nada en el móvil. Ignora vacíos, repetidos
+    seguidos, textos enormes y lo que acaba de poner LaZoo. Se apaga con
+    `--sin-portapapeles` o `LAZO_SIN_PORTAPAPELES=1`."""
+
+    INTERVAL = 1.5
+    MAX_CHARS = 100_000  # más que esto no es una nota: se ignora sin recortar
+
+    def __init__(self, read=None, add=None) -> None:
+        self.enabled = os.environ.get("LAZO_SIN_PORTAPAPELES", "") not in ("1", "si", "sí", "true")
+        self._read = read
+        self._add = add
+        self._last: str | None = None  # huella de lo último visto
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.added = 0
+
+    def seen(self, text: str) -> None:
+        self._last = _clip_digest(text)
+
+    def poll(self, now: float | None = None) -> bool:
+        """Una pasada. Devuelve True si añadió algo al historial."""
+        read = self._read or _read_clipboard_text
+        try:
+            text = read() or ""
+        except Exception:
+            return False
+        if not isinstance(text, str) or len(text) > self.MAX_CHARS:
+            return False
+        clean = _clip_norm(text)
+        if not clean:
+            return False
+        digest = _clip_digest(clean)
+        if digest == self._last:
+            return False
+        self._last = digest
+        mark = _clip_injected
+        if mark is not None and mark[0] == digest and (now or time.time()) <= mark[1]:
+            return False  # lo pusimos nosotros (desde el móvil): ya está en el historial
+        (self._add or (lambda t: clipboard_history(t, auto=True)))(clean)
+        self.added += 1
+        return True
+
+    def start(self) -> bool:
+        if not self.enabled or (self._thread and self._thread.is_alive()):
+            return False
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="lazo-portapapeles", daemon=True)
+        self._thread.start()
+        return True
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _loop(self) -> None:
+        while not self._stop.wait(self.INTERVAL):
+            self.poll()
+
+
+CLIP_WATCH = ClipWatch()
+
+
+def watch_clipboard() -> bool:
+    if "unittest" in sys.modules or "pytest" in sys.modules:
+        return False  # en pruebas no se toca el portapapeles real
+    return CLIP_WATCH.start()
 
 
 class Vigilante:

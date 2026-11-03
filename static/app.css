@@ -373,6 +373,9 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 .arrows { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 
 .phrase { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 10px; }
+.clip-actions { display: grid; gap: 8px; align-content: stretch; }
+.clip-actions button { min-height: 48px; min-width: 88px; margin: 0; }
+.clip-to-pc { background: var(--copper, #e07a3d); color: #111; font-weight: 700; }
 
 .list {
   list-style: none;

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.51</title>
-    <link rel="stylesheet" href="/app.css?v=0.51" />
+    <title>LaZoo 0.52</title>
+    <link rel="stylesheet" href="/app.css?v=0.52" />
   </head>
   <body>
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.51</p>
+          <p class="ver">0.52</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -221,9 +221,12 @@
           <article class="deck">
             <form id="clip-form" class="phrase">
               <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Nota"></textarea>
-              <button type="submit">Guardar</button>
+              <div class="clip-actions">
+                <button type="submit">Guardar</button>
+                <button type="button" id="clip-to-pc" class="clip-to-pc">Al PC</button>
+              </div>
             </form>
-            <p class="notes-info">Estas notas no salen a internet: van solo por tu red local, cifradas entre el móvil y el PC. Sirven para pasar una clave o una contraseña de un dispositivo a otro en segundos y recuperarla después. En el PC se guardan las últimas en un archivo local: en Windows, cifrado con tu cuenta; en Linux y Mac, sin cifrar. Aquí también aparece lo que copies en el PC.</p>
+            <p class="notes-info">Estas notas no salen a internet: van solo por tu red local, cifradas entre el móvil y el PC. Sirven para pasar una clave o una contraseña de un dispositivo a otro en segundos y recuperarla después. En el PC se guardan las últimas en un archivo local: en Windows, cifrado con tu cuenta; en Linux y Mac, sin cifrar. Aquí también aparece lo que copies en el PC. «Al PC» guarda la nota y la deja en el portapapeles del PC, lista para pegar con Ctrl+V. Nada pasa solo al móvil: para traerla, pulsa «Copiar».</p>
             <ul id="clips" class="list"></ul>
           </article>
         </div>
@@ -311,7 +314,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.51</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.52</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -365,7 +368,7 @@
         </div>
       </section>
     </main>
-    <script src="/seal.js?v=0.51"></script>
-    <script src="/app.js?v=0.51"></script>
+    <script src="/seal.js?v=0.52"></script>
+    <script src="/app.js?v=0.52"></script>
   </body>
 </html>

@@ -451,6 +451,28 @@ document.querySelector("#clip-form").addEventListener("submit", async (event) =>
   }
 });
 
+document.querySelector("#clip-to-pc").addEventListener("click", async () => {
+  const input = document.querySelector("#clip-input");
+  const button = document.querySelector("#clip-to-pc");
+  const text = input.value;
+  if (!text.trim()) {
+    say("Escribe una nota primero");
+    return;
+  }
+  if (button.disabled) return;
+  button.disabled = true;
+  try {
+    const data = await api("/api/clipboard", { text, to_system: true });
+    input.value = "";
+    syncClipboard();
+    say(data && data.to_system === false ? "Guardada, pero el PC no dejó escribir en su portapapeles" : "Enviado al portapapeles del PC");
+  } catch (err) {
+    say(err.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
 function formatSpeed(bytesPerSecond) {
   if (bytesPerSecond < 1024) return Math.max(0, Math.round(bytesPerSecond)) + " B/s";
   if (bytesPerSecond < 1024 * 1024) return (bytesPerSecond / 1024).toFixed(1).replace(".", ",") + " KB/s";
@@ -1455,7 +1477,7 @@ function diagFreeze(on) {
 function diagMeta() {
   let aim = "normal";
   try { aim = localStorage.getItem("lazo-aim") || "normal"; } catch (_e) { /* nada */ }
-  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.51", aim };
+  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.52", aim };
 }
 if (diagOn) {
   try { diagOn.checked = localStorage.getItem("lazo-diag") === "1"; } catch (_e) { /* nada */ }

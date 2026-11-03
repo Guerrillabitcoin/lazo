@@ -1,4 +1,4 @@
-# LaZoo 0.51
+# LaZoo 0.52
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir la ventana del PC, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.52:** portapapeles compartido. El PC vigila su portapapeles (cada 1,5 s) y lo que copies aparece en Notas del móvil; nada pasa solo al móvil: para traerlo pulsa «Copiar». En Notas, el botón «Al PC» guarda la nota y la deja en el portapapeles del PC, lista para Ctrl+V. Todo se guarda solo en el PC (`clipboard-history.json`), nada en el móvil, y va por la red local cifrado como siempre. Para apagar el vigilante: `--sin-portapapeles` o `LAZO_SIN_PORTAPAPELES=1`.
 
 **Novedad 0.51:** el ratón simula un movimiento continuo, como el touchpad de un portátil. Con «Predicción de movimiento» (activada por defecto, en Ratón, junto a «Movimiento continuo») el PC calcula la velocidad del dedo y, cuando la Wi-Fi deja un hueco, sigue moviendo el cursor a esa velocidad frenando poco a poco (como mucho 150 ms). Cuando llegan los datos reales, lo ya movido se descuenta, así que el cursor acaba exactamente donde debe (deriva 0). Si paras el dedo sin soltarlo, lo que se haya adelantado se devuelve con suavidad. Clics, arrastres y rueda nunca usan la predicción. Nuevo: «Inercia al soltar» (apagada de serie; poca, media o mucha): al levantar el dedo el cursor desliza y frena; tocar o hacer clic lo para. Si apagas la predicción, todo va exactamente como en 0.50. Modo stats añade: predicción sí/no, inercia, píxeles predichos/s, error de predicción medio/máx. y deriva acumulada. El tamaño del móvil no cambia la sensibilidad: el desplazamiento se mide en píxeles CSS, que ya son independientes de la densidad de la pantalla, y no depende del ancho del touchpad (un móvil pequeño solo obliga a levantar el dedo más a menudo; para eso sirve la inercia).
 
