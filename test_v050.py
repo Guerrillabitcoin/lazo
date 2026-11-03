@@ -24,6 +24,8 @@ def simulate(arrivals, until):
     """arrivals: lista de (t, dx, dy). Reproduce a 200 Hz y devuelve (pasos, continuo)."""
     out = []
     c = control.Continuo(dispatch=lambda dx, dy: out.append((dx, dy)), clock=lambda: 0.0)
+    if hasattr(c, "set_pred"):
+        c.set_pred(False)  # 0.51: aquí se prueba el comportamiento de 0.50
     arrivals = sorted(arrivals)
     i, t, steps = 0, 0.0, []
     while t <= until:
@@ -52,10 +54,10 @@ def bursty(seconds=2.0, seed=1):
 
 class Version(unittest.TestCase):
     def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.50")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.50")
-        self.assertIn('android:versionName="0.50"', APK)
-        self.assertIn('android:versionCode="50"', APK)
+        self.assertEqual(lazo.VERSION, "0.51")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.51")
+        self.assertIn('android:versionName="0.51"', APK)
+        self.assertIn('android:versionCode="51"', APK)
 
 
 class Continuo(unittest.TestCase):

@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.50</title>
-    <link rel="stylesheet" href="/app.css?v=0.50" />
+    <title>LaZoo 0.51</title>
+    <link rel="stylesheet" href="/app.css?v=0.51" />
   </head>
   <body>
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.50</p>
+          <p class="ver">0.51</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -69,6 +69,9 @@
             <div id="diag-extra" hidden>
               <label class="diag-smooth"><input id="diag-autofreeze" type="checkbox" /> Congelar al soltar el dedo</label>
               <label class="diag-smooth"><input id="aim-continuo" type="checkbox" checked /> Movimiento continuo (el PC reparte las ráfagas de la red en pasos suaves)</label>
+              <label class="diag-smooth"><input id="aim-pred" type="checkbox" checked /> Predicción de movimiento (si la red se retrasa, el PC sigue el gesto un instante y luego corrige, sin desviarse)</label>
+              <label class="diag-smooth"><input id="aim-inercia" type="checkbox" /> Inercia al soltar (desliza un poco como el touchpad de un portátil)
+                <select id="aim-inercia-nivel" aria-label="Intensidad de la inercia"><option value="poca">poca</option><option value="media" selected>media</option><option value="mucha">mucha</option></select></label>
               <label class="diag-smooth"><input id="aim-smooth" type="checkbox" /> Suavizado en el PC (reparte cada movimiento en pasos pequeños)</label>
               <label class="diag-smooth"><input id="diag-vigilante" type="checkbox" checked /> Vigilante del ratón del PC (vuelve al cursor normal si usas el ratón de verdad; apágalo para probar si causa los saltos)</label>
               <p class="screen-note">«Copiar stats» copia el resumen de los últimos segundos, aunque ya hayas parado de mover.</p>
@@ -308,7 +311,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.50</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.51</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -362,7 +365,7 @@
         </div>
       </section>
     </main>
-    <script src="/seal.js?v=0.50"></script>
-    <script src="/app.js?v=0.50"></script>
+    <script src="/seal.js?v=0.51"></script>
+    <script src="/app.js?v=0.51"></script>
   </body>
 </html>

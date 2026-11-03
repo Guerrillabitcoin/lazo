@@ -7,6 +7,7 @@ import ctypes
 import hashlib
 import os
 import json
+import math
 import platform
 import secrets
 import shutil
@@ -265,14 +266,34 @@ class Continuo:
     reparte en pasos pequeños cada TICK s, vaciando la cola en ~`buffer` s. El colchón
     se adapta: sube si hay huecos/ráfagas, baja despacio si va estable. Nunca se pierde
     desplazamiento: se sueltan enteros y el resto se guarda. Tope: si lo pendiente supera
-    MAX_LAG s de colchón, se vacía más deprisa."""
+    MAX_LAG s de colchón, se vacía más deprisa.
+
+    0.51: predicción. Se estima la velocidad del dedo (px/s, ventana corta VEL_WIN + EMA).
+    Si la cola se vacía y no llega nada, se sigue moviendo a esa velocidad, frenando con
+    exp(-t/PRED_TAU) y como mucho PRED_MAX s. Lo predicho (enteros) es una «deuda»: al
+    llegar datos reales se descuenta de ellos, así que la suma enviada es exactamente la
+    real (sin deriva). Si el dedo se paró de verdad (fin de toque o SETTLE s sin datos), la
+    deuda se devuelve con suavidad. Con `pred` apagado, todo es idéntico a 0.50.
+    Inercia (opcional): al soltar el dedo, desliza con fricción como un touchpad."""
 
     TICK = 0.005          # 200 Hz
     MIN_BUF, MAX_BUF, DEFAULT_BUF = 0.010, 0.120, 0.030
     MAX_LAG = 0.150
+    VEL_WIN = 0.20        # ventana de la velocidad
+    VEL_ALPHA = 0.5       # EMA de la velocidad
+    PRED_MAX = 0.150      # extrapolación máxima tras vaciarse la cola
+    PRED_TAU = 0.090      # decaimiento de la velocidad predicha
+    PRED_MIN_SPEED = 30.0 # px/s; por debajo no se predice
+    SETTLE = 0.35         # sin datos tanto tiempo: el dedo se paró, se devuelve la deuda
+    RETURN_TIME = 0.06    # la devolución se reparte en ~60 ms
+    INERCIA = {"poca": 0.10, "media": 0.20, "mucha": 0.35}  # constante de fricción (s)
+    GLIDE_MAX = 1.5
+    GLIDE_STOP = 15.0     # px/s
 
     def __init__(self, dispatch=None, clock=None) -> None:
         self.on = True
+        self.pred = True
+        self.inercia = None  # None o "poca"/"media"/"mucha"
         self.buffer = self.DEFAULT_BUF
         self._dispatch = dispatch
         self._clock = clock or time.perf_counter
@@ -288,8 +309,26 @@ class Continuo:
         self._sec_start = self._clock()
         self._stats = {"pasos_s": 0, "cola_max_ms": 0.0}
         self._qmax = 0.0
+        # 0.51
+        self._vhist = collections.deque()
+        self._vx = self._vy = 0.0
+        self._empty_at = None
+        self._fx = self._fy = 0.0     # sub-píxeles de lo predicho
+        self._dbx = self._dby = 0.0   # deuda: predicho y aún no cubierto por datos reales
+        self._returning = False
+        self._ended = False
+        self._real_x = self._real_y = 0.0
+        self._out_x = self._out_y = 0.0
+        self._glide = None  # (vx, vy, t0, tau)
+        self._gfx = self._gfy = 0.0
+        self._glide_x = self._glide_y = 0.0
+        self._pred_px = 0.0
+        self._errs: list[float] = []
+        self._stats2 = {"predichos_px_s": 0, "error_medio_px": 0.0, "error_max_px": 0.0}
 
     def _send(self, dx: int, dy: int) -> None:
+        self._out_x += dx
+        self._out_y += dy
         if self._dispatch is not None:
             self._dispatch(dx, dy)
             return
@@ -302,12 +341,59 @@ class Continuo:
             self.flush()
         return self.on
 
+    def set_pred(self, on: bool) -> bool:
+        with self._cv:
+            self.pred = bool(on)
+            if not self.pred:
+                self._settle_debt()
+        return self.pred
+
+    def set_inercia(self, level) -> str | None:
+        with self._cv:
+            self.inercia = level if level in self.INERCIA else None
+            if self.inercia is None:
+                self._glide = None
+        return self.inercia
+
     def pending(self) -> tuple[float, float]:
         return self._px, self._py
+
+    def velocity(self) -> tuple[float, float]:
+        return self._vx, self._vy
+
+    def drift(self) -> float:
+        """Lo enviado + lo pendiente - deuda frente a la suma real (sin deslizamiento)."""
+        ex = self._out_x - self._glide_x + self._px - self._dbx - self._real_x
+        ey = self._out_y - self._glide_y + self._py - self._dby - self._real_y
+        return math.hypot(ex, ey)
+
+    def _note_err(self, e: float) -> None:
+        self._errs.append(e)
+        if len(self._errs) > 200:
+            del self._errs[:100]
+
+    def _settle_debt(self) -> None:
+        """Devuelve lo predicho de más (el dedo se paró). Dentro de _cv."""
+        if self._dbx or self._dby:
+            self._note_err(math.hypot(self._dbx, self._dby))
+            self._px -= self._dbx
+            self._py -= self._dby
+            self._dbx = self._dby = 0.0
+            self._returning = abs(self._px) + abs(self._py) >= 0.5
+        self._fx = self._fy = 0.0
 
     def push(self, dx: int, dy: int, now: float | None = None, start: bool = True) -> None:
         now = self._clock() if now is None else now
         with self._cv:
+            # tocar de nuevo cancela la inercia; lo que llega justo tras el fin (la red va
+            # detrás del aviso) se suma sin cancelarla
+            if self._glide is not None and now - self._glide[2] < 0.10:
+                pass
+            else:
+                self._glide = None
+                self._ended = False
+            self._real_x += dx
+            self._real_y += dy
             if self._last_in is not None:
                 gap = now - self._last_in
                 if gap > self.buffer * 1.2 and gap < 0.5:
@@ -316,6 +402,19 @@ class Continuo:
                     self.buffer = max(self.MIN_BUF, self.buffer * 0.995)
             else:
                 self._hist.clear()
+            # 0.51: velocidad del dedo (px/s) en ventana corta + EMA
+            if self._last_in is None or now - self._last_in > 0.3:
+                self._vhist.clear()
+                self._vx = self._vy = 0.0
+            self._vhist.append((now, dx, dy))
+            while self._vhist and now - self._vhist[0][0] > self.VEL_WIN:
+                self._vhist.popleft()
+            span = max(0.05, min(self.VEL_WIN, now - self._vhist[0][0] + 1 / 60))
+            ivx = sum(v[1] for v in self._vhist) / span
+            ivy = sum(v[2] for v in self._vhist) / span
+            a = self.VEL_ALPHA
+            self._vx = self._vx * (1 - a) + ivx * a
+            self._vy = self._vy * (1 - a) + ivy * a
             self._last_in = now
             self._hist.append((now, abs(dx) + abs(dy)))
             while self._hist and now - self._hist[0][0] > 0.5:
@@ -323,12 +422,102 @@ class Continuo:
             self._rate = sum(m for _, m in self._hist) / 0.5
             if abs(self._px) + abs(self._py) < 0.5:
                 self._last_tick = now  # arranca de cero, sin «deuda» de tiempo
-            self._px += dx
-            self._py += dy
+            # 0.51: lo real descuenta lo ya predicho (contabilidad exacta)
+            if self._dbx or self._dby:
+                ex = max(0.0, abs(self._dbx) - abs(dx)) if (self._dbx > 0) == (dx > 0) else abs(self._dbx)
+                ey = max(0.0, abs(self._dby) - abs(dy)) if (self._dby > 0) == (dy > 0) else abs(self._dby)
+                self._note_err(math.hypot(ex, ey))
+            self._px += dx - self._dbx
+            self._py += dy - self._dby
+            self._dbx = self._dby = 0.0
+            self._fx = self._fy = 0.0
+            self._empty_at = None
+            self._returning = False
             if start and (self._thread is None or not self._thread.is_alive()):
                 self._thread = threading.Thread(target=self._run, name="lazoo-continuo", daemon=True)
                 self._thread.start()
             self._cv.notify()
+
+    def touch_end(self, now: float | None = None, start: bool = True) -> None:
+        """0.51: el móvil avisa de que se levantó el dedo."""
+        now = self._clock() if now is None else now
+        with self._cv:
+            self._ended = True
+            self._settle_debt()
+            sp = math.hypot(self._vx, self._vy)
+            recent = self._last_in is not None and now - self._last_in < 0.12
+            if self.on and self.inercia and recent and sp > 60:
+                self._glide = (self._vx, self._vy, now, self.INERCIA[self.inercia])
+                self._gfx = self._gfy = 0.0
+                self._last_tick = now if self._last_tick is None else self._last_tick
+                if start and (self._thread is None or not self._thread.is_alive()):
+                    self._thread = threading.Thread(target=self._run, name="lazoo-continuo", daemon=True)
+                    self._thread.start()
+            self._cv.notify()
+
+    def cancel_glide(self) -> None:
+        with self._cv:
+            self._glide = None
+
+    def _wants(self, now: float) -> bool:
+        if abs(self._px) + abs(self._py) >= 0.5 or self._glide is not None:
+            return True
+        if self._dbx or self._dby:
+            return True  # hay que vigilar SETTLE
+        return self.pred and self._last_in is not None and not self._ended and now - self._last_in < self.PRED_MAX + 0.25
+
+    def _roll_stats(self, now: float) -> None:
+        if now - self._sec_start >= 1.0:
+            el = now - self._sec_start
+            errs = self._errs
+            self._stats = {"pasos_s": round(self._steps / el), "cola_max_ms": round(self._qmax, 1)}
+            self._stats2 = {"predichos_px_s": round(self._pred_px / el),
+                            "error_medio_px": round(sum(errs) / len(errs), 1) if errs else 0.0,
+                            "error_max_px": round(max(errs), 1) if errs else 0.0}
+            self._errs = []
+            self._steps, self._qmax, self._sec_start, self._pred_px = 0, 0.0, now, 0.0
+
+    def _extra(self, now: float) -> tuple[int, int, bool]:
+        """0.51: paso predicho o de inercia con la cola vacía. Dentro de _cv."""
+        dt = min(0.03, max(0.0, now - (self._last_tick if self._last_tick is not None else now)) or self.TICK)
+        self._last_tick = now
+        if self._glide is not None:
+            gvx, gvy, t0, tau = self._glide
+            f = math.exp(-(now - t0) / tau)
+            if now - t0 > self.GLIDE_MAX or math.hypot(gvx, gvy) * f < self.GLIDE_STOP:
+                self._glide = None
+                return 0, 0, False
+            self._gfx += gvx * f * dt
+            self._gfy += gvy * f * dt
+            ix, iy = int(self._gfx), int(self._gfy)
+            self._gfx -= ix
+            self._gfy -= iy
+            self._glide_x += ix
+            self._glide_y += iy
+            return ix, iy, True
+        if (self._dbx or self._dby) and self._last_in is not None and now - self._last_in > self.SETTLE:
+            self._settle_debt()
+            return 0, 0, False
+        if not self.pred or self._ended or self._last_in is None:
+            return 0, 0, False
+        if self._empty_at is None:
+            self._empty_at = now
+        t = now - self._empty_at
+        if t > self.PRED_MAX or now - self._last_in > self.PRED_MAX + 0.25:
+            return 0, 0, False
+        sp = math.hypot(self._vx, self._vy)
+        if sp < self.PRED_MIN_SPEED:
+            return 0, 0, False
+        f = math.exp(-t / self.PRED_TAU)
+        self._fx += self._vx * f * dt
+        self._fy += self._vy * f * dt
+        ix, iy = int(self._fx), int(self._fy)
+        self._fx -= ix
+        self._fy -= iy
+        self._dbx += ix
+        self._dby += iy
+        self._pred_px += abs(ix) + abs(iy)
+        return ix, iy, True
 
     def tick(self, now: float | None = None) -> tuple[int, int]:
         """Suelta un paso. Devuelve lo enviado (enteros)."""
@@ -337,41 +526,54 @@ class Continuo:
             px, py = self._px, self._py
             mag = abs(px) + abs(py)
             if mag < 0.5:
-                return 0, 0
-            dt = max(0.0, now - (self._last_tick if self._last_tick is not None else now)) or self.TICK
-            self._last_tick = now
-            buf = self.buffer
-            # tope: si a este ritmo la cola equivale a más de MAX_LAG, vaciar más deprisa
-            if self._rate > 0 and mag / self._rate > self.MAX_LAG:
-                buf = min(buf, self.TICK)
-            frac = min(1.0, dt / buf) if buf > 0 else 1.0
-            idle = self._last_in is None or now - self._last_in > 0.25
-            if idle or mag * frac < 1.0 and mag <= 2:
-                frac = 1.0
-            sx, sy = px * frac, py * frac
-            ix, iy = int(round(sx)), int(round(sy))
-            if frac >= 1.0:
-                ix, iy = int(round(px)), int(round(py))
-            if ix == 0 and iy == 0:
-                # avanza al menos un píxel en el eje más largo, para no estancarse
-                if abs(px) >= abs(py):
-                    ix = 1 if px > 0 else -1
-                else:
-                    iy = 1 if py > 0 else -1
-            self._px -= ix
-            self._py -= iy
-            if self._rate > 0:
-                self._qmax = max(self._qmax, (abs(self._px) + abs(self._py)) / self._rate * 1000)
-            self._steps += 1
-            if now - self._sec_start >= 1.0:
-                self._stats = {"pasos_s": round(self._steps / (now - self._sec_start)), "cola_max_ms": round(self._qmax, 1)}
-                self._steps, self._qmax, self._sec_start = 0, 0.0, now
+                ix, iy, extra = self._extra(now)
+                if extra:
+                    self._steps += 1
+                self._roll_stats(now)
+                if not (ix or iy):
+                    return 0, 0
+            else:
+                self._empty_at = None
+                dt = max(0.0, now - (self._last_tick if self._last_tick is not None else now)) or self.TICK
+                self._last_tick = now
+                buf = self.buffer
+                # tope: si a este ritmo la cola equivale a más de MAX_LAG, vaciar más deprisa
+                if self._rate > 0 and mag / self._rate > self.MAX_LAG:
+                    buf = min(buf, self.TICK)
+                if self._returning:
+                    buf = self.RETURN_TIME
+                frac = min(1.0, dt / buf) if buf > 0 else 1.0
+                idle = self._last_in is None or now - self._last_in > 0.25
+                if (idle and not self._returning) or mag * frac < 1.0 and mag <= 2:
+                    frac = 1.0
+                sx, sy = px * frac, py * frac
+                ix, iy = int(round(sx)), int(round(sy))
+                if frac >= 1.0:
+                    ix, iy = int(round(px)), int(round(py))
+                if ix == 0 and iy == 0:
+                    # avanza al menos un píxel en el eje más largo, para no estancarse
+                    if abs(px) >= abs(py):
+                        ix = 1 if px > 0 else -1
+                    else:
+                        iy = 1 if py > 0 else -1
+                self._px -= ix
+                self._py -= iy
+                if abs(self._px) + abs(self._py) < 0.5:
+                    self._returning = False
+                if self._rate > 0:
+                    self._qmax = max(self._qmax, (abs(self._px) + abs(self._py)) / self._rate * 1000)
+                self._steps += 1
+                self._roll_stats(now)
         if ix or iy:
             self._send(ix, iy)
         return ix, iy
 
     def flush(self) -> None:
+        """Clic, arrastre y rueda: aplica lo pendiente real, sin predicción ni inercia."""
         with self._cv:
+            self._glide = None
+            self._settle_debt()
+            self._returning = False
             ix, iy = int(round(self._px)), int(round(self._py))
             self._px -= ix
             self._py -= iy
@@ -381,16 +583,20 @@ class Continuo:
     def status(self) -> dict:
         now = self._clock()
         st = dict(self._stats)
+        st2 = dict(self._stats2)
         if now - self._sec_start > 2.0:
             st = {"pasos_s": 0, "cola_max_ms": 0.0}
-        return {"on": self.on, "colchon_ms": round(self.buffer * 1000, 1), **st}
+            st2 = {"predichos_px_s": 0, "error_medio_px": 0.0, "error_max_px": 0.0}
+        return {"on": self.on, "colchon_ms": round(self.buffer * 1000, 1), **st,
+                "prediccion": self.pred, "inercia": self.inercia, **st2,
+                "deriva_px": round(self.drift(), 2)}
 
     def _run(self) -> None:
         hi = False
         try:
             while True:
                 with self._cv:
-                    while abs(self._px) + abs(self._py) < 0.5:
+                    while not self._wants(self._clock()):
                         if hi:
                             _hires(False)
                             hi = False
@@ -426,6 +632,19 @@ CONTINUO = Continuo()
 
 def set_continuo(on) -> dict:
     return {"continuo": CONTINUO.set(bool(on))}
+
+
+def set_prediccion(on) -> dict:
+    return {"prediccion": CONTINUO.set_pred(bool(on))}
+
+
+def set_inercia(level) -> dict:
+    return {"inercia": CONTINUO.set_inercia(level if isinstance(level, str) else None)}
+
+
+def touch_end() -> dict:
+    CONTINUO.touch_end()
+    return {"ok": True}
 
 
 def set_smoothing(on) -> dict:

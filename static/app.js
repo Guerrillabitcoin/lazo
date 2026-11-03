@@ -1318,6 +1318,10 @@ function diagSample(rtt, net, proc, pc, vig) {
     buf: diag.pc && diag.pc.continuo ? diag.pc.continuo.colchon_ms : null,
     steps: diag.pc && diag.pc.continuo ? diag.pc.continuo.pasos_s : null,
     qmax: diag.pc && diag.pc.continuo ? diag.pc.continuo.cola_max_ms : null,
+    predPx: diag.pc && diag.pc.continuo ? diag.pc.continuo.predichos_px_s : null,
+    errMed: diag.pc && diag.pc.continuo ? diag.pc.continuo.error_medio_px : null,
+    errMax: diag.pc && diag.pc.continuo ? diag.pc.continuo.error_max_px : null,
+    drift: diag.pc && diag.pc.continuo ? diag.pc.continuo.deriva_px : null,
     vig: vig && vig.available ? (vig.enabled ? (vig.installed ? "encendido y activo" : "encendido, en espera") : "apagado") : "no disponible",
     ws: !!(pointerSocket && pointerSocket.readyState === 1) });
   while (diag.hist.length > DIAG_KEEP) diag.hist.shift();
@@ -1358,6 +1362,11 @@ function diagSummary(hist, secs, meta = {}) {
     line("Pasos aplicados/s en el PC", "steps"),
     line("Cola pendiente máx.", "qmax", 0, " ms"),
     line("Fusionados en el móvil/s", "merged"),
+    `Predicción de movimiento: ${last.cont ? (last.cont.prediccion ? "sí" : "no") : "?"} · Inercia al soltar: ${last.cont ? (last.cont.inercia || "no") : "?"}`,
+    line("Píxeles predichos/s", "predPx"),
+    line("Error de predicción medio", "errMed", 1, " px"),
+    line("Error de predicción máx.", "errMax", 1, " px"),
+    `Deriva acumulada: ${last.drift ?? "—"} px (debe ser ~0)`,
     "",
     "Por segundo (móvil/s, PC/s, eco ms, huecos>100):",
     rows.map((r) => `${r.fps}/${fmt(r.pcFps)}/${fmt(r.rtt)}/${r.g100 ?? "—"}`).join("  "),
@@ -1402,7 +1411,9 @@ window.setInterval(() => {
         `Entre uno y otro: ${fmt(pc.median_ms, 0)} ms normal, ${fmt(pc.p95_ms, 0)} ms en los peores\n` +
         `Huecos: ${pc.gaps50} >50 ms · ${pc.gaps100} >100 ms · ${pc.gaps250} >250 ms\n` +
         `Ráfagas: ${Math.round(pc.burst * 100)} % pegados, hasta ${pc.burst_max} juntos\n` +
-        (diag.pc.continuo ? `Movimiento continuo: ${diag.pc.continuo.on ? "sí" : "no"} · colchón ${fmt(diag.pc.continuo.colchon_ms, 0)} ms · ${diag.pc.continuo.pasos_s} pasos/s · cola máx ${fmt(diag.pc.continuo.cola_max_ms, 0)} ms\n` : "")
+        (diag.pc.continuo ? `Movimiento continuo: ${diag.pc.continuo.on ? "sí" : "no"} · colchón ${fmt(diag.pc.continuo.colchon_ms, 0)} ms · ${diag.pc.continuo.pasos_s} pasos/s · cola máx ${fmt(diag.pc.continuo.cola_max_ms, 0)} ms\n` +
+          `Predicción de movimiento: ${diag.pc.continuo.prediccion ? "sí" : "no"} · Inercia al soltar: ${diag.pc.continuo.inercia || "no"}\n` +
+          `Píxeles predichos/s: ${diag.pc.continuo.predichos_px_s ?? "—"} · Error de predicción: ${fmt(diag.pc.continuo.error_medio_px, 1)} px medio, ${fmt(diag.pc.continuo.error_max_px, 1)} px máx · Deriva acumulada: ${diag.pc.continuo.deriva_px ?? "—"} px\n` : "")
       : "Sin datos del PC todavía\n") +
     `\nECO (ida y vuelta)\n` +
     `Total: ${fmt(rtt, 0)} ms = red ${fmt(net, 0)} ms + PC ${fmt(proc, 2)} ms\n` +
@@ -1444,7 +1455,7 @@ function diagFreeze(on) {
 function diagMeta() {
   let aim = "normal";
   try { aim = localStorage.getItem("lazo-aim") || "normal"; } catch (_e) { /* nada */ }
-  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.50", aim };
+  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.51", aim };
 }
 if (diagOn) {
   try { diagOn.checked = localStorage.getItem("lazo-diag") === "1"; } catch (_e) { /* nada */ }
@@ -1653,6 +1664,8 @@ function endPointer(event) {
   scrollLive = false;
   scrollAcc = 0;
   if (gesture === "tap") api("/api/click", { button: "left" }).catch((err) => say(err.message));
+  // 0.51: aviso de fin de toque (para la predicción y la inercia), tras soltar lo pendiente
+  if (gesture === "move") window.setTimeout(() => api("/api/fin", {}).catch(() => {}), 60);
   gesture = "tap";
   travel = 0;
   const finger = document.querySelector("#finger");
@@ -2987,4 +3000,31 @@ if (contBox) {
     pushCont();
   });
   if (!contBox.checked) window.setTimeout(pushCont, 1500);
+}
+
+/* 0.51: «Predicción de movimiento» (activada por defecto) e «Inercia al soltar» (apagada). */
+const predBox = document.querySelector("#aim-pred");
+if (predBox) {
+  predBox.checked = localStorage.getItem("lazo-pred") !== "0";
+  const pushPred = () => api("/api/prediccion", { on: predBox.checked }).catch(() => {});
+  predBox.addEventListener("change", () => {
+    localStorage.setItem("lazo-pred", predBox.checked ? "1" : "0");
+    pushPred();
+  });
+  window.setTimeout(pushPred, 1500);
+}
+const inerBox = document.querySelector("#aim-inercia");
+const inerLvl = document.querySelector("#aim-inercia-nivel");
+if (inerBox && inerLvl) {
+  const saved = localStorage.getItem("lazo-inercia") || "";
+  inerBox.checked = ["poca", "media", "mucha"].includes(saved);
+  if (inerBox.checked) inerLvl.value = saved;
+  const pushIner = () => api("/api/inercia", { nivel: inerBox.checked ? inerLvl.value : null }).catch(() => {});
+  const save = () => {
+    localStorage.setItem("lazo-inercia", inerBox.checked ? inerLvl.value : "");
+    pushIner();
+  };
+  inerBox.addEventListener("change", save);
+  inerLvl.addEventListener("change", save);
+  window.setTimeout(pushIner, 1500);
 }
