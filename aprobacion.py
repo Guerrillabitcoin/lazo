@@ -97,6 +97,7 @@ class Approvals:
         self.auto = False
         self.on_new: list[Callable[[str, dict], None]] = []
         self.on_change: list[Callable[[], None]] = []  # aprobado, expulsado u olvidado
+        self.on_decide: list[Callable[[str, bool], None]] = []  # 0.57: registro de conexión
 
     def _changed(self) -> None:
         for hook in self.on_change:
@@ -185,6 +186,11 @@ class Approvals:
             if ok and not row.get("fecha"):
                 row["fecha"] = time.strftime("%Y-%m-%d %H:%M")
         print(f"  {'Aceptado' if ok else 'Rechazado'}: {row['label']} ({row['ip']})", flush=True)
+        for hook in self.on_decide:
+            try:
+                hook(who, ok)
+            except Exception:
+                pass
         if ok:
             self._changed()
         return True

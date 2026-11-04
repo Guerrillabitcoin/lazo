@@ -24,6 +24,46 @@ const deviceId = localStorage.getItem("lazo-id") || (() => {
   return fresh;
 })();
 
+/* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
+   versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
+const PAGE_VERSION = "0.57";
+const PAGE_PROTO = 2;
+const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
+function connStep(phase, error) {
+  conn.phase = phase;
+  if (error) conn.error = String(error);
+  const t = new Date().toTimeString().slice(0, 8);
+  conn.log.push(`${t} ${phase}${error ? " · " + error : ""}`);
+  if (conn.log.length > 40) conn.log.shift();
+}
+function apkVersion() {
+  try {
+    if (window.LaZooApp && typeof window.LaZooApp.version === "function") return window.LaZooApp.version() || "?";
+    if (window.LaZooApp) return "anterior a 0.57";
+  } catch (_err) { /* APK vieja */ }
+  return "no (navegador)";
+}
+function connDiagText() {
+  return [
+    `LaZoo móvil · página ${PAGE_VERSION} (protocolo ${PAGE_PROTO}) · PC ${conn.pc || "?"} (protocolo ${conn.proto || "?"}) · APK ${apkVersion()}`,
+    `Fase: ${conn.phase} · último error: ${conn.error || "ninguno"}`,
+    `Id ${deviceId.slice(0, 4)} · clave guardada: ${localStorage.getItem("lazo-key") ? "sí" : "no"} · emparejando: ${pairing ? "sí" : "no"} · ${location.protocol}//${location.host}`,
+    `Navegador: ${navigator.userAgent}`,
+    "--- pasos ---",
+    ...conn.log,
+  ].join("\n");
+}
+function versionProblem() {
+  if (!conn.proto) return "";
+  if (conn.proto !== PAGE_PROTO) return `El PC (LaZoo ${conn.pc}) y esta app no se entienden: actualiza los dos a la misma versión.`;
+  return "";
+}
+function forgetKey() {
+  localStorage.removeItem("lazo-key");
+  wireKey = null;
+  authKey = null;
+}
+
 function setMasterKey(text) {
   const master = b64urlToBytes(text);
   wireKey = deriveKey(master, "lazo/seal/1");
@@ -45,9 +85,13 @@ function signHeaders(method, path, length) {
 async function syncClock() {
   try {
     const before = Date.now();
-    const data = await fetch("/api/time").then((res) => res.json());
+    const data = await fetch("/api/time", { cache: "no-store" }).then((res) => res.json());
     clockOffset = data.t - (before + Date.now()) / 2;
-  } catch (_err) {}
+    conn.pc = data.version || "anterior a 0.57";
+    conn.proto = data.proto || PAGE_PROTO;  // 0.54-0.56 no lo decían, pero ya usaban el saludo
+  } catch (_err) {
+    connStep("hora del PC", "sin respuesta");
+  }
 }
 
 function bodyLength(body) {
@@ -155,7 +199,13 @@ async function api(path, body, method = "POST") {
     // 0.56: solo vuelve al PIN si la petición iba firmada con la clave actual y no hay un
     // emparejamiento en marcha. Una respuesta vieja (sin clave, o de antes de recibirla) no
     // puede echar al móvil justo después de que lo acepten en el PC.
-    if (sentWith && sentWith === authKey && !pairing) showPin();
+    // 0.57: si el PC dice que lo expulsó u olvidó, se borra la clave vieja (sin bucles) y se
+    // vuelve al QR/PIN con el motivo.
+    if (sentWith && sentWith === authKey && !pairing) {
+      connStep("petición firmada rechazada", data.error || "401");
+      forgetKey();
+      showPin(data.error || "El PC ya no reconoce este móvil: vuelve a emparejar");
+    }
     throw new Error(data.error || "PIN");
   }
   if (!res.ok) throw new Error(data.error || "No se pudo");
@@ -171,8 +221,19 @@ function setLink(mode, text) {
   linkLabel.textContent = text || (mode === "on" ? (wireKey ? "Conectado · cifrado" : "Conectado") : "Sin conexión");
 }
 
-function showPin() {
-  const input = document.querySelector("#pin-input");
+function showPin(reason) {
+  const msg = document.querySelector("#pin-msg");
+  if (msg) {
+    const extra = versionProblem();
+    msg.textContent = [reason || "", extra].filter(Boolean).join(" ");
+    msg.hidden = !msg.textContent;
+  }
+  if (reason) say(reason);
+  connStep("pantalla de emparejamiento", reason || "");
+  window.clearInterval(waitTimer);
+  waitPanel.hidden = true;
+  waitNotice(false);
+  stopTimers();
   pinPanel.hidden = false;
   app.hidden = true;
   dock.hidden = true;
@@ -215,9 +276,9 @@ function stopTimers() {
   window.clearInterval(poll);
   window.clearInterval(clipsTimer);
   window.clearInterval(caretTimer);
-  if (pointerSocket) {
-    try { pointerSocket.close(); } catch (_err) { /* ya cerrado */ }
-  }
+  try {  // 0.57: try también por showPin() al arrancar, antes de declarar pointerSocket
+    if (pointerSocket) pointerSocket.close();
+  } catch (_err) { /* ya cerrado o aún sin declarar */ }
 }
 
 /* 0.54: mientras espera, el móvil se ve DESCONECTADO y avisa arriba (y en la barra de
@@ -275,7 +336,8 @@ function showWait(state) {
   document.querySelector("#wait-title").textContent = rejected ? "El PC rechazó este dispositivo" : "Esperando aprobación en el PC…";
   document.querySelector("#wait-text").textContent = rejected
     ? "Puedes volver a intentarlo dentro de 5 minutos. Si fue un error, pide que lo acepten en el PC."
-    : `En el PC sale un aviso para aceptar este móvil: ${waitWhere}.${pairing && pairing.fp ? ` Comprueba que la huella es ${pairing.fp}.` : ""} La clave de conexión solo llega al móvil cuando lo aceptas. Si nadie responde en 60 s, se rechaza.`;
+    : `En el PC sale un aviso para aceptar este móvil: ${waitWhere}.${pairing && pairing.fp ? ` Comprueba que la huella es ${pairing.fp}.` : ""} La clave de conexión solo llega al móvil cuando lo aceptas. Si nadie responde en 60 s, se rechaza.${conn.error && conn.phase.startsWith("espera") ? ` Último problema: ${conn.error}.` : ""}`;
+  connStep(rejected ? "rechazado por el PC" : "esperando aprobación");
   waitPanel.dataset.state = rejected ? "rechazado" : "pendiente";
   setLink("off", rejected ? "Desconectado · rechazado por el PC" : WAIT_LABEL);
   say(rejected ? "El PC dijo que no" : "Acéptalo en el PC");
@@ -305,15 +367,44 @@ async function pairStart(mode, secretText) {
   const secret = mode === "qr" ? b64urlToBytes(secretText) : new TextEncoder().encode("pin:" + secretText);
   const priv = crypto.getRandomValues(new Uint8Array(32));
   const pub = x25519(priv, X_BASE);
-  const hello = await pairPost("/api/pair/hello", { id: deviceId, mode, pub: bytesToB64url(pub) });
-  if (!hello.res.ok) throw new Error(hello.data.error || "El PC no contesta al emparejar");
+  connStep(`saludo (${mode})`);
+  let hello;
+  try {
+    hello = await pairPost("/api/pair/hello", { id: deviceId, mode, pub: bytesToB64url(pub) });
+  } catch (_err) {
+    connStep("saludo", "sin respuesta del PC");
+    throw new Error("Paso 1 (saludo): el PC no contesta. ¿LaZoo abierto y misma Wi-Fi?");
+  }
+  if (hello.res.status === 404) {
+    connStep("saludo", "404");
+    throw new Error("El PC tiene un LaZoo antiguo (antes de 0.54): actualízalo");
+  }
+  if (!hello.res.ok) {
+    connStep("saludo", hello.data.error || hello.res.status);
+    throw new Error("Paso 1 (saludo): " + (hello.data.error || "el PC no contesta al emparejar"));
+  }
+  if (hello.data.version) { conn.pc = hello.data.version; conn.proto = hello.data.proto || PAGE_PROTO; }
+  if (versionProblem()) throw new Error(versionProblem());
   const pcPub = b64urlToBytes(hello.data.pub || "");
   const shared = x25519(priv, pcPub);
   const hk = pairHandshakeKey(secret, mode, deviceId, pub, pcPub, shared);
   const proof = pairProof(hk, "movil");
-  const claim = await pairPost("/api/pair/claim", { sid: hello.data.sid, proof });
-  if (!claim.res.ok) throw new Error(claim.data.error || (mode === "pin" ? "PIN incorrecto" : "Ese QR ya no vale: escanea el de ahora"));
-  if (claim.data.proof !== pairProof(hk, "pc")) throw new Error("Ese PC no es el del QR/PIN. No sigo.");
+  connStep("prueba QR/PIN");
+  let claim;
+  try {
+    claim = await pairPost("/api/pair/claim", { sid: hello.data.sid, proof });
+  } catch (_err) {
+    connStep("prueba QR/PIN", "sin respuesta del PC");
+    throw new Error("Paso 2 (QR/PIN): el PC no contesta");
+  }
+  if (!claim.res.ok) {
+    connStep("prueba QR/PIN", claim.data.error || claim.res.status);
+    throw new Error(claim.data.error || (mode === "pin" ? "PIN incorrecto" : "Ese QR ya no vale: escanea el de ahora"));
+  }
+  if (claim.data.proof !== pairProof(hk, "pc")) {
+    connStep("prueba QR/PIN", "el PC no demostró conocer el QR/PIN");
+    throw new Error("Ese PC no es el del QR/PIN. No sigo.");
+  }
   if (claim.data.where) waitWhere = claim.data.where;
   pairing = { sid: hello.data.sid, proof, hk, fp: claim.data.fp || "" };
   return pairWait();
@@ -323,6 +414,7 @@ async function pairStart(mode, secretText) {
    cruzaban: la primera recibía la clave y la segunda (ya sin sesión en el PC) devolvía 401,
    y el móvil volvía al PIN justo después de entrar («hace un amago de entrar pero no»). */
 let pairInFlight = null;
+let pairFail = "";
 
 function pairWait() {
   if (!pairInFlight) pairInFlight = pairWaitOnce().finally(() => { pairInFlight = null; });
@@ -336,12 +428,18 @@ async function pairWaitOnce() {
   try {
     got = await pairPost("/api/pair/wait", { sid: mine.sid, proof: mine.proof });
   } catch (_err) {
+    connStep("espera de la clave", "sin respuesta del PC (corte o Wi-Fi)");
     return "error";
   }
   if (pairing !== mine) return authKey ? "aprobado" : "pendiente";  // ya lo resolvió otra consulta
   if (got.res.status === 401) {
     pairing = null;
+    if (!authKey) pairFail = got.data.error || "La espera caducó: empareja otra vez";
     return authKey ? "aprobado" : "pin";
+  }
+  if (!got.res.ok) {
+    connStep("espera de la clave", got.data.error || `error ${got.res.status} del PC`);
+    return "error";
   }
   if (got.data.state === "aprobado" && got.data.box) {
     let key;
@@ -350,9 +448,11 @@ async function pairWaitOnce() {
       if (!key) throw new Error("vacía");
       b64urlToBytes(key);
     } catch (_err) {
+      connStep("abrir la clave", "la clave llegó dañada");
       return "error";
     }
     pairing = null;
+    connStep("clave recibida");
     setMasterKey(key);
     localStorage.setItem("lazo-key", key);
     await syncClock();
@@ -368,7 +468,8 @@ function showPaired(state) {
     say("Aceptado en el PC. Conectado y cifrado");
     enterApp();
   } else if (state === "pin") {
-    showPin();
+    showPin(pairFail);
+    pairFail = "";
   } else {
     showWait(state === "rechazado" ? "rechazado" : "pendiente");
   }
@@ -377,7 +478,13 @@ function showPaired(state) {
 async function approvalState() {
   try {
     const res = await lzFetch("/api/aprobacion", { method: "GET", headers: {} });
-    if (res.status === 401) return "pin";
+    if (res.status === 401) {
+      const why = await res.json().catch(() => ({}));
+      pairFail = why.error || "El PC ya no reconoce este móvil: vuelve a emparejar";
+      connStep("aprobación", pairFail);
+      forgetKey();
+      return "pin";
+    }
     const data = await readBody(res);
     return data.state || "pendiente";
   } catch (_err) {
@@ -409,7 +516,10 @@ async function checkApproval() {
     window.clearInterval(waitTimer);
     waitPanel.hidden = true;
     waitNotice(false);
-    showPin();
+    showPin(pairFail);
+    pairFail = "";
+  } else if (state === "error") {
+    showWait("pendiente");  // repinta el texto con el último problema y sigue intentando
   } else if (state === "rechazado" || state === "pendiente") {
     waitPanel.hidden = false;
     showWait(state);
@@ -428,6 +538,8 @@ async function showApp() {
 document.querySelector("#wait-retry").addEventListener("click", checkApproval);
 
 function enterApp() {
+  connStep("conectado");
+  conn.error = "";
   window.clearInterval(waitTimer);
   window.clearInterval(poll);  // 0.56: entrar dos veces no duplica los temporizadores
   window.clearInterval(clipsTimer);
@@ -1074,8 +1186,7 @@ async function login() {
     say("Pidiendo permiso al PC…");
     showPaired(await pairStart("pin", pin));
   } catch (err) {
-    say(err.message || "Sin respuesta del PC");
-    setLink("off");
+    showPin(err.message || "Sin respuesta del PC");
   }
 }
 
@@ -1334,8 +1445,7 @@ if (fromQr && !(onThisPc && fromTray)) {
       enterApp();
       return;
     }
-    say(err.message || "Sin respuesta del PC");
-    showPin();
+    showPin(err.message || "Sin respuesta del PC");
   });
 } else if (onThisPc && fromTray && !authKey) {
   // Abierto desde el icono de la bandeja en este mismo PC: el PC se fía de sí mismo.
@@ -1355,18 +1465,17 @@ if (fromQr && !(onThisPc && fromTray)) {
       return;
     }
     if (res.status === 401 || !data.platform) {
-      localStorage.removeItem("lazo-key");
-      wireKey = null;
-      authKey = null;
-      say("Escanea el QR de nuevo");
-      showPin();
+      forgetKey();
+      showPin(data.error || (res.ok ? "Respuesta rara del PC: vuelve a emparejar" : "Escanea el QR de nuevo"));
       return;
     }
     showApp();
     say("Listo");
   }).catch(() => {
-    say("Sin respuesta del PC");
-    showPin();
+    // 0.57: sin red no se borra la clave (puede ser el PC apagado); se reintenta solo.
+    connStep("reconectar", "sin respuesta del PC");
+    showPin("Sin respuesta del PC. ¿LaZoo abierto y misma Wi-Fi? Reintento solo cada 5 s.");
+    retryBoot();
   });
 } else {
   say("Escanea el QR");
@@ -1374,6 +1483,27 @@ if (fromQr && !(onThisPc && fromTray)) {
 }
 
 document.querySelector("#pin-go").addEventListener("click", login);
+document.querySelectorAll(".conn-diag").forEach((button) => button.addEventListener("click", () => {
+  copyToPhone(connDiagText(), "Diagnóstico copiado: pégalo en el chat");
+}));
+
+/* 0.57: si al abrir no contestaba el PC y hay clave guardada, reintenta cada 5 s. */
+let bootRetry = 0;
+function retryBoot() {
+  window.clearTimeout(bootRetry);
+  bootRetry = window.setTimeout(async () => {
+    if (!authKey || pairing || pinPanel.hidden) return;
+    try {
+      await syncClock();
+      const res = await lzFetch("/api/status");
+      const data = await readBody(res).catch(() => ({}));
+      if (res.ok && data.platform) { enterApp(); say("Conectado otra vez"); return; }
+      if (res.status === 403 && (data.pending || data.rejected)) { showWait(data.rejected ? "rechazado" : "pendiente"); return; }
+      if (res.status === 401) { forgetKey(); showPin(data.error || "El PC ya no reconoce este móvil: vuelve a emparejar"); return; }
+    } catch (_err) { /* sigue sin red */ }
+    retryBoot();
+  }, 5000);
+}
 
 document.querySelectorAll("[data-cursor]").forEach((button) => {
   button.addEventListener("click", async () => {

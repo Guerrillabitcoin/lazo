@@ -664,3 +664,7 @@ button[data-cursor] { min-height: 44px; }
 }
 .top .lz-logo { height: 30px; }
 .lz-logo.grande { height: 46px; margin: 4px auto 14px; display: block; width: max-content; }
+
+/* 0.57 */
+.pin-msg { color: #e07a3d; margin: 4px 0; }
+.conn-diag { font-size: 13px; opacity: .85; }

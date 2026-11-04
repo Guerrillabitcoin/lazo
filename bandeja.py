@@ -418,10 +418,10 @@ class Tray:
         elif action == "reject":
             A.decide(str(data), False)
         elif action == "kick":
-            A.kick(str(data))
+            L.kick_device(str(data))
         elif action == "kickall":
             if self.ask("¿Expulsar a todos los dispositivos?\nTendrán que volver a entrar y que los aceptes en este PC.", "LaZoo: expulsar a todos"):
-                n = A.kick_all()
+                n = L.kick_everyone()
                 self.balloon("LaZoo", f"Expulsados: {n}")
             else:
                 action = "kickall-no"

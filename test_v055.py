@@ -31,7 +31,7 @@ class Archivos(unittest.TestCase):
             root = ET.parse(IMG / f"{name}.svg").getroot()
             self.assertTrue(root.tag.endswith("svg"), name)
             self.assertIn("viewBox", root.attrib)
-        self.assertIn("#ea0918", (IMG / "logo-desconectado.svg").read_text())  # 0.56: color medido
+        self.assertIn("#ea0918", (IMG / "logo-desconectado.svg").read_text())  # 0.57: color medido
         self.assertIn("#158941", (IMG / "logo-conectado.svg").read_text())
 
     def test_png(self):
@@ -84,7 +84,7 @@ class Web(unittest.TestCase):
         for page in (HTML, MESA):
             self.assertIn('class="lz-logo', page)
             self.assertIn('data-estado="desconectado"', page)
-            self.assertIn("/logo.js?v=0.56", page)
+            self.assertIn("/logo.js?v=0.57", page)
         self.assertIn('rel="manifest"', HTML)
         self.assertIn("data-dinamico", MESA)
 
@@ -106,14 +106,14 @@ class Web(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.56")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.56")
-        self.assertIn("<title>LaZoo 0.56</title>", HTML)
-        self.assertIn("0.56", MESA)
-        self.assertIn('android:versionName="0.56"', APK)
-        self.assertIn('android:versionCode="56"', APK)
-        self.assertIn("# LaZoo 0.56", (ROOT / "README.md").read_text(encoding="utf-8"))
-        self.assertIn("## Estado (0.56)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
+        self.assertEqual(lazo.VERSION, "0.57")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.57")
+        self.assertIn("<title>LaZoo 0.57</title>", HTML)
+        self.assertIn("0.57", MESA)
+        self.assertIn('android:versionName="0.57"', APK)
+        self.assertIn('android:versionCode="57"', APK)
+        self.assertIn("# LaZoo 0.57", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("## Estado (0.57)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

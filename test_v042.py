@@ -214,7 +214,12 @@ class HttpApproval(unittest.TestCase):
             lazo.Handler._loopback = real_loop
             self.assertEqual(_req(port, "POST", "/api/dispositivos/expulsar", json.dumps({"all": True}).encode(), local)[0], 200)
             lazo.Handler._loopback = lambda self: False
-            self.assertEqual(signed("GET", "/api/status")[0], 403)  # expulsado: pendiente otra vez
+            # 0.57: expulsado = 401 «kicked» (vuelve al QR/PIN), ya no se pone pendiente solo.
+            status, raw = signed("GET", "/api/status")
+            self.assertEqual(status, 401)
+            self.assertTrue(json.loads(raw)["kicked"])
+            lazo.KICKED.discard(phone)  # como si emparejara otra vez
+            self.assertEqual(signed("GET", "/api/status")[0], 403)
             lazo.Handler._loopback = real_loop
             _req(port, "POST", "/api/dispositivos/decidir", json.dumps({"id": phone, "ok": False}).encode(), local)
             lazo.Handler._loopback = lambda self: False

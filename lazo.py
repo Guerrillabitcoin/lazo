@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import json
 import os
 import re
@@ -33,7 +34,8 @@ import sobre
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.56"
+VERSION = "0.57"
+PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -272,6 +274,8 @@ def connection_info() -> dict:
                     for d in APPROVALS.listing() if d["state"] == "pendiente"],
         "recordar": STORE.enabled(),
         "approve_where": approve_where(),
+        "version": VERSION,
+        "diag": conn_diag(),
     }
 
 
@@ -282,15 +286,60 @@ def approve_where() -> str:
     return "en la consola donde corre LaZoo (S/N)"
 
 
+# 0.57: registro de conexión (sin claves, PIN, fichas ni pruebas): fase, id corto y resultado.
+CONN_LOG: "collections.deque[str]" = collections.deque(maxlen=60)
+
+
+def conn_log(text: str) -> None:
+    line = f"{time.strftime('%H:%M:%S')} {text}"
+    CONN_LOG.append(line)
+    try:  # una consola cp1252 (iniciar.bat) no debe tumbar el emparejamiento por un carácter
+        print(f"  [conexión] {text}", flush=True)
+    except Exception:
+        pass
+
+
+def conn_diag() -> str:
+    """Texto para «Copiar diagnóstico de conexión» del Panel."""
+    rows = APPROVALS.listing()
+    head = [f"LaZoo PC {VERSION} · protocolo {PROTO} · {sys.platform}",
+            f"Recordar dispositivos: {'sí' if STORE.enabled() else 'no'} · conectados: {PAIRING.phone_count()}",
+            "Dispositivos: " + (", ".join(f"{d['short']}={d['state']}" for d in rows) or "ninguno"),
+            "IPs: " + (", ".join(ip for _l, ip in lan_targets()) or "sin red"), "--- últimos pasos ---"]
+    return "\n".join(head + list(CONN_LOG))
+
+
+_DENY_SEEN: dict[str, float] = {}
+# 0.57: expulsados desde el PC. Su clave sigue siendo la del PC, así que antes volvían a pedir
+# permiso solos con cada sondeo; ahora reciben 401 «expulsado» y vuelven a emparejar (QR/PIN).
+KICKED: set[str] = set()
+
+
+def _deny_note(who: str, why: str) -> None:
+    """Una línea por móvil y motivo cada 30 s (p. ej. clave vieja tras «Olvidar todos»)."""
+    if why == "repetida":
+        return
+    key, now = f"{who[:4]}:{why}", time.time()
+    if now - _DENY_SEEN.get(key, 0) < 30:
+        return
+    if len(_DENY_SEEN) > 200:
+        _DENY_SEEN.clear()
+    _DENY_SEEN[key] = now
+    conn_log(f"{who[:4]} petición rechazada: {'clave vieja o de otro PC' if why == 'firma' else 'reloj distinto' if why == 'hora' else why}")
+
+
 def persist_devices() -> None:
-    """Con «Recordar dispositivos», guarda clave y aprobados tras cada cambio."""
+    """Con «Recordar dispositivos», guarda clave y aprobados tras cada cambio.
+
+    0.57: NUNCA lanza. En 0.54-0.56 un `ctypes.ArgumentError` de DPAPI salía de aquí dentro de
+    /api/pair/wait y el móvil aceptado se quedaba sin su clave (ver recordar._dpapi_fns)."""
     if APPROVALS.auto:
         return
     try:
         if STORE.enabled():
             STORE.save(PAIRING.key, APPROVALS.approved_rows())
-    except OSError:
-        print("  No pude guardar los dispositivos recordados.", flush=True)
+    except Exception as exc:
+        conn_log(f"no pude guardar los dispositivos recordados ({type(exc).__name__})")
 
 
 def set_remember(on: bool) -> dict:
@@ -302,11 +351,36 @@ def set_remember(on: bool) -> dict:
 def forget_all() -> dict:
     """«Olvidar todos»: borra clave y lista, clave nueva, fuera todas las sesiones."""
     count = APPROVALS.kick_all()
+    KICKED.clear()  # con la clave nueva, cualquier clave vieja ya da 401 «stale»
     STORE.forget()
     PAIRING.rekey()
     _QR_CACHE.clear()
+    conn_log(f"olvidar todos: {count} fuera, clave nueva")
     print(f"  Olvidados todos los dispositivos ({count}). Clave nueva: hay que volver a emparejar.", flush=True)
     return {"ok": True, "count": count, "recordar": STORE.enabled()}
+
+
+def kick_device(who: str) -> bool:
+    """Expulsa un móvil (Panel, bandeja o el propio móvil). 0.57: queda en KICKED hasta que
+    vuelva a emparejar, para que sepa que debe enseñar el QR/PIN en vez de reintentar."""
+    done = APPROVALS.kick(who)
+    if done:
+        KICKED.add(who)
+    PAIRING.phone_gone(who)
+    conn_log(f"{who[:4]} expulsado" if done else f"{who[:4]} expulsar: no estaba")
+    return done
+
+
+def kick_everyone() -> int:
+    KICKED.update(d["id"] for d in APPROVALS.listing() if d["state"] == "aprobado")
+    count = APPROVALS.kick_all()
+    PAIRING.forget_phones()
+    conn_log(f"expulsados todos ({count})")
+    return count
+
+
+def _log_decision(who: str, ok: bool) -> None:
+    conn_log(f"{who[:4]} {'aceptado' if ok else 'rechazado'} en el PC")
 
 
 def load_remembered() -> int:
@@ -314,13 +388,15 @@ def load_remembered() -> int:
         return 0
     try:
         saved = STORE.load()
-    except OSError:
+    except Exception as exc:
+        conn_log(f"no pude leer los dispositivos recordados ({type(exc).__name__})")
         saved = None
     if not saved:
         return 0
     key, rows = saved
     PAIRING.set_key(key)
     APPROVALS.preload(rows)
+    conn_log(f"recordados al arrancar: {len(rows)}")
     return len(rows)
 
 
@@ -502,8 +578,13 @@ class Handler(BaseHTTPRequestHandler):
             return False
         self.denied = PAIRING.verify(self.command, path, length, *got)
         if self.denied != "ok":
+            _deny_note(self._who(ws), self.denied)
             return False
         who = self._who(ws)
+        if who in KICKED:
+            self.denied = "expulsado"
+            _deny_note(who, "expulsado")
+            return False
         if not allow_pending:
             state = APPROVALS.check(who, self.headers.get("User-Agent", ""), self.client_address[0])
             if state != "ok":
@@ -536,10 +617,14 @@ class Handler(BaseHTTPRequestHandler):
             self._send(403, {"error": "Pendiente de aprobación", "pending": True})
         elif self.denied == "rechazado":
             self._send(403, {"error": "El PC rechazó este dispositivo", "rejected": True})
+        elif self.denied == "expulsado":
+            self._send(401, {"error": "El PC expulsó este móvil: vuelve a emparejar con el QR o el PIN", "kicked": True}, seal=False)
+        elif self.denied == "firma":
+            self._send(401, {"error": "El PC ya no reconoce la clave de este móvil (olvidado o PC reiniciado): vuelve a emparejar", "stale": True}, seal=False)
         elif self.denied == "hora":
             self._send(401, {"error": "El reloj del móvil no coincide con el del PC", "clock": True})
         else:
-            self._send(401, {"error": "Entra con el QR"})
+            self._send(401, {"error": "Entra con el QR"}, seal=False)
 
     def _send(self, code: int, payload: dict | None = None, body: bytes | None = None, content_type: str = "application/json", seal: bool = True) -> None:
         data = body if body is not None else json.dumps(payload or {}, ensure_ascii=False).encode()
@@ -635,7 +720,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, connection_info(), seal=False)
             return
         if path == "/api/time":
-            self._send(200, {"t": int(time.time() * 1000)}, seal=False)
+            self._send(200, {"t": int(time.time() * 1000), "version": VERSION, "proto": PROTO}, seal=False)
             return
         if path == "/api/seen":
             if not (_local_pc(self.client_address[0]) and self._host_ok()):
@@ -841,7 +926,8 @@ class Handler(BaseHTTPRequestHandler):
                 if PAIRING.locked():
                     self._send(429, {"error": "Demasiados intentos. Espera un momento."}, seal=False)
                     return
-                self._send(200, PAIRING.hello(who, mode, str(body.get("pub", ""))), seal=False)
+                conn_log(f"{who[:4]} saludo ({mode})")
+                self._send(200, {**PAIRING.hello(who, mode, str(body.get("pub", ""))), "version": VERSION, "proto": PROTO}, seal=False)
                 return
             sid = str(body.get("sid", ""))[:64]
             if step == "claim":
@@ -850,11 +936,14 @@ class Handler(BaseHTTPRequestHandler):
                     self._send(429, {"error": "Demasiados intentos. Espera un momento."}, seal=False)
                     return
                 if result != "ok" or row is None:
+                    conn_log(f"prueba rechazada: {result}")
                     msg = "PIN incorrecto" if result == "mal" else "Empieza otra vez"
                     self._send(401, {"error": msg, "retry": result == "caducada"}, seal=False)
                     return
+                KICKED.discard(row["who"])  # emparejar de nuevo (y aceptar en el PC) lo readmite
                 state = APPROVALS.check(row["who"], self.headers.get("User-Agent", ""), self.client_address[0], row["fp"])
                 APPROVALS.note_meta(row["who"], fp=row["fp"])
+                conn_log(f"{row['who'][:4]} prueba buena ({row['mode']}) -> {state}")
                 if self.remote:
                     maybe_open_mesa()
                 self._send(200, {"state": {"ok": "aprobado"}.get(state, state), "proof": protocol.proof(row["hk"], "pc"),
@@ -862,19 +951,28 @@ class Handler(BaseHTTPRequestHandler):
                 return
             row = PAIRING.session(sid, str(body.get("proof", ""))[:128])
             if row is None:
-                self._send(401, {"error": "Empareja otra vez", "retry": True}, seal=False)
+                conn_log("espera: sesión caducada o desconocida")
+                self._send(401, {"error": "La espera caducó: empareja otra vez", "retry": True}, seal=False)
                 return
             state = APPROVALS.state(row["who"])
             if state == "aprobado":
+                first = not row.get("done")
                 box = PAIRING.deliver(sid)
                 APPROVALS.note_meta(row["who"], fp=row["fp"])
-                persist_devices()
+                # 0.57: primero la respuesta al móvil; guardar en disco nunca puede impedirla.
                 self._send(200, {"state": "aprobado", "box": box}, seal=False)
+                if first:
+                    conn_log(f"{row['who'][:4]} aceptado: clave entregada")
+                    persist_devices()
                 return
             left = next((d["left"] for d in APPROVALS.listing() if d["id"] == row["who"]), 0)
             self._send(200, {"state": "pendiente" if state == "pendiente" else "rechazado", "left": left}, seal=False)
         except protocol.ProtocolError as exc:
+            conn_log(f"emparejamiento ({step}): {exc}")
             self._send(400, {"error": str(exc)}, seal=False)
+        except Exception as exc:  # 0.57: nunca cortar sin respuesta
+            conn_log(f"emparejamiento ({step}): fallo del PC {type(exc).__name__}")
+            self._send(500, {"error": f"Fallo del PC al emparejar ({step}). Copia el diagnóstico del Panel."}, seal=False)
 
     def _guard(self, fn) -> None:
         if not self._authed():
@@ -915,13 +1013,11 @@ class Handler(BaseHTTPRequestHandler):
         if body.get("all"):
             if body.get("olvidar") and not self.remote:
                 return forget_all()
-            count = APPROVALS.kick_all()
-            PAIRING.forget_phones()
+            count = kick_everyone()
             print(f"  Expulsados todos los dispositivos ({count}).", flush=True)
             return {"ok": True, "count": count}
         who = str(body.get("id", ""))
-        done = APPROVALS.kick(who)
-        PAIRING.phone_gone(who)
+        done = kick_device(who)
         if done:
             print(f"  Dispositivo {who[:4]} expulsado.", flush=True)
         return {"ok": done}
@@ -1293,6 +1389,8 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     PAIRING.pin = protocol.Pairing(args.pin).pin
     remembered = load_remembered()
+    if _log_decision not in APPROVALS.on_decide:
+        APPROVALS.on_decide.append(_log_decision)
     if persist_devices not in APPROVALS.on_change:
         APPROVALS.on_change.append(persist_devices)
     PORT = args.port

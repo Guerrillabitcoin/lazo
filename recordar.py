@@ -15,6 +15,7 @@ import json
 import os
 import secrets
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -37,36 +38,81 @@ def data_dir() -> Path:
 
 # --- DPAPI (Windows) ---------------------------------------------------------
 
+_DPAPI_FNS = None
+
+
+def _dpapi_fns():
+    """0.57: crypt32 y kernel32 PROPIOS (ctypes.WinDLL nuevo), no ctypes.windll compartido.
+
+    Causa del fallo de 0.54-0.56 en el .exe: control._dpapi (portapapeles) pone
+    `ctypes.windll.crypt32.CryptProtectData.argtypes` con SU estructura DATA_BLOB, y como
+    ctypes.windll es global, aquí saltaba `ctypes.ArgumentError` (que no es OSError) al guardar
+    la clave tras aceptar el móvil: /api/pair/wait se cortaba sin respuesta y el móvil nunca
+    recibía la clave. Con una instancia propia nadie más toca estas firmas."""
+    global _DPAPI_FNS
+    if _DPAPI_FNS is None:
+        import ctypes
+
+        crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        sig = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong, ctypes.c_void_p]
+        for fn in (crypt32.CryptProtectData, crypt32.CryptUnprotectData):
+            fn.argtypes = sig
+            fn.restype = ctypes.c_int
+        kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+        kernel32.LocalFree.restype = ctypes.c_void_p
+        _DPAPI_FNS = (crypt32.CryptProtectData, crypt32.CryptUnprotectData, kernel32.LocalFree)
+    return _DPAPI_FNS
+
+
 def _dpapi(data: bytes, protect: bool) -> bytes:
     import ctypes
-    from ctypes import wintypes
 
     class BLOB(ctypes.Structure):
-        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+        _fields_ = [("cbData", ctypes.c_ulong), ("pbData", ctypes.c_void_p)]
 
-    crypt32, kernel32 = ctypes.windll.crypt32, ctypes.windll.kernel32
+    protect_fn, unprotect_fn, local_free = _dpapi_fns()
     buf = ctypes.create_string_buffer(data, len(data))
-    src = BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+    src = BLOB(len(data), ctypes.cast(buf, ctypes.c_void_p))
     out = BLOB()
-    fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
-    ok = fn(ctypes.byref(src), "LaZoo" if protect else None, None, None, None, 0x1, ctypes.byref(out))  # UI_FORBIDDEN
-    if not ok:
+    fn = protect_fn if protect else unprotect_fn
+    ok = fn(ctypes.addressof(src), "LaZoo" if protect else None, None, None, None, 0x1, ctypes.addressof(out))  # UI_FORBIDDEN
+    if not ok or not out.pbData:
         raise OSError("DPAPI no pudo con la clave")
     try:
         return ctypes.string_at(out.pbData, out.cbData)
     finally:
-        kernel32.LocalFree(out.pbData)
+        local_free(out.pbData)
+
+
+_WRITE_LOCK = threading.Lock()  # 0.57: dos guardados a la vez daban PermissionError en Windows
 
 
 def _write_private(path: Path, data: bytes) -> None:
+    with _WRITE_LOCK:
+        _write_private_now(path, data)
+
+
+def _write_private_now(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp = path.with_suffix(path.suffix + f".{secrets.token_hex(4)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "wb") as out:
         out.write(data)
     if sys.platform != "win32":
         os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    for intento in range(5):  # Windows: un antivirus o un lector puede tener el archivo abierto un instante
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if intento == 4:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.05 * (intento + 1))
 
 
 class Store:
@@ -127,7 +173,7 @@ class Store:
             return None
         try:
             key = self._unprotect((self.folder / KEY_FILE).read_bytes())
-        except (OSError, protocol.ProtocolError):
+        except Exception:  # 0.57: DPAPI/ctypes, archivo dañado... sin clave recordada, nunca un cierre
             return None
         if len(key) != 32:
             return None

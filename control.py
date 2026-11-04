@@ -3807,35 +3807,14 @@ def _open_seal(data: bytes) -> bytes:
 
 
 def _dpapi(data: bytes, protect: bool) -> bytes:
-    class DATA_BLOB(ctypes.Structure):
-        _fields_ = [("cbData", ctypes.c_ulong), ("pbData", ctypes.c_void_p)]
-
-    crypt32 = ctypes.windll.crypt32
-    kernel32 = ctypes.windll.kernel32
-    buf = ctypes.create_string_buffer(data)
-    incoming = DATA_BLOB(len(data), ctypes.cast(buf, ctypes.c_void_p))
-    outgoing = DATA_BLOB()
-    crypt32.CryptProtectData.argtypes = [
-        ctypes.POINTER(DATA_BLOB),
-        ctypes.c_wchar_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.c_ulong,
-        ctypes.POINTER(DATA_BLOB),
-    ]
-    crypt32.CryptUnprotectData.argtypes = crypt32.CryptProtectData.argtypes
-    crypt32.CryptProtectData.restype = ctypes.c_bool
-    crypt32.CryptUnprotectData.restype = ctypes.c_bool
-    kernel32.LocalFree.argtypes = [ctypes.c_void_p]
-    kernel32.LocalFree.restype = ctypes.c_void_p
-    fn = crypt32.CryptProtectData if protect else crypt32.CryptUnprotectData
-    if not fn(ctypes.byref(incoming), None, None, None, None, 0, ctypes.byref(outgoing)):
-        return b""
+    """0.57: usa el DPAPI de recordar.py (crypt32 propio). Antes cambiaba las firmas de
+    ctypes.windll.crypt32, que es global, y rompía «Recordar dispositivos» al aceptar un móvil."""
     try:
-        return ctypes.string_at(outgoing.pbData, outgoing.cbData)
-    finally:
-        kernel32.LocalFree(outgoing.pbData)
+        import recordar
+
+        return recordar._dpapi(data, protect)
+    except Exception:
+        return b""
 
 
 

@@ -103,7 +103,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.56</p>
+          <p class="ver">0.57</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -136,6 +136,7 @@
           <a class="primary" href="/conectar" target="_blank" rel="noopener">QR a pantalla completa</a>
           <button id="conn-puente" type="button">Recibido del móvil</button>
           <button id="conn-devs" type="button">Dispositivos</button>
+          <button id="conn-diag" type="button" title="Pasos de conexión sin claves ni PIN, para pegarlos si algo falla">Copiar diagnóstico de conexión</button>
           <p><small>Misma Wi-Fi. Este bloque se oculta al conectar un móvil y vuelve cuando no queda ninguno.</small></p>
         </div>
       </section>
@@ -372,6 +373,13 @@
 
       // Solo estado: aquí no hay botones de aceptar ni rechazar (eso va en Windows/bandeja).
       let connShown = null;
+      let connDiag = "";  // 0.57
+      document.querySelector("#conn-diag").addEventListener("click", async (ev) => {
+        const btn = ev.currentTarget;
+        try { await navigator.clipboard.writeText(connDiag); btn.textContent = "Copiado: pégalo en el chat"; }
+        catch (_err) { window.prompt("Copia este diagnóstico:", connDiag); }
+        window.setTimeout(() => { btn.textContent = "Copiar diagnóstico de conexión"; }, 2500);
+      });
       async function watchConn() {
         try {
           const data = await fetch("/api/conexion").then((res) => res.json());
@@ -389,6 +397,7 @@
               return p;
             }));
           }
+          connDiag = data.diag || "";
           if (data.approve_where) $("#conn-where").textContent = data.approve_where;
           if (show !== connShown) { box.hidden = !show; connShown = show; document.body.classList.toggle("connected", !show); }
           const waiting = data.waiting || [];
@@ -465,6 +474,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.56"></script>
+    <script src="/logo.js?v=0.57"></script>
   </body>
 </html>

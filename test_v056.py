@@ -127,7 +127,7 @@ class Cliente(unittest.TestCase):
 
     def test_401_viejo_no_echa(self):
         self.assertIn("const sentWith = authKey;", JS)
-        self.assertIn("if (sentWith && sentWith === authKey && !pairing) showPin();", JS)
+        self.assertIn("if (sentWith && sentWith === authKey && !pairing) {", JS)
 
     def test_ajustes_al_entrar(self):
         for fn in ("pushPred", "pushIner", "pushCont", "pushSmooth"):
@@ -290,14 +290,14 @@ class Logo(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.56")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.56")
-        self.assertIn("<title>LaZoo 0.56</title>", HTML)
-        self.assertIn("/logo.js?v=0.56", MESA)
-        self.assertIn('android:versionName="0.56"', APK)
-        self.assertIn('android:versionCode="56"', APK)
-        self.assertIn("# LaZoo 0.56", (ROOT / "README.md").read_text(encoding="utf-8"))
-        self.assertIn("## Estado (0.56)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
+        self.assertEqual(lazo.VERSION, "0.57")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.57")
+        self.assertIn("<title>LaZoo 0.57</title>", HTML)
+        self.assertIn("/logo.js?v=0.57", MESA)
+        self.assertIn('android:versionName="0.57"', APK)
+        self.assertIn('android:versionCode="57"', APK)
+        self.assertIn("# LaZoo 0.57", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("## Estado (0.57)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
