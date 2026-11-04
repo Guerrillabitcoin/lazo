@@ -3,8 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.54</title>
-    <link rel="stylesheet" href="/app.css?v=0.54" />
+    <title>LaZoo 0.55</title>
+    <link rel="stylesheet" href="/app.css?v=0.55" />
+    <link rel="icon" type="image/svg+xml" href="/img/infinito-naranja.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/img/icono-192.png" />
+    <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#000000" />
   </head>
   <body>
     <div id="wait-banner" class="wait-banner" role="alert" hidden>
@@ -14,8 +19,8 @@
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
-          <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.54</p>
+          <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
+          <p class="ver">0.55</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -25,6 +30,7 @@
       </header>
 
       <section id="pin" class="panel pin" hidden>
+        <span class="lz-logo grande" data-estado="desconectado" title="LaZoo"></span>
         <input id="pin-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="PIN de 6 dígitos" />
         <button id="pin-go" type="button" class="primary">Entrar</button>
         <div class="qr-box">
@@ -36,6 +42,7 @@
         </div>
       </section>
       <section id="wait" class="panel wait" hidden aria-live="polite">
+        <span class="lz-logo grande" data-estado="desconectado" title="LaZoo"></span>
         <p id="wait-title" class="wait-title">Esperando aprobación en el PC…</p>
         <p id="wait-text" class="hint"></p>
         <button id="wait-retry" type="button">Comprobar otra vez</button>
@@ -359,7 +366,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.54</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.55</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -413,7 +420,8 @@
         </div>
       </section>
     </main>
-    <script src="/seal.js?v=0.54"></script>
-    <script src="/app.js?v=0.54"></script>
+    <script src="/logo.js?v=0.55"></script>
+    <script src="/seal.js?v=0.55"></script>
+    <script src="/app.js?v=0.55"></script>
   </body>
 </html>

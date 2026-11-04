@@ -61,49 +61,12 @@ button:focus-visible, input:focus-visible {
 
 .brand-col { display: flex; flex-direction: column; align-items: flex-start; }
 
-.brand {
-  display: flex;
-  align-items: baseline;
-  margin: 0;
-  font-family: Georgia, "Times New Roman", serif;
-  font-style: italic;
-  font-size: 30px;
-  line-height: 1;
-  letter-spacing: -0.03em;
-}
 
 .ver {
   margin: 1px 0 0;
   font-size: 11px;
   letter-spacing: 0.12em;
   color: var(--fog);
-}
-
-.oo { display: inline-flex; align-items: center; }
-
-.bridge {
-  width: 0;
-  height: 3px;
-  border-radius: 99px;
-  background: transparent;
-  transition: width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease;
-}
-
-.o.right { transition: margin-left 0.35s ease; }
-
-.top[data-link="on"] .bridge {
-  width: 14px;
-  background: #3dbe6e;
-  box-shadow: 0 0 10px #3dbe6e;
-}
-
-.top[data-link="on"] .oo { color: #3dbe6e; }
-
-.top[data-link="off"] .o.right { margin-left: -0.55em; }
-
-.top[data-link="off"] .oo {
-  color: #e23b3b;
-  text-shadow: 0 0 12px rgba(226, 59, 59, 0.9);
 }
 
 .status-copy { min-width: 0; flex: 1; }
@@ -690,3 +653,14 @@ button[data-cursor] { min-height: 44px; }
 }
 .wait-banner strong { font-size: 16px; }
 .wait-banner[data-state="rechazado"] { background: #b3261e; color: #fff; }
+
+/* 0.55: logotipo animado (static/logo.js). Anillo rojo = desconectado, infinito verde = conectado. */
+.lz-logo { display: inline-block; line-height: 0; }
+.lz-logo-svg { display: block; height: 100%; width: auto; overflow: visible; }
+.lz-logo[data-estado="esperando"] .lz-o:last-of-type { animation: lz-latido 1.6s ease-in-out infinite; }
+@keyframes lz-latido { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) {
+  .lz-logo[data-estado="esperando"] .lz-o:last-of-type { animation: none; }
+}
+.top .lz-logo { height: 30px; }
+.lz-logo.grande { height: 46px; margin: 4px auto 14px; display: block; width: max-content; }

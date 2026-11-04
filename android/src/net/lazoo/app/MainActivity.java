@@ -133,7 +133,7 @@ public class MainActivity extends Activity {
             }
             Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
             PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
-            b.setSmallIcon(getApplicationInfo().icon).setContentTitle(title).setContentText(text)
+            b.setSmallIcon(R.drawable.ic_notif).setContentTitle(title).setContentText(text)
                     .setStyle(new Notification.BigTextStyle().bigText(text))
                     .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(pi).setCategory(Notification.CATEGORY_STATUS);
             nm.notify(NOTE_WAIT, b.build());

@@ -1,4 +1,4 @@
-# LaZoo 0.54
+# LaZoo 0.55
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.55:** nuevo logotipo. En el Panel de LaZoo y en el móvil, «LaZoo» lleva la última «o» como un anillo rojo mientras no hay conexión; al conectar, las dos «o» se funden en un infinito verde con una animación de un segundo (y al desconectar vuelve al anillo rojo; si tienes activado «reducir movimiento» en el sistema, cambia sin animar). Mientras el móvil espera aprobación, el anillo es naranja y late suave. El icono de la bandeja de Windows es un infinito rojo sin móviles y verde con al menos uno conectado, con el texto «LaZoo · sin dispositivos» o «LaZoo · N dispositivo(s) conectado(s)». El `.exe`, la APK, el favicon y el icono de pantalla de inicio del móvil usan el infinito naranja.
 
 **Novedad 0.54:** emparejamiento más seguro y reconexión automática. El QR y el PIN ya no llevan ni entregan la clave larga: solo sirven para que el móvil se identifique y pida permiso. El móvil se ve **desconectado** con un aviso naranja arriba (y, con la APK, una notificación en la barra del teléfono) hasta que lo aceptas en el PC; solo entonces le llega la clave, cifrada con un secreto de un solo uso. Se acepta en un único sitio: el aviso de Windows o el menú del icono de la bandeja («Aceptar/Rechazar dispositivo pendiente»). **Recordar dispositivos** (activado de serie, en el icono de la bandeja y en el Panel): guarda la clave cifrada en este PC (DPAPI en Windows; en Linux/macOS, archivo cifrado con permisos 600) y la lista de aprobados con nombre, fecha y huella, así que los móviles se reconectan solos al reiniciar el PC, también con «Iniciar con Windows». **Olvidar todos** borra todo eso, cambia la clave y obliga a emparejar y aceptar de nuevo. La ventana del PC se llama ahora **Panel de LaZoo**, apaisada: QR, PIN y pasos arriba mientras espera; estado, dispositivos, portapapeles, archivos y lo recibido del móvil en columnas cuando está conectado. YouTube: el título ocupa hasta 2 líneas sin cortar palabras, la velocidad cambia desde la actual (no baja siempre a 0,25x) y LaZoo recuerda la ventana de YouTube que usas aunque cambie de vídeo.
 
@@ -109,3 +111,18 @@ Desde la 0.54 la clave no va en el QR ni sale por el PIN: el móvil y el PC hace
 Para pararlo: `Ctrl+C` en la terminal.
 
 MIT. Úsalo en tus propios equipos.
+
+## Identidad visual
+
+| Uso | Color | Hex |
+| --- | --- | --- |
+| Anillo «desconectado» (wordmark, bandeja) | rojo | `#e8101c` |
+| Infinito «conectado» del wordmark | verde | `#1a8f3a` |
+| Infinito «conectado» de la bandeja (más claro para 16 px) | verde lima | `#5abf10` |
+| Infinito de la app (APK, `.exe`, favicon, icono del móvil) | naranja | `#ff8040` |
+| Color de la interfaz (botones, títulos) | naranja de marca | `#e07a3d` |
+| Letras «LaZ» | blanco sobre fondo negro | `#ffffff` / `#000000` |
+
+- Letras: Poppins Bold (licencia OFL) convertida a trazos; no hace falta instalar la fuente.
+- Archivos: `static/img/` (SVG y PNG finales), `static/img/original/` (imágenes originales), `static/lazoo.ico` (naranja, `.exe`), `static/lazoo-rojo.ico` y `static/lazoo-verde.ico` (bandeja, de 16 a 256 px), `android/res/` (mipmaps, icono adaptable e icono de notificación).
+- Animación: `static/logo.js`, sin librerías. Para regenerarlo todo: `python diseno/logos.py` (necesita Pillow y fontTools; solo para desarrollo, no se empaqueta).

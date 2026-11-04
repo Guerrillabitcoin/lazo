@@ -11,7 +11,7 @@ Hoja de ruta para pasar de `iniciar.bat` (con consola) a un programa con icono e
   Iniciar con Windows (apagado por defecto) y Salir. Doble clic en el icono abre la ventana del PC.
 - Un solo ejemplar: si ya está en marcha, abrir otro solo trae su ventana.
 - Lo que antes salía en la consola va a `%LOCALAPPDATA%\LaZoo\lazoo.log`.
-- Icono propio en `static/lazoo.ico` (lo genera `python icono.py`, solo biblioteca estándar).
+- Icono propio en `static/lazoo.ico` (infinito naranja; con `lazoo-rojo.ico` y `lazoo-verde.ico` para la bandeja). Se regeneran con `python diseno/logos.py`.
 
 ## Construir el .exe
 

@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Panel de LaZoo</title>
+    <link rel="icon" type="image/svg+xml" href="/img/infinito-rojo.svg" data-dinamico />
     <style>
       :root { color-scheme: dark; --naranja: #e07a3d; --fondo: #141210; --caja: #241f1a; --hondo: #16130f; --borde: #4a4036; --texto: #f3eee6; --suave: #c4b8aa; }
       * { box-sizing: border-box; }
@@ -15,15 +16,7 @@
       p { color: var(--suave); margin: 0 0 8px; }
       small { color: var(--suave); }
       .top { display: flex; align-items: center; gap: 18px; margin: 0 -28px 20px; padding: 12px 28px; background: var(--caja); border-bottom: 1px solid var(--borde); }
-      .brand { display: flex; align-items: baseline; margin: 0; font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 34px; line-height: 1; }
       .ver { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.12em; color: var(--suave); }
-      .oo { display: inline-flex; align-items: center; }
-      .bridge { width: 0; height: 3px; border-radius: 99px; background: transparent; transition: width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease; }
-      .o.right { transition: margin-left 0.35s ease; }
-      .top[data-link="on"] .bridge { width: 16px; background: #3dbe6e; box-shadow: 0 0 10px #3dbe6e; }
-      .top[data-link="on"] .oo { color: #3dbe6e; }
-      .top[data-link="off"] .o.right { margin-left: -0.55em; }
-      .top[data-link="off"] .oo { color: #e23b3b; text-shadow: 0 0 12px rgba(226, 59, 59, 0.9); }
       .title { margin: 0; font-size: 1.25rem; font-weight: 600; color: var(--texto); }
       #link-label { margin: 0; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
       .top[data-link="on"] #link-label { color: #3dbe6e; }
@@ -94,14 +87,23 @@
         .conn, .board { grid-template-columns: 1fr; grid-template-areas: "side" "clip" "files" "recv"; }
         .conn { justify-items: center; text-align: center; }
       }
+      /* 0.55: logotipo animado (static/logo.js). Anillo rojo = desconectado, infinito verde = conectado. */
+      .lz-logo { display: inline-block; line-height: 0; }
+      .lz-logo-svg { display: block; height: 100%; width: auto; overflow: visible; }
+      .lz-logo[data-estado="esperando"] .lz-o:last-of-type { animation: lz-latido 1.6s ease-in-out infinite; }
+      @keyframes lz-latido { 50% { opacity: 0.45; } }
+      @media (prefers-reduced-motion: reduce) {
+        .lz-logo[data-estado="esperando"] .lz-o:last-of-type { animation: none; }
+      }
+      .top .lz-logo { height: 40px; }
     </style>
   </head>
   <body>
     <main>
       <header id="status" class="top" data-link="off">
         <div>
-          <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.54</p>
+          <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
+          <p class="ver">0.55</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -463,5 +465,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
+    <script src="/logo.js?v=0.55"></script>
   </body>
 </html>

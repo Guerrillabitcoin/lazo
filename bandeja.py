@@ -32,6 +32,8 @@ WM_LBUTTONDBLCLK = 0x0203
 WM_RBUTTONUP = 0x0205
 WM_CONTEXTMENU = 0x007B
 NIN_SELECT = 0x0400
+WM_TIMER = 0x0113
+TIMER_ID = 7  # 0.55: revisa si hay móviles conectados para el icono rojo/verde
 
 # Órdenes del menú (también se pueden mandar por WM_COMMAND, p. ej. en pruebas).
 ID_OPEN, ID_QR, ID_FOLDER, ID_BRIDGE, ID_PROPS, ID_KICKALL, ID_AUTORUN, ID_DEVICES, ID_QUIT = 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1099
@@ -108,6 +110,17 @@ def resolve(command: int, listing: list[dict]) -> tuple[str, object]:
     return names.get(command, ""), None
 
 
+def tray_state(count: int) -> tuple[str, str]:
+    """0.55: icono y texto de la bandeja según los móviles conectados (función pura).
+
+    Rojo = ninguno; verde = al menos uno. Devuelve (archivo .ico en static/, tooltip)."""
+    if count <= 0:
+        return "lazoo-rojo.ico", "LaZoo · sin dispositivos"
+    if count == 1:
+        return "lazoo-verde.ico", "LaZoo · 1 dispositivo conectado"
+    return "lazoo-verde.ico", f"LaZoo · {count} dispositivos conectados"
+
+
 def local_ips() -> str:
     import lazo
     try:
@@ -178,6 +191,12 @@ class Tray:
         u.RegisterWindowMessageW.argtypes = [wt.LPCWSTR]
         u.RegisterWindowMessageW.restype = wt.UINT
         u.DestroyWindow.argtypes = [wt.HWND]
+        u.LoadImageW.argtypes = [wt.HINSTANCE, wt.LPCWSTR, wt.UINT, ct.c_int, ct.c_int, wt.UINT]
+        u.LoadImageW.restype = wt.HANDLE
+        u.SetTimer.argtypes = [wt.HWND, ct.c_size_t, wt.UINT, ct.c_void_p]
+        u.SetTimer.restype = ct.c_size_t
+        u.KillTimer.argtypes = [wt.HWND, ct.c_size_t]
+        u.GetSystemMetrics.argtypes = [ct.c_int]
         s.Shell_NotifyIconW.argtypes = [wt.DWORD, ct.POINTER(NOTIFYICONDATAW)]
         s.Shell_NotifyIconW.restype = wt.BOOL
         k.GetModuleHandleW.restype = wt.HMODULE
@@ -228,11 +247,45 @@ class Tray:
         u.RegisterClassW(ct.byref(wc))
         self.hwnd = u.CreateWindowExW(0, CLASS_NAME, "LaZoo", 0, 0, 0, 0, 0, None, None, hinst, None)
         self.taskbar_created = u.RegisterWindowMessageW("TaskbarCreated")
-        import icono
-
-        data = icono.dib_icon(32)
-        self.hicon = u.CreateIconFromResourceEx(data, len(data), True, 0x00030000, 32, 32, 0)
+        self.icons: dict[str, int] = {}
+        self.state = tray_state(self._count())
+        self.hicon = self._icon(self.state[0])
         self._add_icon()
+        u.SetTimer(self.hwnd, TIMER_ID, 1500, None)  # 0.55: rojo/verde según el estado real
+
+    def _icon(self, name: str):
+        """HICON del .ico de static/ al tamaño de la bandeja (se carga una vez y se reutiliza)."""
+        if name not in self.icons:
+            u = self.user32
+            size = u.GetSystemMetrics(49) or 16  # SM_CXSMICON
+            path = str(Path(self.lazo.STATIC) / name)
+            handle = u.LoadImageW(None, path, 1, size, size, 0x10)  # IMAGE_ICON, LR_LOADFROMFILE
+            if not handle:
+                import icono
+
+                data = icono.dib_icon(32)
+                handle = u.CreateIconFromResourceEx(data, len(data), True, 0x00030000, 32, 32, 0)
+            self.icons[name] = handle
+        return self.icons[name]
+
+    def _count(self) -> int:
+        try:
+            return int(self.lazo.PAIRING.phone_count())
+        except Exception:
+            return 0
+
+    def refresh_icon(self) -> None:
+        """Cambia icono y tooltip solo si el estado cambió (NIM_MODIFY: sin parpadeo)."""
+        state = tray_state(self._count())
+        if state == self.state:
+            return
+        self.state = state
+        self.hicon = self._icon(state[0])
+        nid = self._nid()
+        nid.uFlags = 0x2 | 0x4  # ICON | TIP
+        nid.hIcon = self.hicon
+        nid.szTip = state[1]
+        self.shell32.Shell_NotifyIconW(1, self.ct.byref(nid))  # NIM_MODIFY
 
     def _nid(self):
         nid = self.NOTIFYICONDATAW()
@@ -246,7 +299,7 @@ class Tray:
         nid.uFlags = 0x1 | 0x2 | 0x4  # MESSAGE | ICON | TIP
         nid.uCallbackMessage = WM_TRAY
         nid.hIcon = self.hicon
-        nid.szTip = f"LaZoo {self.lazo.VERSION} · puerto {self.lazo.PORT}"
+        nid.szTip = self.state[1]
         self.shell32.Shell_NotifyIconW(0, self.ct.byref(nid))  # NIM_ADD
 
     def balloon(self, title: str, text: str) -> None:
@@ -421,6 +474,9 @@ class Tray:
                 row = getattr(self, "last_new", {}) or {}
                 self.balloon("LaZoo: dispositivo nuevo", f"{row.get('label', 'Un móvil')} ({row.get('ip', '')}) quiere entrar. Acéptalo o recházalo en el cuadro de Windows o con clic derecho en este icono.")
                 return 0
+            if msg == WM_TIMER and wparam == TIMER_ID:
+                self.refresh_icon()
+                return 0
             if msg == WM_SHOWME:
                 self.run_command(ID_OPEN)
                 return 0
@@ -439,6 +495,7 @@ class Tray:
         if self.quitting:
             return
         self.quitting = True
+        self.user32.KillTimer(self.hwnd, TIMER_ID)
         self.shell32.Shell_NotifyIconW(2, self.ct.byref(self._nid()))  # NIM_DELETE
         if self.server is not None:
             threading.Thread(target=self._stop_server, daemon=True).start()

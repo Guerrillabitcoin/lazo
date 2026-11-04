@@ -32,7 +32,8 @@ import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.54"
+IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
+VERSION = "0.55"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
@@ -595,6 +596,24 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/jsqr-LICENSE.txt":
             self._file(STATIC / "jsqr-LICENSE.txt", "text/plain; charset=utf-8")
+            return
+        if path == "/logo.js":
+            self._file(STATIC / "logo.js", "text/javascript; charset=utf-8")
+            return
+        if path == "/favicon.ico":
+            self._file(STATIC / "lazoo.ico", "image/x-icon")
+            return
+        if path == "/manifest.webmanifest":
+            self._file(STATIC / "manifest.webmanifest", "application/manifest+json; charset=utf-8")
+            return
+        if path.startswith("/img/"):
+            # 0.55: logotipo e iconos. Solo nombres sencillos de static/img (sin subcarpetas).
+            name = path[5:]
+            kind = IMG_TYPES.get(name.rsplit(".", 1)[-1]) if re.fullmatch(r"[a-z0-9-]+\.(svg|png)", name) else None
+            if kind is None:
+                self._send(404, {"error": "no está"})
+                return
+            self._file(STATIC / "img" / name, kind)
             return
         if path == "/puente-worker.js":
             self._file(STATIC / "puente-worker.js", "text/javascript; charset=utf-8")

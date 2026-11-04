@@ -73,7 +73,7 @@ class TrayModel(unittest.TestCase):
 class Icon(unittest.TestCase):
     def test_ico(self):
         data = (ROOT / "static" / "lazoo.ico").read_bytes()
-        self.assertEqual(data, icono.ico_bytes())
+        self.assertGreater(len(data), 1000)  # 0.55: infinito naranja (diseno/logos.py)
         self.assertEqual(struct.unpack("<HHH", data[:6])[:2], (0, 1))
 
     def test_dib(self):

@@ -2,7 +2,8 @@
 
 `rgba(size)` da los píxeles, `ico_bytes()` un .ico (PNG dentro, de 16 a 256 px) y
 `dib_icon(size)` el formato que acepta CreateIconFromResourceEx en Windows.
-Ejecuta `python icono.py` para regenerar static/lazoo.ico.
+Desde 0.55 los .ico de LaZoo (infinito naranja, rojo y verde) salen de diseno/logos.py;
+este icono queda solo de reserva por si falta un .ico en la bandeja.
 """
 
 from __future__ import annotations
@@ -89,6 +90,4 @@ def dib_icon(size: int = 32) -> bytes:
 
 
 if __name__ == "__main__":
-    target = Path(__file__).with_name("static") / "lazoo.ico"
-    target.write_bytes(ico_bytes())
-    print(f"Escrito {target.name} ({target.stat().st_size} bytes)")
+    print("Desde 0.55 los iconos se generan con: python diseno/logos.py")

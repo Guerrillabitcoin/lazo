@@ -126,10 +126,10 @@ class Post(Base):
 
 class Ui(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.54")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.54")
-        self.assertIn('android:versionName="0.54"', APK)
-        self.assertIn('android:versionCode="54"', APK)
+        self.assertEqual(lazo.VERSION, "0.55")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.55")
+        self.assertIn('android:versionName="0.55"', APK)
+        self.assertIn('android:versionCode="55"', APK)
 
     def test_boton(self):
         self.assertIn('id="clip-to-pc"', HTML)
