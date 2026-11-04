@@ -188,6 +188,10 @@ function openCube(id) {
   if (id === "notes" || id === "bridge") syncClipboard();
   if (id === "about") aboutOpen();
   mediaWatch(id === "youtube" || id === "spotify");
+  if (id === "youtube" || id === "spotify") {
+    const el = document.querySelector(id === "youtube" ? "#yt-title" : "#sp-title");
+    if (el && el.title) fitWords(el, el.title);  // al estar oculta no se pudo medir
+  }
 }
 
 /* Aprobación en el PC: la primera vez, el móvil espera a que lo acepten allí. */
@@ -203,23 +207,139 @@ function stopTimers() {
   }
 }
 
+/* 0.54: mientras espera, el móvil se ve DESCONECTADO y avisa arriba (y en la barra de
+   notificaciones del teléfono con la APK; en el navegador, Notification si está permitido). */
+const WAIT_LABEL = "Desconectado · falta aceptarlo en el PC";
+const waitBanner = document.querySelector("#wait-banner");
+let waitWhere = "en el aviso de Windows o en el icono de LaZoo de la bandeja";
+
+function phoneNotify(on, title, text) {
+  const appBridge = window.LaZooApp;
+  try {
+    if (appBridge && typeof appBridge.waitNote === "function") {
+      if (on) appBridge.waitNote(title, text);
+      else appBridge.clearNote();
+      return "apk";
+    }
+  } catch (_err) { /* APK vieja sin avisos */ }
+  if (!("Notification" in window) || !window.isSecureContext) return "banner";
+  try {
+    if (!on) {
+      if (phoneNotify.last) phoneNotify.last.close();
+      phoneNotify.last = null;
+      return "web";
+    }
+    if (Notification.permission === "granted") {
+      phoneNotify.last = new Notification(title, { body: text, tag: "lazo-espera", requireInteraction: true });
+      return "web";
+    }
+    if (Notification.permission === "default") Notification.requestPermission().catch(() => {});
+  } catch (_err) { /* sin avisos del navegador */ }
+  return "banner";
+}
+
+function waitNotice(on, rejected) {
+  if (!waitBanner) return;
+  waitBanner.hidden = !on;
+  if (!on) {
+    if (waitNotice.shown) phoneNotify(false);
+    waitNotice.shown = null;
+    return;
+  }
+  const title = rejected ? "LaZoo: El PC rechazó este móvil" : "LaZoo: Valida este móvil en el PC";
+  const text = rejected ? "Puedes volver a intentarlo dentro de 5 minutos." : `Acéptalo ${waitWhere}. Hasta entonces no está conectado.`;
+  waitBanner.querySelector("strong").textContent = title.replace("LaZoo: ", "");
+  waitBanner.querySelector("span").textContent = text;
+  waitBanner.dataset.state = rejected ? "rechazado" : "pendiente";
+  if (waitNotice.shown !== waitBanner.dataset.state) {
+    waitNotice.shown = waitBanner.dataset.state;
+    phoneNotify(true, title, text);
+  }
+}
+
 function showWait(state) {
   const rejected = state === "rechazado";
   document.querySelector("#wait-title").textContent = rejected ? "El PC rechazó este dispositivo" : "Esperando aprobación en el PC…";
   document.querySelector("#wait-text").textContent = rejected
     ? "Puedes volver a intentarlo dentro de 5 minutos. Si fue un error, pide que lo acepten en el PC."
-    : "En el PC sale un aviso para aceptar este móvil: en la ventana de LaZoo, en el icono de la bandeja, en la consola o en un cuadro de Windows. Si nadie responde en 60 s, se rechaza.";
+    : `En el PC sale un aviso para aceptar este móvil: ${waitWhere}.${pairing && pairing.fp ? ` Comprueba que la huella es ${pairing.fp}.` : ""} La clave de conexión solo llega al móvil cuando lo aceptas. Si nadie responde en 60 s, se rechaza.`;
   waitPanel.dataset.state = rejected ? "rechazado" : "pendiente";
-  setLink("off", rejected ? "Rechazado por el PC" : "Esperando aprobación");
+  setLink("off", rejected ? "Desconectado · rechazado por el PC" : WAIT_LABEL);
   say(rejected ? "El PC dijo que no" : "Acéptalo en el PC");
-  if (!waitPanel.hidden) return;
-  waitPanel.hidden = false;
+  waitNotice(true, rejected);
   pinPanel.hidden = true;
   app.hidden = true;
   dock.hidden = true;
+  if (!waitPanel.hidden) return;
+  waitPanel.hidden = false;
   stopTimers();
   window.clearInterval(waitTimer);
   waitTimer = window.setInterval(checkApproval, 1500);
+}
+
+/* Saludo de emparejamiento (protocol.py): QR o PIN solo identifican y piden permiso.
+   La clave larga llega sellada con una clave del saludo, y solo tras aceptar en el PC. */
+let pairing = null;
+const X_BASE = (() => { const b = new Uint8Array(32); b[0] = 9; return b; })();
+
+async function pairPost(path, body) {
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const data = await res.json().catch(() => ({}));
+  return { res, data };
+}
+
+async function pairStart(mode, secretText) {
+  const secret = mode === "qr" ? b64urlToBytes(secretText) : new TextEncoder().encode("pin:" + secretText);
+  const priv = crypto.getRandomValues(new Uint8Array(32));
+  const pub = x25519(priv, X_BASE);
+  const hello = await pairPost("/api/pair/hello", { id: deviceId, mode, pub: bytesToB64url(pub) });
+  if (!hello.res.ok) throw new Error(hello.data.error || "El PC no contesta al emparejar");
+  const pcPub = b64urlToBytes(hello.data.pub || "");
+  const shared = x25519(priv, pcPub);
+  const hk = pairHandshakeKey(secret, mode, deviceId, pub, pcPub, shared);
+  const proof = pairProof(hk, "movil");
+  const claim = await pairPost("/api/pair/claim", { sid: hello.data.sid, proof });
+  if (!claim.res.ok) throw new Error(claim.data.error || (mode === "pin" ? "PIN incorrecto" : "Ese QR ya no vale: escanea el de ahora"));
+  if (claim.data.proof !== pairProof(hk, "pc")) throw new Error("Ese PC no es el del QR/PIN. No sigo.");
+  if (claim.data.where) waitWhere = claim.data.where;
+  pairing = { sid: hello.data.sid, proof, hk, fp: claim.data.fp || "" };
+  return pairWait();
+}
+
+async function pairWait() {
+  if (!pairing) return "pin";
+  let got;
+  try {
+    got = await pairPost("/api/pair/wait", { sid: pairing.sid, proof: pairing.proof });
+  } catch (_err) {
+    return "error";
+  }
+  if (got.res.status === 401) {
+    pairing = null;
+    return "pin";
+  }
+  if (got.data.state === "aprobado" && got.data.box) {
+    const key = openText(b64urlToBytes(got.data.box), deriveKey(pairing.hk, "lazo/pair/box/1"));
+    pairing = null;
+    setMasterKey(key);
+    localStorage.setItem("lazo-key", key);
+    await syncClock();
+    return "aprobado";
+  }
+  return got.data.state || "pendiente";
+}
+
+function showPaired(state) {
+  if (state === "aprobado") {
+    waitPanel.hidden = true;
+    waitNotice(false);
+    say("Aceptado en el PC. Conectado y cifrado");
+    enterApp();
+  } else if (state === "pin") {
+    showPin();
+  } else {
+    showWait(state === "rechazado" ? "rechazado" : "pendiente");
+  }
 }
 
 async function approvalState() {
@@ -234,14 +354,16 @@ async function approvalState() {
 }
 
 async function checkApproval() {
-  const state = await approvalState();
+  const state = pairing ? await pairWait() : await approvalState();
   if (state === "aprobado") {
     window.clearInterval(waitTimer);
     waitPanel.hidden = true;
+    waitNotice(false);
     enterApp();
   } else if (state === "pin") {
     window.clearInterval(waitTimer);
     waitPanel.hidden = true;
+    waitNotice(false);
     showPin();
   } else if (state === "rechazado" || state === "pendiente") {
     waitPanel.hidden = false;
@@ -262,6 +384,7 @@ document.querySelector("#wait-retry").addEventListener("click", checkApproval);
 
 function enterApp() {
   waitPanel.hidden = true;
+  waitNotice(false);
   pinPanel.hidden = true;
   app.hidden = false;
   dock.hidden = false;
@@ -893,25 +1016,15 @@ async function receiveChunked(kind, id, fallbackName, onProgress) {
 
 async function login() {
   const pin = document.querySelector("#pin-input").value.trim();
+  if (!/^\d{6}$/.test(pin)) {
+    say("El PIN tiene 6 números");
+    return;
+  }
   try {
-    const res = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pin }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      say(data.error || "PIN incorrecto");
-      setLink("off");
-      return;
-    }
-    setMasterKey(data.key);
-    localStorage.setItem("lazo-key", data.key);
-    await syncClock();
-    say("Conectado y cifrado");
-    showApp();
-  } catch (_err) {
-    say("Sin respuesta del PC");
+    say("Pidiendo permiso al PC…");
+    showPaired(await pairStart("pin", pin));
+  } catch (err) {
+    say(err.message || "Sin respuesta del PC");
     setLink("off");
   }
 }
@@ -1147,8 +1260,8 @@ window.addEventListener("pagehide", () => {
 renderDock();
 
 const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
-const fromQr = hash.get("k") || "";
-const keyFromLink = fromQr || localStorage.getItem("lazo-key") || "";
+const fromQr = hash.get("p") || "";
+const keyFromLink = localStorage.getItem("lazo-key") || "";
 const fromTray = hash.get("pastilla") || "";
 const onThisPc = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 if (fromQr || fromTray) history.replaceState(null, "", location.pathname);
@@ -1161,7 +1274,15 @@ if (keyFromLink) {
     authKey = null;
   }
 }
-if (onThisPc && fromTray && !authKey) {
+if (fromQr && !(onThisPc && fromTray)) {
+  // 0.54: el QR trae una ficha para pedir permiso, no la clave.
+  pinPanel.hidden = true;
+  say("Pidiendo permiso al PC…");
+  syncClock().then(() => pairStart("qr", fromQr)).then(showPaired).catch((err) => {
+    say(err.message || "Sin respuesta del PC");
+    showPin();
+  });
+} else if (onThisPc && fromTray && !authKey) {
   // Abierto desde el icono de la bandeja en este mismo PC: el PC se fía de sí mismo.
   // Tras cargar todo el script (el ratón usa variables que se declaran más abajo).
   window.setTimeout(() => {
@@ -1497,7 +1618,7 @@ function diagFreeze(on) {
 function diagMeta() {
   let aim = "normal";
   try { aim = localStorage.getItem("lazo-aim") || "normal"; } catch (_e) { /* nada */ }
-  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.53", aim };
+  return { version: (document.querySelector("#about-version") || {}).textContent || window.LAZO_VERSION || "0.54", aim };
 }
 if (diagOn) {
   try {
@@ -2340,13 +2461,36 @@ function cleanMediaTitle(text) {
     .trim();
 }
 
+/* 0.54: el título cabe en 2 líneas; si sobra, se quitan palabras ENTERAS del final y se
+   pone «…». Nunca se corta una palabra por la mitad. */
+function fitWords(el, text) {
+  el.textContent = text;
+  if (!el.clientHeight || el.scrollHeight <= el.clientHeight + 1) return text;
+  const words = text.split(/\s+/);
+  let lo = 1, hi = words.length - 1, best = words[0] + "…";
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    el.textContent = words.slice(0, mid).join(" ") + "…";
+    if (el.scrollHeight <= el.clientHeight + 1) { best = el.textContent; lo = mid + 1; } else hi = mid - 1;
+  }
+  el.textContent = best;
+  return best;
+}
+
 function setMediaTitle(prefix, text) {
   const el = document.querySelector(`#${prefix}-title`);
   const clean = prefix === "yt" ? cleanMediaTitle(text) : String(text || "");
-  if (!clean || el.textContent === clean) return;
-  el.textContent = clean;
+  if (!clean || el.title === clean) return;
   el.title = clean;
+  fitWords(el, clean);
 }
+
+window.addEventListener("resize", () => {
+  ["yt", "sp"].forEach((prefix) => {
+    const el = document.querySelector(`#${prefix}-title`);
+    if (el && el.title) fitWords(el, el.title);
+  });
+});
 
 function applyMedia(prefix, data) {
   if (!data) return;
@@ -2868,22 +3012,17 @@ function qrUse(text) {
     return "Ese QR no es de LaZoo";
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return "Ese QR no es de LaZoo";
-  const key = new URLSearchParams(url.hash.replace(/^#/, "")).get("k") || "";
-  if (!key) return "Ese QR no trae la clave de LaZoo";
+  const ticket = new URLSearchParams(url.hash.replace(/^#/, "")).get("p") || "";
+  if (!ticket) return "Ese QR no es de LaZoo 0.54 o posterior";
+  if (!/^[A-Za-z0-9_-]{20,80}$/.test(ticket)) return "Ese QR no es válido";
   if (!qrPrivateHost(url.hostname)) return "Ese QR apunta a internet, no a un PC de tu red. No lo abro.";
   if (url.host === location.host) {
-    try {
-      setMasterKey(key);
-    } catch (_err) {
-      return "La clave del QR no es válida";
-    }
-    localStorage.setItem("lazo-key", key);
-    qrSay("QR leído. Conectando…");
-    window.setTimeout(() => location.replace(location.pathname), 150);
+    qrSay("QR leído. Pidiendo permiso al PC…");
+    pairStart("qr", ticket).then(showPaired).catch((err) => qrSay(err.message || "Sin respuesta del PC"));
     return "";
   }
   qrSay("QR leído. Abriendo LaZoo en " + url.host + "…");
-  window.setTimeout(() => location.replace(url.origin + "/#k=" + encodeURIComponent(key)), 150);
+  window.setTimeout(() => location.replace(url.origin + "/#p=" + encodeURIComponent(ticket)), 150);
   return "";
 }
 

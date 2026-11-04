@@ -160,4 +160,14 @@ def summary(row: dict[str, Any] | None) -> dict[str, Any]:
         "len": round(float(row.get("len") or 0), 1),
         "media_title": str(row.get("title") or "")[:180],
         "artist": str(row.get("artist") or "")[:80],
+        "rate": _rate(row.get("rate")),
     }
+
+
+def _rate(value: Any) -> float | None:
+    """Velocidad que da el sistema (Windows la publica si el navegador la informa)."""
+    try:
+        rate = round(float(value), 2)
+    except (TypeError, ValueError):
+        return None
+    return rate if 0.25 <= rate <= 2.0 else None

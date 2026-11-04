@@ -35,6 +35,8 @@ NIN_SELECT = 0x0400
 
 # Órdenes del menú (también se pueden mandar por WM_COMMAND, p. ej. en pruebas).
 ID_OPEN, ID_QR, ID_FOLDER, ID_BRIDGE, ID_PROPS, ID_KICKALL, ID_AUTORUN, ID_DEVICES, ID_QUIT = 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1099
+ID_REMEMBER, ID_FORGET = 1009, 1010
+PANEL = "Panel de LaZoo"
 ID_CUBE, ID_KICK, ID_ACCEPT, ID_REJECT = 1100, 2000, 3000, 4000
 
 CUBES = [("mouse", "Ratón"), ("bridge", "Puente Wi-Fi"), ("windows", "Ventanas"), ("youtube", "YouTube"),
@@ -101,7 +103,8 @@ def resolve(command: int, listing: list[dict]) -> tuple[str, object]:
         if command == kid:
             return "kick", d["id"]
     names = {ID_OPEN: "open", ID_QR: "qr", ID_FOLDER: "folder", ID_BRIDGE: "bridge", ID_PROPS: "props",
-             ID_KICKALL: "kickall", ID_AUTORUN: "autorun", ID_DEVICES: "devices", ID_QUIT: "quit"}
+             ID_KICKALL: "kickall", ID_AUTORUN: "autorun", ID_DEVICES: "devices", ID_QUIT: "quit",
+             ID_REMEMBER: "remember", ID_FORGET: "forget"}
     return names.get(command, ""), None
 
 
@@ -204,7 +207,7 @@ class Tray:
         if getattr(sys, "frozen", False):  # .exe: lo recibido, junto al LaZoo.exe y no dentro de _internal
             lazo.control.set_photos_dir(Path(sys.executable).resolve().parent / "Fotos")
         lazo.APPROVALS.on_new.append(self._on_new)
-        # La bandeja ya avisa y abre la ventana del PC; el cuadro Sí/No de Windows se queda.
+        # La bandeja ya avisa y abre el Panel de LaZoo; el cuadro Sí/No de Windows se queda.
         lazo.maybe_open_mesa = lambda: None
         self.aprobacion = aprobacion
         return True
@@ -263,7 +266,7 @@ class Tray:
         model = menu_model(self.listing())
         menu = u.CreatePopupMenu()
         MF_STRING, MF_POPUP, MF_SEP, MF_GRAY, MF_CHECKED = 0x0, 0x10, 0x800, 0x1, 0x8
-        u.AppendMenuW(menu, MF_STRING, ID_OPEN, "Abrir LaZoo (ventana del PC)")
+        u.AppendMenuW(menu, MF_STRING, ID_OPEN, f"Abrir el {PANEL}")
         u.AppendMenuW(menu, MF_STRING, ID_QR, "Mostrar QR para conectar")
         cubes = u.CreatePopupMenu()
         for cid, _cube, name in model["cubes"]:
@@ -278,6 +281,11 @@ class Tray:
             u.AppendMenuW(sub, MF_STRING, acc, "Aceptar")
             u.AppendMenuW(sub, MF_STRING, rej, "Rechazar")
             u.AppendMenuW(pend, MF_POPUP, sub, f"{d['label']} · {d['ip']} ({d['left']} s)")
+        # 0.54: aquí (y en el aviso de Windows) es el ÚNICO sitio donde se acepta un móvil nuevo.
+        if len(model["pending"]) == 1:
+            acc, rej, d = model["pending"][0]
+            u.AppendMenuW(menu, MF_STRING, acc, f"Aceptar dispositivo pendiente: {d['label']}")
+            u.AppendMenuW(menu, MF_STRING, rej, "Rechazar dispositivo pendiente")
         u.AppendMenuW(menu, MF_POPUP, pend, f"Solicitudes pendientes ({len(model['pending'])})")
         devs = u.CreatePopupMenu()
         if not model["approved"]:
@@ -288,10 +296,12 @@ class Tray:
             u.AppendMenuW(devs, MF_POPUP, sub, f"{d['label']} · {d['ip']}")
         u.AppendMenuW(devs, MF_SEP, 0, None)
         u.AppendMenuW(devs, MF_STRING if model["approved"] else MF_GRAY, ID_KICKALL, "Expulsar a todos…")
+        u.AppendMenuW(devs, MF_STRING | (MF_CHECKED if self.lazo.STORE.enabled() else 0), ID_REMEMBER, "Recordar dispositivos")
+        u.AppendMenuW(devs, MF_STRING, ID_FORGET, "Olvidar todos…")
         u.AppendMenuW(menu, MF_POPUP, devs, f"Dispositivos conectados ({len(model['approved'])})")
         bridge = u.CreatePopupMenu()
         u.AppendMenuW(bridge, MF_STRING, ID_FOLDER, "Abrir carpeta «Recibido del móvil»")
-        u.AppendMenuW(bridge, MF_STRING, ID_BRIDGE, "Abrir el puente en la ventana del PC")
+        u.AppendMenuW(bridge, MF_STRING, ID_BRIDGE, f"Abrir el puente en el {PANEL}")
         u.AppendMenuW(menu, MF_POPUP, bridge, "Puente Wi-Fi")
         u.AppendMenuW(menu, MF_SEP, 0, None)
         u.AppendMenuW(menu, MF_STRING, ID_PROPS, "Propiedades…")
@@ -362,6 +372,15 @@ class Tray:
                 self.balloon("LaZoo", f"Expulsados: {n}")
             else:
                 action = "kickall-no"
+        elif action == "remember":
+            L.set_remember(not L.STORE.enabled())
+            self.balloon("LaZoo", "Recordar dispositivos: " + ("sí, se reconectan solos al reiniciar" if L.STORE.enabled() else "no, la clave cambia al reiniciar"))
+        elif action == "forget":
+            if self.ask("¿Olvidar todos los dispositivos?\nSe borra la clave guardada y la lista. Todos los móviles tendrán que volver a emparejarse (QR o PIN) y que los aceptes.", "LaZoo: olvidar todos"):
+                n = L.forget_all()["count"]
+                self.balloon("LaZoo", f"Olvidados: {n}. Clave nueva.")
+            else:
+                action = "forget-no"
         elif action == "props":
             self.info(self.props_text(), "Propiedades de LaZoo")
         elif action == "autorun":
@@ -382,6 +401,7 @@ class Tray:
                 f"Carpeta de recibidos: {folder}\n"
                 "Solo red local: sí (se rechaza cualquier IP de internet)\n"
                 f"Dispositivos nuevos: {'entran sin aprobación (modo pruebas)' if L.APPROVALS.auto else 'hay que aceptarlos en este PC'}\n"
+                f"Recordar dispositivos: {'sí' if L.STORE.enabled() else 'no'}\n"
                 f"Iniciar con Windows: {'sí' if autorun_enabled() else 'no'} (cámbialo en el menú del icono)")
 
     # ---- bucle ------------------------------------------------------------------
@@ -399,7 +419,7 @@ class Tray:
                 return 0
             if msg == WM_NEWDEV:
                 row = getattr(self, "last_new", {}) or {}
-                self.balloon("LaZoo: dispositivo nuevo", f"{row.get('label', 'Un móvil')} ({row.get('ip', '')}) quiere entrar. Acéptalo o recházalo en el menú del icono o en el cuadro de Windows.")
+                self.balloon("LaZoo: dispositivo nuevo", f"{row.get('label', 'Un móvil')} ({row.get('ip', '')}) quiere entrar. Acéptalo o recházalo en el cuadro de Windows o con clic derecho en este icono.")
                 return 0
             if msg == WM_SHOWME:
                 self.run_command(ID_OPEN)
@@ -446,7 +466,7 @@ def main(argv: list[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(description="LaZoo en la bandeja de Windows")
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--sin-ventana", action="store_true", help="no abrir la ventana del PC al arrancar")
+    parser.add_argument("--sin-ventana", action="store_true", help="no abrir el Panel de LaZoo al arrancar")
     args, extra = parser.parse_known_args(argv)
     tray = Tray(args.port, extra)
     if not tray.single():
@@ -455,9 +475,10 @@ def main(argv: list[str] | None = None) -> int:
         tray.info("No pude arrancar LaZoo: el puerto está ocupado o falta un permiso.")
         return 1
     tray.create()
-    tray.balloon("LaZoo está en marcha", f"Puerto {tray.lazo.PORT}. Clic derecho en el icono para el menú; doble clic abre la ventana del PC.")
+    tray.balloon("LaZoo está en marcha", f"Puerto {tray.lazo.PORT}. Clic derecho en el icono para el menú; doble clic abre el Panel de LaZoo.")
     if not args.sin_ventana:
-        # 0.44: al arrancar (también con Windows) se abre la ventana del PC con el QR y el PIN.
+        # 0.44: al arrancar (también con Windows) se abre el Panel de LaZoo con el QR y el PIN.
+        # 0.54: con «Recordar dispositivos», los móviles aprobados se reconectan solos.
         tray.open(tray.url("/mesa"))
     tray.loop()
     tray._stop_server()

@@ -2,6 +2,10 @@ package net.lazoo.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -30,7 +34,9 @@ import java.net.InetAddress;
 public class MainActivity extends Activity {
     static final String ASSETS = "https://appassets.androidplatform.net/assets/";
     static final String SCANNER = ASSETS + "escaner.html";
-    static final int REQ_CAMERA = 1, REQ_FILE = 2;
+    static final int REQ_CAMERA = 1, REQ_FILE = 2, REQ_NOTIFY = 3;
+    static final String CHANNEL = "lazoo-aprobacion";
+    static final int NOTE_WAIT = 54;
 
     WebView web;
     WifiManager.WifiLock wifiLock;
@@ -91,6 +97,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         holdWifi(false);
+        clearWaitNote();
         super.onDestroy();
     }
 
@@ -98,6 +105,51 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle out) {
         super.onSaveInstanceState(out);
         web.saveState(out);
+    }
+
+    // 0.54: aviso en la barra de notificaciones mientras el PC no acepta este móvil.
+    // Canal nativo de Android, sin servicios de Google (vale en GrapheneOS).
+    String noteTitle, noteText;
+
+    void showWaitNote(String title, String text) {
+        noteTitle = title;
+        noteText = text;
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFY);
+                return; // el aviso de arriba de la pantalla sigue saliendo igual
+            }
+            Notification.Builder b;
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel ch = new NotificationChannel(CHANNEL, "Aprobación en el PC", NotificationManager.IMPORTANCE_HIGH);
+                ch.setDescription("Avisa cuando hay que aceptar este móvil en el PC");
+                nm.createNotificationChannel(ch);
+                b = new Notification.Builder(this, CHANNEL);
+            } else {
+                b = new Notification.Builder(this).setPriority(Notification.PRIORITY_HIGH);
+            }
+            Intent open = new Intent(this, MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            PendingIntent pi = PendingIntent.getActivity(this, 0, open, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            b.setSmallIcon(getApplicationInfo().icon).setContentTitle(title).setContentText(text)
+                    .setStyle(new Notification.BigTextStyle().bigText(text))
+                    .setOngoing(true).setOnlyAlertOnce(true).setContentIntent(pi).setCategory(Notification.CATEGORY_STATUS);
+            nm.notify(NOTE_WAIT, b.build());
+        } catch (Exception e) {
+            // sin aviso del sistema: queda el de la pantalla
+        }
+    }
+
+    void clearWaitNote() {
+        noteTitle = null;
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(NOTE_WAIT);
+        } catch (Exception e) {
+            // nada
+        }
     }
 
     SharedPreferences prefs() { return getSharedPreferences("lazoo", MODE_PRIVATE); }
@@ -148,6 +200,16 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void scan() { runOnUiThread(MainActivity.this::rescan); }
+
+        @JavascriptInterface
+        public void waitNote(final String title, final String text) {
+            final String t = title == null ? "LaZoo" : title.substring(0, Math.min(80, title.length()));
+            final String x = text == null ? "" : text.substring(0, Math.min(240, text.length()));
+            runOnUiThread(() -> showWaitNote(t, x));
+        }
+
+        @JavascriptInterface
+        public void clearNote() { runOnUiThread(MainActivity.this::clearWaitNote); }
     }
 
     class Client extends WebViewClient {
@@ -214,6 +276,11 @@ public class MainActivity extends Activity {
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        if (code == REQ_NOTIFY) {
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED && noteTitle != null)
+                showWaitNote(noteTitle, noteText);
+            return;
+        }
         if (code != REQ_CAMERA || pendingPermission == null) return;
         if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED)
             pendingPermission.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});

@@ -3,125 +3,97 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Puente Wi-Fi</title>
+    <title>Panel de LaZoo</title>
     <style>
-      :root { color-scheme: dark; }
+      :root { color-scheme: dark; --naranja: #e07a3d; --fondo: #141210; --caja: #241f1a; --hondo: #16130f; --borde: #4a4036; --texto: #f3eee6; --suave: #c4b8aa; }
       * { box-sizing: border-box; }
-      body {
-        margin: 0;
-        background: #141210;
-        color: #f3eee6;
-        font-family: "Segoe UI", system-ui, sans-serif;
-      }
-      main { max-width: 980px; margin: 0 auto; padding: 28px 20px 48px; }
-      h1 {
-        margin: 0 0 8px;
-        font-family: Georgia, serif;
-        font-style: italic;
-        font-weight: 500;
-        font-size: 2rem;
-      }
-      h2 { margin: 0 0 10px; font-size: 1rem; color: #e07a3d; }
-      .top {
-        display: flex;
-        align-items: center;
-        gap: 14px;
-        margin: -28px -20px 22px;
-        padding: 14px 18px;
-        background: #241f1a;
-        border-bottom: 1px solid #4a4036;
-      }
-      .brand {
-        display: flex;
-        align-items: baseline;
-        margin: 0;
-        font-family: Georgia, "Times New Roman", serif;
-        font-style: italic;
-        font-size: 34px;
-        line-height: 1;
-      }
-      .ver { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.12em; color: #c4b8aa; }
+      html, body { margin: 0; min-height: 100%; }
+      body { background: var(--fondo); color: var(--texto); font-family: "Segoe UI", system-ui, sans-serif; font-size: 15px; }
+      /* 0.54: Panel apaisado pensado para escritorio (de 1100 a 1600 px de ancho). */
+      main { max-width: 1600px; margin: 0 auto; padding: 0 28px 32px; }
+      h2 { margin: 0 0 10px; font-size: 1rem; color: var(--naranja); letter-spacing: 0.02em; }
+      p { color: var(--suave); margin: 0 0 8px; }
+      small { color: var(--suave); }
+      .top { display: flex; align-items: center; gap: 18px; margin: 0 -28px 20px; padding: 12px 28px; background: var(--caja); border-bottom: 1px solid var(--borde); }
+      .brand { display: flex; align-items: baseline; margin: 0; font-family: Georgia, "Times New Roman", serif; font-style: italic; font-size: 34px; line-height: 1; }
+      .ver { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.12em; color: var(--suave); }
       .oo { display: inline-flex; align-items: center; }
-      .bridge {
-        width: 0; height: 3px; border-radius: 99px; background: transparent;
-        transition: width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease;
-      }
+      .bridge { width: 0; height: 3px; border-radius: 99px; background: transparent; transition: width 0.35s ease, background 0.35s ease, box-shadow 0.35s ease; }
       .o.right { transition: margin-left 0.35s ease; }
       .top[data-link="on"] .bridge { width: 16px; background: #3dbe6e; box-shadow: 0 0 10px #3dbe6e; }
       .top[data-link="on"] .oo { color: #3dbe6e; }
       .top[data-link="off"] .o.right { margin-left: -0.55em; }
       .top[data-link="off"] .oo { color: #e23b3b; text-shadow: 0 0 12px rgba(226, 59, 59, 0.9); }
-      #link-label { margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; }
+      .title { margin: 0; font-size: 1.25rem; font-weight: 600; color: var(--texto); }
+      #link-label { margin: 0; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
       .top[data-link="on"] #link-label { color: #3dbe6e; }
       .top[data-link="off"] #link-label { color: #e23b3b; }
-      p { color: #c4b8aa; }
-      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-      section { background: #241f1a; border-radius: 18px; padding: 16px; min-height: 420px; }
-      section.fotos { min-height: 0; margin-top: 22px; }
+      .top .grow { flex: 1; }
+      .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px; background: var(--hondo); border: 1px solid var(--borde); color: var(--suave); font-size: 13px; }
+      .chip input { accent-color: var(--naranja); width: 18px; height: 18px; margin: 0; }
       textarea, button, input { font: inherit; color: inherit; }
-      textarea {
-        width: 100%;
-        min-height: 110px;
-        border: 1px solid #4a4036;
-        border-radius: 12px;
-        background: #16130f;
-        padding: 10px 12px;
-        resize: vertical;
-      }
-      button, .drop {
-        border: 0;
-        border-radius: 12px;
-        background: #3a332b;
-        min-height: 44px;
-      }
-      button.primary { background: #e07a3d; color: #141210; font-weight: 650; }
-      .row { display: flex; gap: 8px; margin-top: 8px; }
-      .drop {
-        display: grid;
-        place-items: center;
-        border: 1px dashed #4a4036;
-        color: #c4b8aa;
-        margin-bottom: 10px;
-      }
+      button, .drop { border: 0; border-radius: 12px; background: #3a332b; min-height: 42px; cursor: pointer; }
+      button:hover { filter: brightness(1.12); }
+      button.primary { background: var(--naranja); color: var(--fondo); font-weight: 650; }
+      button.danger { background: #8e2a22; color: #fff; }
+      .waiting { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; margin: 0 0 18px; padding: 14px 18px; border-radius: 14px; border: 2px solid var(--naranja); background: #2b1f15; }
+      .waiting[hidden] { display: none; }
+      .waiting .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--naranja); box-shadow: 0 0 14px var(--naranja); animation: late 1.2s ease-in-out infinite; }
+      .waiting p { margin: 0; color: var(--texto); }
+      .waiting b { color: var(--naranja); }
+      @keyframes late { 50% { opacity: 0.35; } }
+      /* Esperando conexión: QR | PIN y direcciones | menú */
+      .conn { display: grid; grid-template-columns: 300px minmax(320px, 1fr) 300px; gap: 28px; align-items: stretch; margin: 0 0 20px; padding: 22px; border-radius: 18px; background: #1d1915; border: 2px solid var(--naranja); }
+      .conn[hidden] { display: none; }
+      .conn .qr { width: 300px; height: 300px; background: #fff; padding: 14px; border-radius: 10px; }
+      .conn .qr svg { width: 100%; height: 100%; display: block; }
+      .conn h2 { font-size: 1.45rem; margin-bottom: 6px; }
+      .conn .pin { font-size: 3rem; letter-spacing: 0.22em; color: #fff; margin: 6px 0 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
+      .conn .url { font-size: 1.1rem; color: #fff; word-break: break-all; margin: 0 0 4px; }
+      .conn ol { margin: 10px 0 0; padding-left: 20px; color: var(--suave); line-height: 1.6; }
+      .conn .menu { display: grid; align-content: start; gap: 10px; padding-left: 24px; border-left: 1px solid var(--borde); }
+      .conn .menu a, .conn .menu button { min-height: 46px; padding: 0 16px; border-radius: 12px; display: grid; place-items: center; background: #3a332b; color: var(--texto); text-decoration: none; border: 0; font: inherit; cursor: pointer; }
+      .conn .menu .primary { background: var(--naranja); color: var(--fondo); font-weight: 650; }
+      /* Rejilla de trabajo: estado y dispositivos a la izquierda, puente a la derecha */
+      .board { display: grid; grid-template-columns: 340px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "side clip files" "side recv recv"; gap: 20px; align-items: start; }
+      .side { grid-area: side; display: grid; gap: 20px; min-width: 0; }
+      .board > * { min-width: 0; }
+      #clip-box { grid-area: clip; }
+      #files-box { grid-area: files; }
+      #puente { grid-area: recv; }
+      section.box { background: var(--caja); border-radius: 18px; padding: 16px 18px; border: 1px solid #2f2822; }
+      #clip-box, #files-box { min-height: 420px; }
+      textarea { width: 100%; min-height: 96px; border: 1px solid var(--borde); border-radius: 12px; background: var(--hondo); padding: 10px 12px; resize: vertical; }
+      .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+      .drop { display: grid; place-items: center; min-height: 96px; border: 1px dashed var(--borde); color: var(--suave); margin-bottom: 10px; background: var(--hondo); }
       ul { list-style: none; margin: 12px 0 0; padding: 0; }
       li { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
-      li button, li a { flex: 1; text-align: left; }
+      li button, li a { flex: 1; text-align: left; padding: 8px 12px; overflow: hidden; text-overflow: ellipsis; }
       li .copy { flex: none; width: 88px; text-align: center; }
-      a {
-        color: #f3eee6;
-        text-decoration: none;
-        background: #16130f;
-        border-radius: 12px;
-        padding: 10px 12px;
+      li small { align-self: center; white-space: nowrap; }
+      a { color: var(--texto); text-decoration: none; background: var(--hondo); border-radius: 12px; padding: 10px 12px; }
+      #clips, #files { max-height: 52vh; overflow: auto; }
+      .stat { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
+      .stat dt { color: var(--suave); }
+      .stat dd { margin: 0; color: var(--texto); text-align: right; }
+      .devs li { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; background: var(--hondo); border-radius: 12px; padding: 10px 12px; }
+      .devs li span { color: var(--texto); }
+      .devs li small { grid-column: 1; white-space: normal; overflow-wrap: anywhere; }
+      .devs li button { grid-row: 1 / span 2; grid-column: 2; flex: none; padding: 0 12px; min-height: 36px; }
+      .estado-pendiente { color: var(--naranja) !important; }
+      #fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 12px; }
+      #fotos li { margin: 0; color: var(--suave); }
+      body.connected .conn { display: none; }
+      @media (max-width: 1180px) {
+        .conn { grid-template-columns: 260px 1fr; }
+        .conn .qr { width: 260px; height: 260px; }
+        .conn .menu { grid-column: 1 / -1; padding-left: 0; border-left: 0; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+        .board { grid-template-columns: 300px minmax(0, 1fr); grid-template-areas: "side clip" "side files" "recv recv"; }
       }
-      small { color: #c4b8aa; }
-      .choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-      .choices button { padding: 0 14px; }
-      .card { background: #16130f; border-radius: 12px; padding: 12px; margin-top: 12px; }
-      .card p { margin: 0 0 6px; }
-      .track { height: 8px; border-radius: 99px; background: #16130f; overflow: hidden; margin-top: 6px; }
-      .fill { height: 100%; background: #e07a3d; }
-      .jobs li { display: block; background: #16130f; border-radius: 12px; padding: 10px 12px; }
-      .jobs li .row button, .jobs li .row a { flex: none; padding: 0 14px; display: inline-grid; place-items: center; min-height: 40px; background: #3a332b; }
-      .ask { display: grid; gap: 10px; margin: 0 0 18px; }
-      .ask .card { border: 2px solid #e07a3d; border-radius: 14px; padding: 14px 16px; background: #241f1a; display: grid; gap: 10px; }
-      .ask .card p { margin: 0; }
-      .ask .card .row { display: flex; gap: 10px; }
-      .ask .card .row button { flex: 1; min-height: 48px; }
-      button.danger { background: #b3261e; color: #fff; }
-      .devs .jobs li { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
-      .conn { border: 2px solid #e07a3d; border-radius: 16px; background: #1d1915; padding: 18px; margin: 0 0 22px; display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: center; }
-      .conn[hidden] { display: none; }
-      .conn .qr { width: 240px; height: 240px; background: #fff; padding: 12px; border-radius: 8px; }
-      .conn .qr svg { width: 100%; height: 100%; display: block; }
-      .conn h2 { margin: 0 0 8px; color: #e07a3d; font-size: 1.3rem; }
-      .conn .pin { font-size: 2.4rem; letter-spacing: 0.2em; color: #fff; margin: 4px 0 8px; font-weight: 600; }
-      .conn .url { font-size: 1.15rem; color: #fff; word-break: break-all; margin: 0 0 4px; }
-      .conn .menu { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-      .conn .menu a, .conn .menu button { min-height: 40px; padding: 0 14px; border-radius: 10px; display: inline-grid; place-items: center; background: #3a332b; color: #f3eee6; text-decoration: none; border: 0; font: inherit; cursor: pointer; }
-      .conn .menu .primary { background: #e07a3d; color: #141210; }
-      @media (max-width: 640px) { .conn { grid-template-columns: 1fr; justify-items: center; text-align: center; } }
-      @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+      @media (max-width: 760px) {
+        .conn, .board { grid-template-columns: 1fr; grid-template-areas: "side" "clip" "files" "recv"; }
+        .conn { justify-items: center; text-align: center; }
+      }
     </style>
   </head>
   <body>
@@ -129,55 +101,82 @@
       <header id="status" class="top" data-link="off">
         <div>
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.53</p>
+          <p class="ver">0.54</p>
         </div>
-        <p id="link-label">Sin conexión</p>
+        <div>
+          <p class="title">Panel de LaZoo</p>
+          <p id="link-label">Sin conexión</p>
+        </div>
+        <div class="grow"></div>
+        <label class="chip" title="Guarda la clave cifrada en este PC para que los móviles aprobados se reconecten solos tras reiniciar">
+          <input id="recordar" type="checkbox" /> Recordar dispositivos
+        </label>
       </header>
-      <div id="ask" class="ask" hidden></div>
+      <!-- 0.54: el Panel solo informa. Se acepta o rechaza en el aviso de Windows o en el icono de la bandeja. -->
+      <div id="ask" class="waiting" role="status" aria-live="polite" hidden>
+        <span class="dot" aria-hidden="true"></span>
+        <p id="ask-text">Hay un dispositivo esperando aprobación: acéptalo desde el aviso de Windows o el icono de la bandeja.</p>
+      </div>
       <section id="conexion" class="conn" aria-label="Conectar un móvil" hidden>
         <div id="conn-qr" class="qr" aria-label="Código QR para conectar"></div>
         <div>
           <h2>Conecta tu móvil</h2>
-          <p>Escanea el QR con la app LaZoo o la cámara del móvil. Si escribes la dirección a mano, usa este PIN:</p>
+          <p>Escanea el QR con la app LaZoo o la cámara del móvil. Sin cámara, abre la dirección y escribe este PIN:</p>
           <p id="conn-pin" class="pin"></p>
           <div id="conn-urls"></div>
-          <p><small>Misma Wi-Fi. Este panel se oculta al conectar un móvil y vuelve cuando no queda ninguno.</small></p>
-          <div class="menu">
-            <a class="primary" href="/conectar" target="_blank" rel="noopener">QR a pantalla completa</a>
-            <button id="conn-puente" type="button">Puente Wi-Fi</button>
-            <button id="conn-devs" type="button">Dispositivos</button>
-          </div>
+          <ol>
+            <li>El móvil pide permiso con el QR o el PIN (no recibe aún la clave).</li>
+            <li>Acéptalo <span id="conn-where">en el aviso de Windows o en el icono de la bandeja</span>.</li>
+            <li>Solo entonces le llega la clave cifrada y queda conectado.</li>
+          </ol>
+        </div>
+        <div class="menu">
+          <a class="primary" href="/conectar" target="_blank" rel="noopener">QR a pantalla completa</a>
+          <button id="conn-puente" type="button">Recibido del móvil</button>
+          <button id="conn-devs" type="button">Dispositivos</button>
+          <p><small>Misma Wi-Fi. Este bloque se oculta al conectar un móvil y vuelve cuando no queda ninguno.</small></p>
         </div>
       </section>
-      <h1>Puente Wi-Fi</h1>
-      <p>Solo la Wi-Fi de esta casa. Nada de esto sale a internet. Si el móvil entró con el QR, quien escuche la red ve el tráfico cifrado, no el texto ni los archivos. Lo que ya estaba copiado al abrir no se guarda: pégalo si lo quieres en las notas.</p>
-      <div class="grid">
-        <section>
+      <div class="board">
+        <div class="side">
+          <section class="box" aria-label="Estado">
+            <h2>Estado</h2>
+            <dl class="stat">
+              <dt>Móviles conectados</dt><dd id="st-on">0</dd>
+              <dt>Esperando aprobación</dt><dd id="st-wait">0</dd>
+              <dt>Recordar dispositivos</dt><dd id="st-rec">—</dd>
+              <dt>Red</dt><dd id="st-net">—</dd>
+            </dl>
+          </section>
+          <section id="dispositivos" class="box devs">
+            <h2>Dispositivos</h2>
+            <p><small>Solo red local. Los móviles nuevos se aceptan en el aviso de Windows o en el icono de la bandeja; aquí solo se ven.</small></p>
+            <ul id="devs"></ul>
+            <div class="row">
+              <button id="kick-all" type="button">Expulsar a todos</button>
+              <button id="forget-all" class="danger" type="button">Olvidar todos</button>
+            </div>
+          </section>
+        </div>
+        <section id="clip-box" class="box">
           <h2>Portapapeles</h2>
           <textarea id="paste" placeholder="Pega aquí un texto del PC"></textarea>
           <div class="row"><button id="save" class="primary" type="button">Guardar en el móvil</button></div>
           <ul id="clips"></ul>
         </section>
-        <section>
-          <h2>Archivos</h2>
+        <section id="files-box" class="box">
+          <h2>Archivos para el móvil</h2>
           <div id="drop" class="drop" role="button" tabindex="0" aria-label="Suelta archivos o pulsa para elegir">Suelta archivos aquí (cualquier tipo y tamaño)</div>
-          <input id="file" type="file" multiple aria-label="Elegir archivos para el móvil" />
+          <input id="file" type="file" multiple aria-label="Elegir archivos para el móvil" hidden />
           <p id="up-stat" aria-live="polite"><small></small></p>
           <ul id="files"></ul>
         </section>
+        <section id="puente" class="box">
+          <h2>Recibido del móvil</h2>
+          <div class="row" style="align-items:center;margin:0 0 6px"><p id="fotos-path" style="flex:1;margin:0">Todavía no ha llegado nada.</p><button id="open-fotos" type="button">Abrir carpeta</button></div>
+          <ul id="fotos"></ul>
+        </section>
       </div>
-      <section id="puente" class="fotos">
-        <h2>Recibido del móvil</h2>
-        <p id="fotos-path">Todavía no ha llegado nada.</p>
-        <button id="open-fotos" type="button">Abrir carpeta</button>
-        <ul id="fotos"></ul>
-      </section>
-      <section id="dispositivos" class="fotos devs">
-        <h2>Dispositivos</h2>
-        <p><small>Solo acepta conexiones de tu red local. Cada móvil nuevo hay que aceptarlo aquí la primera vez.</small></p>
-        <ul id="devs" class="jobs"></ul>
-        <div class="row"><button id="kick-all" class="danger" type="button">Expulsar a todos</button></div>
-      </section>
     </main>
     <script>
       const nativeFetch = window.fetch.bind(window);
@@ -205,39 +204,6 @@
         const text = event.clipboardData && event.clipboardData.getData("text");
         if (text) pushText(text, false);
       });
-
-      async function watchLink() {
-        try {
-          const data = await fetch("/api/seen").then((res) => res.json());
-          const bar = document.querySelector("#status");
-          bar.dataset.link = data.paired ? "on" : "off";
-          document.querySelector("#link-label").textContent = data.paired ? "Móvil conectado" : "Sin conexión";
-        } catch (_err) {}
-      }
-
-      let connShown = null;
-      async function watchConn() {
-        try {
-          const data = await fetch("/api/conexion").then((res) => res.json());
-          const show = !(data.connected > 0);
-          const box = document.querySelector("#conexion");
-          if (show) {
-            const qr = document.querySelector("#conn-qr");
-            if (qr.dataset.svg !== data.qr) { qr.innerHTML = data.qr || ""; qr.dataset.svg = data.qr || ""; }
-            document.querySelector("#conn-pin").textContent = data.pin || "";
-            const urls = document.querySelector("#conn-urls");
-            urls.replaceChildren(...(data.targets || []).map((t) => {
-              const p = document.createElement("p");
-              p.className = "url";
-              p.textContent = t.url + "  (" + t.label + ")";
-              return p;
-            }));
-          }
-          if (show !== connShown) { box.hidden = !show; connShown = show; }
-        } catch (_err) {}
-      }
-      document.querySelector("#conn-puente").addEventListener("click", () => document.querySelector("#puente").scrollIntoView({ behavior: "smooth" }));
-      document.querySelector("#conn-devs").addEventListener("click", () => document.querySelector("#dispositivos").scrollIntoView({ behavior: "smooth" }));
 
       async function watchClipboard() {
         try {
@@ -392,52 +358,71 @@
         if (!res.ok) throw new Error(data.error || "No se pudo");
         return data;
       }
-      let askKey = "";
+
+      async function watchLink() {
+        try {
+          const data = await fetch("/api/seen").then((res) => res.json());
+          const bar = document.querySelector("#status");
+          bar.dataset.link = data.paired ? "on" : "off";
+          document.querySelector("#link-label").textContent = data.paired ? "Móvil conectado" : "Sin conexión";
+        } catch (_err) {}
+      }
+
+      // Solo estado: aquí no hay botones de aceptar ni rechazar (eso va en Windows/bandeja).
+      let connShown = null;
+      async function watchConn() {
+        try {
+          const data = await fetch("/api/conexion").then((res) => res.json());
+          const show = !(data.connected > 0);
+          const box = document.querySelector("#conexion");
+          if (show) {
+            const qr = document.querySelector("#conn-qr");
+            if (qr.dataset.svg !== data.qr) { qr.innerHTML = data.qr || ""; qr.dataset.svg = data.qr || ""; }
+            document.querySelector("#conn-pin").textContent = data.pin || "";
+            const urls = document.querySelector("#conn-urls");
+            urls.replaceChildren(...(data.targets || []).map((t) => {
+              const p = document.createElement("p");
+              p.className = "url";
+              p.textContent = t.url + "  (" + t.label + ")";
+              return p;
+            }));
+          }
+          if (data.approve_where) $("#conn-where").textContent = data.approve_where;
+          if (show !== connShown) { box.hidden = !show; connShown = show; document.body.classList.toggle("connected", !show); }
+          const waiting = data.waiting || [];
+          $("#ask").hidden = !waiting.length;
+          if (waiting.length) {
+            const d = waiting[0];
+            const more = waiting.length > 1 ? ` (y ${waiting.length - 1} más)` : "";
+            $("#ask-text").innerHTML = "";
+            const b = document.createElement("b");
+            b.textContent = "Hay un dispositivo esperando aprobación";
+            $("#ask-text").append(b, document.createTextNode(`: ${d.label} (${d.ip}${d.fp ? ", huella " + d.fp : ""})${more}. Acéptalo ${data.approve_where || "en el aviso de Windows o en el icono de la bandeja"}. Quedan ${d.left} s.`));
+          }
+          document.title = waiting.length ? "Esperando aprobación · Panel de LaZoo" : "Panel de LaZoo";
+          $("#st-on").textContent = String(data.connected || 0);
+          $("#st-wait").textContent = String(waiting.length);
+          $("#st-wait").className = waiting.length ? "estado-pendiente" : "";
+          $("#st-rec").textContent = data.recordar ? "Sí" : "No";
+          $("#recordar").checked = !!data.recordar;
+          $("#st-net").textContent = (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red";
+        } catch (_err) {}
+      }
+      document.querySelector("#conn-puente").addEventListener("click", () => document.querySelector("#puente").scrollIntoView({ behavior: "smooth" }));
+      document.querySelector("#conn-devs").addEventListener("click", () => document.querySelector("#dispositivos").scrollIntoView({ behavior: "smooth" }));
+
       async function loadDevices() {
         let list = [];
         try { list = (await devCall("/api/dispositivos")).devices || []; } catch (_err) { return; }
-        const pending = list.filter((d) => d.state === "pendiente");
-        const key = pending.map((d) => d.id).join(",");
-        if (key !== askKey) {
-          askKey = key;
-          $("#ask").replaceChildren(...pending.map((d) => {
-            const card = document.createElement("div");
-            card.className = "card";
-            card.dataset.id = d.id;
-            const p = document.createElement("p");
-            p.textContent = `Nuevo dispositivo ${d.label} (${d.ip}, id ${d.short}) quiere entrar. Podrá usar el ratón y el teclado de este PC.`;
-            const left = document.createElement("small");
-            left.className = "left";
-            const row = document.createElement("div");
-            row.className = "row";
-            const yes = document.createElement("button");
-            yes.className = "primary";
-            yes.type = "button";
-            yes.textContent = "Aceptar";
-            const no = document.createElement("button");
-            no.className = "danger";
-            no.type = "button";
-            no.textContent = "Rechazar";
-            yes.addEventListener("click", () => devCall("/api/dispositivos/decidir", { id: d.id, ok: true }).then(loadDevices).catch(() => {}));
-            no.addEventListener("click", () => devCall("/api/dispositivos/decidir", { id: d.id, ok: false }).then(loadDevices).catch(() => {}));
-            row.append(yes, no);
-            card.append(p, left, row);
-            return card;
-          }));
-        }
-        pending.forEach((d) => {
-          const left = $("#ask").querySelector(`.card[data-id="${d.id}"] .left`);
-          if (left) left.textContent = `Si no respondes en ${d.left} s, se rechaza.`;
-        });
-        $("#ask").hidden = !pending.length;
-        if (pending.length) document.title = "¿Aceptar dispositivo? · LaZoo";
-        else document.title = "Puente Wi-Fi";
         $("#devs").replaceChildren(...(list.length ? list : [null]).map((d) => {
           const li = document.createElement("li");
           if (!d) { li.textContent = "Ningún dispositivo todavía."; return li; }
           const t = document.createElement("span");
-          t.textContent = `${d.label} · ${d.ip} · id ${d.short} · ${STATES[d.state] || d.state}`;
-          li.append(t);
+          t.textContent = `${d.label} · ${STATES[d.state] || d.state}`;
+          if (d.state === "pendiente") t.className = "estado-pendiente";
+          const s = document.createElement("small");
+          s.textContent = [d.ip, "id " + d.short, d.fp ? "huella " + d.fp : "", d.fecha ? "desde " + d.fecha : "", d.recordado ? "recordado" : ""].filter(Boolean).join(" · ");
+          li.append(t, s);
           if (d.state === "aprobado") {
             const b = document.createElement("button");
             b.type = "button";
@@ -453,8 +438,15 @@
         if (!confirm("¿Expulsar a todos los dispositivos? Tendrán que volver a ser aprobados en este PC.")) return;
         devCall("/api/dispositivos/expulsar", { all: true }).then(loadDevices).catch(() => {});
       });
+      $("#forget-all").addEventListener("click", () => {
+        if (!confirm("¿Olvidar todos los dispositivos? Se borra la clave guardada y la lista, se cierran las sesiones y todos tendrán que emparejarse y ser aceptados otra vez.")) return;
+        devCall("/api/olvidar", {}).then(() => { loadDevices(); watchConn(); }).catch(() => {});
+      });
+      $("#recordar").addEventListener("change", (event) => {
+        devCall("/api/recordar", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
+      });
       loadDevices();
-      setInterval(loadDevices, 1000);
+      setInterval(() => { if (!document.hidden) loadDevices(); }, 1500);
       watchConn();
       setInterval(() => { if (!document.hidden) watchConn(); }, 1500);
       document.addEventListener("visibilitychange", () => { if (!document.hidden) watchConn(); });
@@ -463,13 +455,13 @@
       setInterval(() => { if (!document.hidden) load(); }, 2000);
       setInterval(() => { if (!document.hidden) watchLink(); }, 2000);
       setInterval(() => { if (!document.hidden) watchClipboard(); }, 2000);
-    
-    // La bandeja abre /mesa#pastilla=puente o #pastilla=dispositivos.
-    (() => {
-      const want = new URLSearchParams(location.hash.slice(1)).get("pastilla");
-      const box = want && document.getElementById(want);
-      if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
-    })();
-</script>
+
+      // La bandeja abre /mesa#pastilla=puente o #pastilla=dispositivos.
+      (() => {
+        const want = new URLSearchParams(location.hash.slice(1)).get("pastilla");
+        const box = want && document.getElementById(want);
+        if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+      })();
+    </script>
   </body>
 </html>

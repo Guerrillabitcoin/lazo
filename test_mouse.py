@@ -329,7 +329,8 @@ def test_protocol() -> None:
     if pairing.verify("GET", "/api/status", 0, other[protocol.H_T], other[protocol.H_N], other[protocol.H_S]) != "firma":
         raise SystemExit("aceptó la firma de otro anfitrión")
     url = pairing.phone_url("http", "192.168.1.2", 8787)
-    if not url.startswith("http://192.168.1.2:8787/#k=") or "p=" in url:
+    # 0.54: el QR lleva la ficha de emparejamiento, nunca la clave.
+    if not url.startswith("http://192.168.1.2:8787/#p=") or "k=" in url or pairing.key_text() in url:
         raise SystemExit("dirección del QR")
     if protocol.ws_accept("dGhlIHNhbXBsZSBub25jZQ==") != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=":
         raise SystemExit("saludo del websocket")
@@ -413,14 +414,11 @@ def test_remote_security() -> None:
         if b"401" not in head.split(b"\r\n", 1)[0]:
             raise SystemExit("aceptó un websocket sin firma")
 
-        # PIN: da la clave una vez bien puesto, sin cookie.
+        # 0.54: el PIN ya no entrega la clave (se empareja con /api/pair/*, ver test_v054.py).
         plain = {"Content-Type": "application/json"}
-        status, _ = _post(port, "/api/login", json.dumps({"pin": "000000"}).encode(), plain)
-        if status != 401:
-            raise SystemExit("PIN malo")
         status, body = _post(port, "/api/login", json.dumps({"pin": pairing.pin}).encode(), plain)
-        if status != 200 or json.loads(body)["key"] != pairing.key_text():
-            raise SystemExit("el PIN no entregó la clave")
+        if status != 410 or pairing.key_text().encode() in body:
+            raise SystemExit("el PIN antiguo no debe entregar la clave")
         print("remoto: firma única, sin cookie, sellado obligatorio, PC protegido de webs ajenas")
     finally:
         lazo.Handler._loopback = real_loopback

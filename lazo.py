@@ -27,15 +27,18 @@ import aprobacion
 import control
 import protocol
 import puente
+import recordar
 import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-VERSION = "0.53"
+VERSION = "0.54"
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
 APPROVALS.auto = os.environ.get("LAZO_AUTOAPPROVE") == "1"  # SOLO pruebas; nunca por defecto
 REJECTS = aprobacion.RejectLog()
+STORE = recordar.Store()
+PANEL_TITLE = "Panel de LaZoo"
 PORT = 8787
 VISITS: list[str] = []
 VISITS_LOCK = threading.Lock()
@@ -264,7 +267,60 @@ def connection_info() -> dict:
         "qr": qr,
         "targets": [{"label": label, "ip": ip, "url": plain_url(ip)} for label, ip in targets],
         "pending": len([d for d in APPROVALS.listing() if d["state"] == "pendiente"]),
+        "waiting": [{"label": d["label"], "ip": d["ip"], "short": d["short"], "left": d["left"], "fp": d.get("fp", "")}
+                    for d in APPROVALS.listing() if d["state"] == "pendiente"],
+        "recordar": STORE.enabled(),
+        "approve_where": approve_where(),
     }
+
+
+def approve_where() -> str:
+    """Dónde se aceptan los dispositivos nuevos (la única forma, 0.54)."""
+    if sys.platform == "win32":
+        return "en el aviso de Windows o en el icono de LaZoo de la bandeja"
+    return "en la consola donde corre LaZoo (S/N)"
+
+
+def persist_devices() -> None:
+    """Con «Recordar dispositivos», guarda clave y aprobados tras cada cambio."""
+    if APPROVALS.auto:
+        return
+    try:
+        if STORE.enabled():
+            STORE.save(PAIRING.key, APPROVALS.approved_rows())
+    except OSError:
+        print("  No pude guardar los dispositivos recordados.", flush=True)
+
+
+def set_remember(on: bool) -> dict:
+    STORE.set_enabled(bool(on), PAIRING.key if on else None, APPROVALS.approved_rows() if on else None)
+    print(f"  Recordar dispositivos: {'sí' if on else 'no'}", flush=True)
+    return {"ok": True, "recordar": STORE.enabled()}
+
+
+def forget_all() -> dict:
+    """«Olvidar todos»: borra clave y lista, clave nueva, fuera todas las sesiones."""
+    count = APPROVALS.kick_all()
+    STORE.forget()
+    PAIRING.rekey()
+    _QR_CACHE.clear()
+    print(f"  Olvidados todos los dispositivos ({count}). Clave nueva: hay que volver a emparejar.", flush=True)
+    return {"ok": True, "count": count, "recordar": STORE.enabled()}
+
+
+def load_remembered() -> int:
+    if APPROVALS.auto:
+        return 0
+    try:
+        saved = STORE.load()
+    except OSError:
+        saved = None
+    if not saved:
+        return 0
+    key, rows = saved
+    PAIRING.set_key(key)
+    APPROVALS.preload(rows)
+    return len(rows)
 
 
 def connect_page() -> bytes:
@@ -291,7 +347,7 @@ def connect_page() -> bytes:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Conectar Lazo</title>
+  <title>QR · {PANEL_TITLE}</title>
   <style>
     body {{ margin: 0; background: #141210; color: #f3eee6; font-family: "Segoe UI", system-ui, sans-serif; }}
     main {{ max-width: 520px; margin: 0 auto; padding: 48px 16px; text-align: center; }}
@@ -356,10 +412,10 @@ def connect_page() -> bytes:
     </header>
     <div id="pair">
       {''.join(blocks)}
-      <p id="ayuda" class="note">Misma Wi-Fi. Si el navegador dice que no es segura, es la dirección de casa.</p>
+      <p id="ayuda" class="note">Misma Wi-Fi. El QR solo sirve para pedir permiso: la clave llega al móvil cuando lo aceptas en este PC.</p>
     </div>
-    <p id="pending" class="note" hidden><a href="/mesa">Un dispositivo nuevo quiere entrar: acéptalo o recházalo aquí</a></p>
-    <p class="note"><a href="/mesa">Abrir el puente Wi-Fi</a></p>
+    <p id="pending" class="note" hidden>Hay un dispositivo esperando aprobación: acéptalo {escape(approve_where())}.</p>
+    <p class="note"><a href="/mesa">Abrir el {PANEL_TITLE}</a></p>
     <p class="note">Solo acepta conexiones de tu red local.</p>
   </main>
   <script>
@@ -603,6 +659,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/dispositivos":
             self._guard(lambda _body: {"devices": APPROVALS.listing(), "me": self._who() if self.remote else ""})
             return
+        if path == "/api/recordar":
+            self._local_only(lambda _body: {"recordar": STORE.enabled(), "devices": APPROVALS.approved_rows()})
+            return
         if path == "/api/status":
             self._guard(lambda _body: {**control.status(), "version": VERSION})
             return
@@ -660,6 +719,15 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path == "/api/login":
             self._login()
+            return
+        if path in ("/api/pair/hello", "/api/pair/claim", "/api/pair/wait"):
+            self._pair(path.rsplit("/", 1)[-1])
+            return
+        if path == "/api/recordar":
+            self._local_only(lambda body: set_remember(bool(body.get("on"))))
+            return
+        if path == "/api/olvidar":
+            self._local_only(lambda _body: forget_all())
             return
         if path == "/api/clipboard":
             self._push_clip()
@@ -732,24 +800,62 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _login(self) -> None:
-        """Emparejar con el PIN cuando no hay cámara. Devuelve la clave sin cifrar:
-        es la parte menos segura, y el QR es el camino recomendado."""
+        """0.54: el PIN ya no devuelve la clave. Se empareja con /api/pair/* (ver protocol.py)."""
+        self._drain()
+        self._send(410, {"error": "Actualiza la página: esta versión empareja de otra forma"}, seal=False)
+
+    def _pair(self, step: str) -> None:
+        """Saludo de emparejamiento. Sin firma (aún no hay clave) y sin sello LZ2: lo que
+        importa va protegido con la clave del saludo. La clave larga solo sale aprobado."""
         self.remote = not self._loopback()
         try:
             body = self._read_json(need_seal=False)
         except control.ControlError as exc:
             self._send(400, {"error": str(exc)}, seal=False)
             return
-        result = PAIRING.login(str(body.get("pin", "")))
-        if result == "espera":
-            self._send(429, {"error": "Demasiados intentos. Espera un momento."}, seal=False)
-            return
-        if result == "mal":
-            self._send(401, {"error": "PIN incorrecto"}, seal=False)
-            return
-        if self.remote:
-            maybe_open_mesa()
-        self._send(200, {"ok": True, "key": PAIRING.key_text()}, seal=False)
+        try:
+            if step == "hello":
+                who = str(body.get("id", ""))
+                if not re.fullmatch(r"[0-9a-f]{8,40}", who):
+                    raise protocol.ProtocolError("id no válido")
+                mode = str(body.get("mode", ""))
+                if PAIRING.locked():
+                    self._send(429, {"error": "Demasiados intentos. Espera un momento."}, seal=False)
+                    return
+                self._send(200, PAIRING.hello(who, mode, str(body.get("pub", ""))), seal=False)
+                return
+            sid = str(body.get("sid", ""))[:64]
+            if step == "claim":
+                result, row = PAIRING.claim(sid, str(body.get("proof", ""))[:128])
+                if result == "espera":
+                    self._send(429, {"error": "Demasiados intentos. Espera un momento."}, seal=False)
+                    return
+                if result != "ok" or row is None:
+                    msg = "PIN incorrecto" if result == "mal" else "Empieza otra vez"
+                    self._send(401, {"error": msg, "retry": result == "caducada"}, seal=False)
+                    return
+                state = APPROVALS.check(row["who"], self.headers.get("User-Agent", ""), self.client_address[0], row["fp"])
+                APPROVALS.note_meta(row["who"], fp=row["fp"])
+                if self.remote:
+                    maybe_open_mesa()
+                self._send(200, {"state": {"ok": "aprobado"}.get(state, state), "proof": protocol.proof(row["hk"], "pc"),
+                                 "fp": row["fp"], "where": approve_where()}, seal=False)
+                return
+            row = PAIRING.session(sid, str(body.get("proof", ""))[:128])
+            if row is None:
+                self._send(401, {"error": "Empareja otra vez", "retry": True}, seal=False)
+                return
+            state = APPROVALS.state(row["who"])
+            if state == "aprobado":
+                box = PAIRING.deliver(sid)
+                APPROVALS.note_meta(row["who"], fp=row["fp"])
+                persist_devices()
+                self._send(200, {"state": "aprobado", "box": box}, seal=False)
+                return
+            left = next((d["left"] for d in APPROVALS.listing() if d["id"] == row["who"]), 0)
+            self._send(200, {"state": "pendiente" if state == "pendiente" else "rechazado", "left": left}, seal=False)
+        except protocol.ProtocolError as exc:
+            self._send(400, {"error": str(exc)}, seal=False)
 
     def _guard(self, fn) -> None:
         if not self._authed():
@@ -788,6 +894,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def _kick(self, body: dict) -> dict:
         if body.get("all"):
+            if body.get("olvidar") and not self.remote:
+                return forget_all()
             count = APPROVALS.kick_all()
             PAIRING.forget_phones()
             print(f"  Expulsados todos los dispositivos ({count}).", flush=True)
@@ -1165,6 +1273,9 @@ def start(argv: list[str] | None = None, console: bool = True):
     except OSError:
         pass
     PAIRING.pin = protocol.Pairing(args.pin).pin
+    remembered = load_remembered()
+    if persist_devices not in APPROVALS.on_change:
+        APPROVALS.on_change.append(persist_devices)
     PORT = args.port
     try:
         server, PORT = listen(args.host, args.port)
@@ -1175,7 +1286,7 @@ def start(argv: list[str] | None = None, console: bool = True):
         print("  Cierra las ventanas negras de Lazo y vuelve a abrir iniciar.bat.")
         return None, ""
     PORT = server.server_address[1] or PORT
-    home = f"http://127.0.0.1:{PORT}/conectar"
+    home = f"http://127.0.0.1:{PORT}/mesa"
     print()
     print(f"  LaZoo {VERSION}")
     print(f"  PIN: {PAIRING.pin}")
@@ -1187,6 +1298,8 @@ def start(argv: list[str] | None = None, console: bool = True):
     print("  Al entrar el móvil se abre el puente Wi-Fi. No pasa por internet.")
     print("  No abras este puerto en el router. Solo acepta conexiones de tu red local.")
     print("  Cada móvil nuevo hay que aceptarlo en este PC la primera vez.")
+    if remembered:
+        print(f"  Recordar dispositivos: {remembered} móvil(es) aprobados se reconectan solos.")
     print()
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:

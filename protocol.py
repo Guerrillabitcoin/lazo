@@ -4,10 +4,31 @@ Es el único sitio donde vive. El anfitrión (bandeja de Windows, Linux o macOS)
 y cualquier mando (navegador, APK) hablan esto y nada más. No importa
 `control.py` ni nada del sistema: solo biblioteca estándar.
 
-Emparejamiento y firma de peticiones
-    El PC muestra un QR con `http://IP:PUERTO/#k=CLAVE`. La clave maestra solo
-    viaja en el QR (el fragmento nunca sale del móvil). De ella salen dos claves
-    con HMAC-SHA256: `auth = HMAC(k, "lazo/auth/1")` y `seal = HMAC(k, "lazo/seal/1")`.
+Emparejamiento (0.54: la clave larga solo sale tras aprobar)
+    La clave maestra `k` (32 bytes) NUNCA va en el QR ni sale por el PIN antes de que
+    el PC acepte el dispositivo. El QR lleva `http://IP:PUERTO/#p=FICHA`: una ficha de
+    emparejamiento de 32 bytes que solo sirve para identificarse y pedir aprobación (se
+    renueva tras cada entrega y al reiniciar). Sin cámara se usa el PIN de 6 dígitos.
+    Saludo (handshake) en tres pasos, todo en JSON por la red local:
+      1. `POST /api/pair/hello {id, mode: "qr"|"pin", pub}`: el móvil manda su clave
+         pública X25519 efímera; el PC contesta `{sid, pub}` con la suya, también efímera.
+      2. Los dos calculan `dh = X25519(priv, pub_otro)` y
+         `hk = HMAC(S, "lazo/pair/1|" + mode + "|" + id + "|" + pub_movil + pub_pc + dh)`,
+         con `S` = la ficha del QR o `"pin:" + PIN`. `POST /api/pair/claim {sid, proof}`
+         con `proof = HMAC(hk, "lazo/pair/movil")`. Si cuadra, el dispositivo pasa a
+         «pendiente» y salta el aviso de Windows/bandeja. El PC devuelve su propia prueba
+         `HMAC(hk, "lazo/pair/pc")` para que el móvil sepa que habla con el PC del QR/PIN.
+         Un fallo cuenta para el bloqueo creciente del PIN.
+      3. `POST /api/pair/wait {sid, proof}` hasta que el PC decide. Solo con «aprobado»
+         llega `box` = sello LZ2 de la clave maestra con `derive(hk, "lazo/pair/box/1")`.
+    Quien escuche la Wi-Fi ve las dos claves públicas y las pruebas, pero no `dh`: no
+    puede sacar la clave larga ni probar PINes sin conexión. Límite conocido: alguien que
+    se ponga EN MEDIO durante el emparejamiento por PIN podría probar los 10^6 PINes con
+    la prueba del móvil; con el QR (256 bits) no. Por eso el QR sigue siendo lo
+    recomendado. De la clave maestra salen dos claves con HMAC-SHA256:
+    `auth = HMAC(k, "lazo/auth/1")` y `seal = HMAC(k, "lazo/seal/1")`.
+
+Firma de peticiones
     Cada petición del móvil lleva `X-Lazo-Id` (id del mando), `X-Lazo-T`
     (milisegundos), `X-Lazo-N` (nonce de 16 bytes en hex) y `X-Lazo-S`:
     HMAC-SHA256(auth, "MÉTODO\nRUTA\nT\nN\nLONGITUD") en hex. La ruta va sin
@@ -16,10 +37,8 @@ Emparejamiento y firma de peticiones
     lo que viaja por la Wi-Fi no sirve para controlar el PC. Los cuerpos de las
     peticiones van sellados (LZ2), que además los autentica. En `/ws` los
     mismos cuatro valores van en la consulta: `?i=&t=&n=&s=`.
-    Sin cámara se puede emparejar con el PIN de 6 dígitos en `POST /api/login`,
-    que devuelve la clave. Es más cómodo y menos seguro: en ese momento la clave
-    viaja sin cifrar. Seis fallos seguidos bloquean el login y cada bloqueo dura
-    el doble que el anterior (30 s, 1 min, 2 min... hasta 1 h).
+    Seis fallos seguidos (PIN o ficha) bloquean el emparejamiento y cada bloqueo
+    dura el doble que el anterior (30 s, 1 min, 2 min... hasta 1 h).
 
 Sello LZ2
     `b"LZ2" + nonce(12) + cifrado + etiqueta(16)`. El flujo es
@@ -148,25 +167,148 @@ def sign_request(auth_key: bytes, method: str, path: str, stamp: int, nonce: str
     return hmac.new(auth_key, text.encode(), hashlib.sha256).hexdigest()
 
 
+# --- X25519 (RFC 7748), solo biblioteca estándar ------------------------------
+
+_P = 2 ** 255 - 19
+_A24 = 121665
+PAIR_SECONDS = 120
+MAX_SESSIONS = 32
+
+
+def x25519(scalar: bytes, point: bytes) -> bytes:
+    if len(scalar) != 32 or len(point) != 32:
+        raise ProtocolError("clave no válida")
+    k = bytearray(scalar)
+    k[0] &= 248
+    k[31] &= 127
+    k[31] |= 64
+    n = int.from_bytes(k, "little")
+    x1 = int.from_bytes(point, "little") & ((1 << 255) - 1)
+    x2, z2, x3, z3, swap = 1, 0, x1, 1, 0
+    p = _P
+    for t in range(254, -1, -1):
+        bit = (n >> t) & 1
+        if swap ^ bit:
+            x2, x3, z2, z3 = x3, x2, z3, z2
+        swap = bit
+        a = (x2 + z2) % p
+        aa = a * a % p
+        b = (x2 - z2) % p
+        bb = b * b % p
+        e = (aa - bb) % p
+        c = (x3 + z3) % p
+        d = (x3 - z3) % p
+        da = d * a % p
+        cb = c * b % p
+        x3 = (da + cb) ** 2 % p
+        z3 = x1 * (da - cb) ** 2 % p
+        x2 = aa * bb % p
+        z2 = e * (aa + _A24 * e) % p
+    if swap:
+        x2, z2 = x3, z3
+    return (x2 * pow(z2, p - 2, p) % p).to_bytes(32, "little")
+
+
+X25519_BASE = (9).to_bytes(32, "little")
+
+
+def x25519_keypair() -> tuple[bytes, bytes]:
+    priv = secrets.token_bytes(32)
+    return priv, x25519(priv, X25519_BASE)
+
+
+def b64u(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode().rstrip("=")
+
+
+def unb64u(text: str) -> bytes:
+    text = str(text or "")
+    if len(text) > 200 or not all(c.isalnum() or c in "-_" for c in text):
+        raise ProtocolError("base64 no válido")
+    try:
+        return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    except ValueError as exc:
+        raise ProtocolError("base64 no válido") from exc
+
+
+def pair_secret(mode: str, token: bytes, pin: str) -> bytes:
+    return token if mode == "qr" else ("pin:" + pin).encode()
+
+
+def handshake_key(secret: bytes, mode: str, who: str, pub_phone: bytes, pub_pc: bytes, shared: bytes) -> bytes:
+    msg = f"lazo/pair/1|{mode}|{who}|".encode() + pub_phone + pub_pc + shared
+    return hmac.new(secret, msg, hashlib.sha256).digest()
+
+
+def proof(hk: bytes, side: str) -> str:
+    return hmac.new(hk, f"lazo/pair/{side}".encode(), hashlib.sha256).hexdigest()
+
+
+def fingerprint(who: str, pub_phone: bytes) -> str:
+    """Huella corta del dispositivo (id + su clave efímera del emparejamiento)."""
+    raw = hashlib.sha256(who.encode() + pub_phone).hexdigest()[:16].upper()
+    return "-".join(raw[i:i + 4] for i in range(0, 16, 4))
+
+
 class Pairing:
     """PIN, clave, firma de peticiones y presencia de los mandos de un anfitrión."""
 
     def __init__(self, pin: str = "") -> None:
         self.pin = pin if pin.isdigit() and len(pin) == PIN_LEN else new_pin()
-        self.key = secrets.token_bytes(32)
-        self.auth_key = derive(self.key, "lazo/auth/1")
-        self.seal_key = derive(self.key, "lazo/seal/1")
         self._lock = threading.Lock()
+        self.set_key(secrets.token_bytes(32))
+        self.token = secrets.token_bytes(32)  # ficha del QR: solo para pedir aprobación
+        self.sessions: dict[str, dict] = {}
         self._fails = 0
         self._locks = 0
         self._locked_until = 0.0
         self._seen: dict[str, float] = {}
         self._nonces: dict[str, float] = {}
 
-    # PIN (emparejamiento sin cámara)
+    def set_key(self, key: bytes) -> None:
+        """Pone la clave maestra (nueva, o la recordada en este PC)."""
+        if len(key) != 32:
+            raise ProtocolError("clave no válida")
+        self.key = key
+        self.auth_key = derive(key, "lazo/auth/1")
+        self.seal_key = derive(key, "lazo/seal/1")
+
+    def rekey(self) -> None:
+        """Clave y ficha nuevas: todo móvil con la clave vieja deja de valer."""
+        with self._lock:
+            self.set_key(secrets.token_bytes(32))
+            self.token = secrets.token_bytes(32)
+            self.sessions.clear()
+            self._nonces.clear()
+            self._seen.clear()
+
+    def new_token(self) -> None:
+        with self._lock:
+            self.token = secrets.token_bytes(32)
+
+    # Bloqueo creciente (PIN y ficha del QR)
+
+    def locked(self) -> bool:
+        with self._lock:
+            return time.time() < self._locked_until
+
+    def _fail(self) -> None:
+        with self._lock:
+            now = time.time()
+            self._fails += 1
+            if self._fails >= MAX_FAILS:
+                wait = min(LOCK_SECONDS * 2 ** self._locks, MAX_LOCK_SECONDS)
+                self._locked_until = now + wait
+                self._locks += 1
+                self._fails = 0
+
+    def _good(self) -> None:
+        with self._lock:
+            self._fails = 0
+            self._locks = 0
 
     def login(self, pin: str) -> str:
-        """Devuelve "ok", "mal" o "espera"."""
+        """Comprueba solo el PIN (no entrega nada). Devuelve "ok", "mal" o "espera"."""
         with self._lock:
             now = time.time()
             if now < self._locked_until:
@@ -184,10 +326,82 @@ class Pairing:
         return "ok"
 
     def key_text(self) -> str:
-        return base64.urlsafe_b64encode(self.key).decode().rstrip("=")
+        return b64u(self.key)
+
+    def token_text(self) -> str:
+        return b64u(self.token)
 
     def phone_url(self, scheme: str, ip: str, port: int) -> str:
-        return f"{scheme}://{ip}:{port}/#k={self.key_text()}"
+        """0.54: el QR lleva la ficha de emparejamiento, no la clave."""
+        return f"{scheme}://{ip}:{port}/#p={self.token_text()}"
+
+    # Saludo de emparejamiento (ver arriba). Nada de esto toca la clave hasta aprobar.
+
+    def _expire_sessions(self, now: float) -> None:
+        for sid in [sid for sid, row in self.sessions.items() if now - row["at"] > PAIR_SECONDS]:
+            del self.sessions[sid]
+
+    def hello(self, who: str, mode: str, pub_text: str) -> dict:
+        if mode not in ("qr", "pin"):
+            raise ProtocolError("modo no válido")
+        pub = unb64u(pub_text)
+        if len(pub) != 32:
+            raise ProtocolError("clave no válida")
+        priv, mine = x25519_keypair()
+        shared = x25519(priv, pub)
+        if shared == bytes(32):
+            raise ProtocolError("clave no válida")
+        sid = secrets.token_hex(16)
+        with self._lock:
+            now = time.time()
+            self._expire_sessions(now)
+            if len(self.sessions) >= MAX_SESSIONS:
+                oldest = min(self.sessions, key=lambda k: self.sessions[k]["at"])
+                del self.sessions[oldest]
+            self.sessions[sid] = {"who": who, "mode": mode, "pub": pub, "mine": mine, "shared": shared,
+                                  "at": now, "hk": None, "fp": fingerprint(who, pub)}
+        return {"sid": sid, "pub": b64u(mine)}
+
+    def claim(self, sid: str, proof_text: str) -> tuple[str, dict | None]:
+        """("ok", sesión), ("mal", None), ("espera", None) o ("caducada", None)."""
+        if self.locked():
+            return "espera", None
+        with self._lock:
+            self._expire_sessions(time.time())
+            row = self.sessions.get(sid)
+        if row is None:
+            return "caducada", None
+        secret = pair_secret(row["mode"], self.token, self.pin)
+        hk = handshake_key(secret, row["mode"], row["who"], row["pub"], row["mine"], row["shared"])
+        if not hmac.compare_digest(str(proof_text).lower(), proof(hk, "movil")):
+            self._fail()
+            with self._lock:
+                self.sessions.pop(sid, None)  # cada intento pide un saludo nuevo
+            return "mal", None
+        self._good()
+        with self._lock:
+            row["hk"] = hk
+            row["at"] = time.time()
+        return "ok", row
+
+    def session(self, sid: str, proof_text: str) -> dict | None:
+        """Sesión ya verificada y su prueba (para /api/pair/wait)."""
+        with self._lock:
+            self._expire_sessions(time.time())
+            row = self.sessions.get(sid)
+        if not row or not row["hk"] or not hmac.compare_digest(str(proof_text).lower(), proof(row["hk"], "movil")):
+            return None
+        return row
+
+    def deliver(self, sid: str) -> str:
+        """Entrega la clave sellada con la del saludo y cierra la sesión."""
+        with self._lock:
+            row = self.sessions.pop(sid, None)
+        if not row or not row["hk"]:
+            raise ProtocolError("sesión no válida")
+        if row["mode"] == "qr":
+            self.new_token()  # un QR fotografiado no vale para otro dispositivo
+        return b64u(seal(self.key_text().encode(), derive(row["hk"], "lazo/pair/box/1")))
 
     # Firma de peticiones
 

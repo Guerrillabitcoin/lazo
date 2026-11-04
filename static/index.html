@@ -3,15 +3,19 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.53</title>
-    <link rel="stylesheet" href="/app.css?v=0.53" />
+    <title>LaZoo 0.54</title>
+    <link rel="stylesheet" href="/app.css?v=0.54" />
   </head>
   <body>
+    <div id="wait-banner" class="wait-banner" role="alert" hidden>
+      <strong>Valida este móvil en el PC</strong>
+      <span>Acéptalo en el aviso de Windows o en el icono de LaZoo de la bandeja. Hasta entonces no está conectado.</span>
+    </div>
     <main class="phone">
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <div class="brand" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
-          <p class="ver">0.53</p>
+          <p class="ver">0.54</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -28,7 +32,7 @@
           <input id="qr-cam" type="file" accept="image/*" capture="environment" hidden />
           <label class="file-label qr-photo">Elegir foto del QR<input id="qr-photo" type="file" accept="image/*" hidden /></label>
           <p id="qr-msg" class="hint" aria-live="polite"></p>
-          <p class="hint">También puedes abrir la app de cámara del móvil y apuntar al QR de la pantalla del PC: abrirá LaZoo directamente con la clave.</p>
+          <p class="hint">También puedes abrir la app de cámara del móvil y apuntar al QR de la pantalla del PC: abrirá LaZoo y pedirá permiso al PC. La clave solo llega cuando lo aceptas allí.</p>
         </div>
       </section>
       <section id="wait" class="panel wait" hidden aria-live="polite">
@@ -355,7 +359,7 @@
             <div class="about-head">
               <div class="brand about-logo" aria-hidden="true"><span>LaZ</span><span class="oo"><span class="o">o</span><span class="bridge"></span><span class="o right">o</span></span></div>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.53</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.54</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -409,7 +413,7 @@
         </div>
       </section>
     </main>
-    <script src="/seal.js?v=0.53"></script>
-    <script src="/app.js?v=0.53"></script>
+    <script src="/seal.js?v=0.54"></script>
+    <script src="/app.js?v=0.54"></script>
   </body>
 </html>

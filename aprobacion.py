@@ -3,9 +3,11 @@
 - `allowed(ip)`: LaZoo solo atiende a direcciones de la red local (loopback, privadas,
   link-local, ULA y sus IPv4 mapeadas en IPv6). Lo demás se corta antes de leer nada.
   Las cabeceras X-Forwarded-For se ignoran: publicar LaZoo detrás de un proxy no se soporta.
-- `Approvals`: el primer contacto de un móvil (QR o PIN válidos) queda pendiente hasta que
-  el PC lo acepta (consola, cuadro de Windows o ventana del PC). Se recuerda mientras el
-  servidor siga encendido: al reiniciar cambia la clave y todo empieza de cero.
+- `Approvals`: el primer contacto de un móvil (saludo con QR o PIN válido) queda pendiente
+  hasta que el PC lo acepta. 0.54: una sola forma de aceptar, el aviso de Windows (cuadro
+  Sí/No) o el menú del icono de la bandeja (en Linux/macOS, la consola). El Panel de LaZoo
+  solo enseña el estado. Con «Recordar dispositivos» (recordar.py) los aprobados se
+  cargan al arrancar; sin él, al reiniciar cambia la clave y todo empieza de cero.
 """
 
 from __future__ import annotations
@@ -94,6 +96,38 @@ class Approvals:
         self.devices: dict[str, dict] = {}
         self.auto = False
         self.on_new: list[Callable[[str, dict], None]] = []
+        self.on_change: list[Callable[[], None]] = []  # aprobado, expulsado u olvidado
+
+    def _changed(self) -> None:
+        for hook in self.on_change:
+            try:
+                hook()
+            except Exception:
+                pass
+
+    def preload(self, rows: list[dict]) -> int:
+        """Dispositivos recordados en este PC: entran ya aprobados."""
+        now = time.time()
+        with self.lock:
+            for row in rows:
+                who = str(row.get("id", ""))
+                if not re.fullmatch(r"[0-9a-f]{8,40}", who):
+                    continue
+                self.devices[who] = {"state": "aprobado", "since": now, "label": str(row.get("label") or "Dispositivo")[:60],
+                                     "ip": "", "seen": now, "fp": str(row.get("fp", ""))[:40],
+                                     "fecha": str(row.get("fecha", ""))[:20], "recordado": True}
+            return len(self.devices)
+
+    def note_meta(self, who: str, **meta) -> None:
+        with self.lock:
+            row = self.devices.get(who)
+            if row is not None:
+                row.update({k: v for k, v in meta.items() if v})
+
+    def approved_rows(self) -> list[dict]:
+        with self.lock:
+            return [{"id": who, "label": row["label"], "fp": row.get("fp", ""), "fecha": row.get("fecha", "")}
+                    for who, row in self.devices.items() if row["state"] == "aprobado"]
 
     def _expire(self, now: float) -> None:
         for who, row in list(self.devices.items()):
@@ -102,7 +136,7 @@ class Approvals:
             elif row["state"] == "rechazado" and now >= row.get("until", 0):
                 del self.devices[who]
 
-    def check(self, who: str, ua: str = "", ip: str = "") -> str:
+    def check(self, who: str, ua: str = "", ip: str = "", fp: str = "") -> str:
         """`ok`, `pendiente` o `rechazado`. Un desconocido pasa a pendiente y avisa al PC."""
         now = time.time()
         fresh = None
@@ -110,7 +144,8 @@ class Approvals:
             self._expire(now)
             row = self.devices.get(who)
             if row is None:
-                row = {"state": "aprobado" if self.auto else "pendiente", "since": now, "label": device_label(ua), "ip": ip, "seen": now}
+                row = {"state": "aprobado" if self.auto else "pendiente", "since": now, "label": device_label(ua), "ip": ip, "seen": now,
+                       "fecha": time.strftime("%Y-%m-%d %H:%M") if self.auto else "", "fp": fp}
                 self.devices[who] = row
                 if not self.auto:
                     fresh = dict(row)
@@ -118,6 +153,8 @@ class Approvals:
             if ip:
                 row["ip"] = ip
             state = row["state"]
+        if self.auto and fresh is None and row.get("since") == now:
+            self._changed()
         if fresh:
             for hook in self.on_new:
                 try:
@@ -145,18 +182,26 @@ class Approvals:
                 return False
             row["state"] = "aprobado" if ok else "rechazado"
             row["until"] = now + BLOCK_SECONDS
+            if ok and not row.get("fecha"):
+                row["fecha"] = time.strftime("%Y-%m-%d %H:%M")
         print(f"  {'Aceptado' if ok else 'Rechazado'}: {row['label']} ({row['ip']})", flush=True)
+        if ok:
+            self._changed()
         return True
 
     def kick(self, who: str) -> bool:
         with self.lock:
-            return self.devices.pop(who, None) is not None
+            done = self.devices.pop(who, None) is not None
+        if done:
+            self._changed()
+        return done
 
     def kick_all(self) -> int:
         with self.lock:
             count = sum(1 for row in self.devices.values() if row["state"] == "aprobado")
             self.devices = {w: r for w, r in self.devices.items() if r["state"] == "rechazado"}
-            return count
+        self._changed()
+        return count
 
     def listing(self) -> list[dict]:
         now = time.time()
@@ -165,13 +210,15 @@ class Approvals:
             return [
                 {"id": who, "short": who[:4], "state": row["state"], "label": row["label"], "ip": row["ip"],
                  "left": max(0, int(WAIT_SECONDS - (now - row["since"]))) if row["state"] == "pendiente" else 0,
-                 "ago": int(now - row["seen"])}
+                 "ago": int(now - row["seen"]), "fp": row.get("fp", ""), "fecha": row.get("fecha", ""),
+                 "recordado": bool(row.get("recordado"))}
                 for who, row in sorted(self.devices.items(), key=lambda kv: kv[1]["since"])
             ]
 
 
 def ask_text(who: str, row: dict) -> str:
-    return f"Nuevo dispositivo {row['label']} ({row['ip']}, id {who[:4]}) quiere entrar en LaZoo."
+    huella = f", huella {row['fp']}" if row.get("fp") else ""
+    return f"Nuevo dispositivo {row['label']} ({row['ip']}, id {who[:4]}{huella}) quiere entrar en LaZoo."
 
 
 # ---- Preguntar en el PC -------------------------------------------------------
@@ -232,7 +279,7 @@ class ConsolePrompt:
             elif key == "n":
                 self.approvals.decide(who, False)
             elif self.approvals.state(who) == "pendiente":
-                print("  Sin respuesta en la consola. Puedes aceptarlo en la ventana del PC.", flush=True)
+                print("  Sin respuesta en la consola. Puedes aceptarlo en el aviso de Windows o en el icono de la bandeja.", flush=True)
 
 
 MB_YESNO, MB_ICONQUESTION, MB_SETFOREGROUND, MB_TOPMOST, IDYES, MB_TIMEDOUT = 0x4, 0x20, 0x10000, 0x40000, 6, 32000

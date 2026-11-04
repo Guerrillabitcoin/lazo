@@ -2158,6 +2158,59 @@ def youtube_speed_ups(raw: object) -> int:
     return _YOUTUBE_LADDER.index(match_youtube_speed(raw))
 
 
+def youtube_speed_plan(current: object, target: object) -> tuple[list[bool], bool]:
+    """0.54: pulsaciones para ir de la velocidad ACTUAL a la elegida (True = más rápido).
+    Si no se sabe la actual (o no es un paso de YouTube), baja del todo y sube: (pasos, True)."""
+    goal = _YOUTUBE_LADDER.index(match_youtube_speed(target))
+    try:
+        now = round(float(current), 2)
+    except (TypeError, ValueError):
+        now = None
+    here = next((i for i, item in enumerate(_YOUTUBE_LADDER) if now is not None and abs(item - now) < 0.001), None)
+    if here is None:
+        return [False] * len(_YOUTUBE_LADDER) + [True] * goal, True
+    step = goal - here
+    return [step > 0] * abs(step), False
+
+
+# 0.54: memoria de la ventana de YouTube elegida. Se reconoce por su identificador
+# aunque cambie el título (otro vídeo); si la ventana se cerró, por el título parecido.
+# Solo se lee la lista de ventanas: elegirla no mueve ni trae nada delante.
+_YT_MEM: dict[str, Any] = {"id": "", "title": "", "speed": None, "at": 0.0}
+
+
+def _yt_words(title: str) -> set[str]:
+    clean = re.sub(r"\s+-\s+(youtube|google chrome|microsoft edge|mozilla firefox|brave|opera|vivaldi|chromium).*$", "", title.lower())
+    return {w for w in re.findall(r"\w+", clean) if len(w) > 2}
+
+
+def pick_youtube(rows: list[dict[str, str]], memory: dict[str, Any] | None = None) -> dict[str, str] | None:
+    """Elige la ventana de YouTube: primero la recordada (mismo id, aunque haya cambiado
+    de vídeo), luego la de título más parecido al recordado y, si no, la primera."""
+    memory = _YT_MEM if memory is None else memory
+    tubes = [r for r in rows if "youtube" in r["title"].lower() and "youtube music" not in r["title"].lower()]
+    if memory.get("id"):
+        same = next((r for r in rows if str(r.get("id")) == str(memory["id"])), None)
+        if same is not None and (same in tubes or memory.get("title") and _yt_words(same["title"]) & _yt_words(memory["title"])):
+            return same
+    if not tubes:
+        return None
+    if memory.get("title") and len(tubes) > 1:
+        want = _yt_words(memory["title"])
+        best = max(tubes, key=lambda r: len(_yt_words(r["title"]) & want))
+        if _yt_words(best["title"]) & want:
+            return best
+    return tubes[0]
+
+
+def remember_youtube(row: dict[str, str], speed: float | None = None) -> None:
+    if str(row.get("id")) != str(_YT_MEM.get("id")):
+        _YT_MEM["speed"] = None  # otra ventana: su velocidad no la sabemos
+    _YT_MEM["id"], _YT_MEM["title"], _YT_MEM["at"] = str(row.get("id", "")), row.get("title", ""), time.time()
+    if speed is not None:
+        _YT_MEM["speed"] = speed
+
+
 def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
     extra = extra or {}
     if action == "search":
@@ -2363,24 +2416,35 @@ def _youtube_speed(raw: object) -> dict[str, Any]:
         row = _find_youtube_unlocked()
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
-    if not _focus_for_keys(row["id"]):
-        raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
-    time.sleep(0.16)
-    # YouTube solo salta 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75 y 2.
-    # Bajar del todo y luego subir deja la velocidad exacta, sin abrir ventanas.
-    for _ in range(8):
-        _speed_tap(False)
-        time.sleep(0.04)
-    for _ in range(youtube_speed_ups(rate)):
-        _speed_tap(True)
-        time.sleep(0.04)
+    current = None
+    try:
+        import medios
+
+        current = medios.summary(medios.browser_session(row["title"])).get("rate")
+    except Exception:  # noqa: BLE001 (sin datos del sistema)
+        current = None
+    if current is None and str(_YT_MEM.get("id")) == str(row["id"]):
+        current = _YT_MEM.get("speed")
+    taps, reset = youtube_speed_plan(current, rate)
+    if taps:
+        if not _focus_for_keys(row["id"]):
+            raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
+        time.sleep(0.16)
+        # YouTube solo salta 0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75 y 2: desde la actual, paso a paso.
+        for faster in taps:
+            _speed_tap(faster)
+            time.sleep(0.04)
     _levels["youtube_speed"] = rate
+    remember_youtube(row, rate)
     label = _YOUTUBE_SPEED_TEXT[rate]
     return {
         "detail": f"Velocidad {label}",
         "title": row["title"],
         "level": _levels["youtube"],
         "rate": rate,
+        "from": current,
+        "taps": len(taps),
+        "reset": reset,
     }
 
 
@@ -2523,13 +2587,10 @@ def _find_youtube_unlocked() -> dict[str, str] | None:
         rows = _mac_windows()
     else:
         rows = _linux_windows()
-    for row in rows:
-        title = row["title"].lower()
-        if "youtube music" in title:
-            continue
-        if "youtube" in title:
-            return row
-    return None
+    row = pick_youtube(rows)
+    if row is not None:
+        remember_youtube(row)
+    return row
 
 
 def _focus_unlocked(window_id: str) -> None:

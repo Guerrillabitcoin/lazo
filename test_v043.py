@@ -27,7 +27,9 @@ class QrWaitsWithoutPin(unittest.TestCase):
         js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
         login = js[js.index("async function login()"):]
         login = login[:login.index("\n}\n")]
-        self.assertIn("showApp()", login)  # showApp consulta /api/aprobacion y espera si toca
+        # 0.54: el PIN pide permiso con el saludo y espera la aprobación (showPaired -> showWait).
+        self.assertIn('pairStart("pin", pin)', login)
+        self.assertIn("showPaired(", login)
 
     def test_tray_hash_only_on_loopback(self):
         js = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
@@ -86,7 +88,7 @@ class StartApi(unittest.TestCase):
         auto = lazo.APPROVALS.auto
         server, home = lazo.start(["--no-browser", "--port", "0", "--host", "127.0.0.1"], console=False)
         try:
-            self.assertTrue(home.endswith("/conectar"))
+            self.assertTrue(home.endswith("/mesa"))  # 0.54: abre el Panel de LaZoo
             self.assertNotEqual(lazo.PORT, 0)
             with urllib.request.urlopen(f"http://127.0.0.1:{lazo.PORT}/api/seen", timeout=3) as res:
                 self.assertIn("pending", json.loads(res.read()))

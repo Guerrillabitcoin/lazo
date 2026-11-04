@@ -237,3 +237,84 @@ function signRequest(authKey, method, path, stamp, nonce, length) {
   const text = `${method}\n${path}\n${stamp}\n${nonce}\n${length}`;
   return toHex(hmacSha256(authKey, new TextEncoder().encode(text)));
 }
+
+/* 0.54: X25519 (RFC 7748) con BigInt para el saludo de emparejamiento. La clave larga
+   solo llega tras aprobar, sellada con una clave que sale de este intercambio. */
+const X_P = (1n << 255n) - 19n;
+
+function xmod(a) {
+  const r = a % X_P;
+  return r < 0n ? r + X_P : r;
+}
+
+function xpow(base, exp) {
+  let result = 1n;
+  let b = xmod(base);
+  let e = exp;
+  while (e > 0n) {
+    if (e & 1n) result = (result * b) % X_P;
+    b = (b * b) % X_P;
+    e >>= 1n;
+  }
+  return result;
+}
+
+function leToBig(bytes) {
+  let n = 0n;
+  for (let i = bytes.length - 1; i >= 0; i -= 1) n = (n << 8n) | BigInt(bytes[i]);
+  return n;
+}
+
+function bigToLe(n) {
+  const out = new Uint8Array(32);
+  let v = n;
+  for (let i = 0; i < 32; i += 1) { out[i] = Number(v & 255n); v >>= 8n; }
+  return out;
+}
+
+function x25519(scalar, point) {
+  const k = new Uint8Array(scalar);
+  k[0] &= 248; k[31] &= 127; k[31] |= 64;
+  const n = leToBig(k);
+  const x1 = leToBig(point) & ((1n << 255n) - 1n);
+  let x2 = 1n, z2 = 0n, x3 = x1, z3 = 1n, swap = 0n;
+  for (let t = 254n; t >= 0n; t -= 1n) {
+    const bit = (n >> t) & 1n;
+    if (swap ^ bit) { [x2, x3] = [x3, x2]; [z2, z3] = [z3, z2]; }
+    swap = bit;
+    const a = xmod(x2 + z2), aa = (a * a) % X_P;
+    const b = xmod(x2 - z2), bb = (b * b) % X_P;
+    const e = xmod(aa - bb);
+    const c = xmod(x3 + z3), d = xmod(x3 - z3);
+    const da = (d * a) % X_P, cb = (c * b) % X_P;
+    x3 = xmod((da + cb) * (da + cb));
+    z3 = xmod(x1 * xmod((da - cb) * (da - cb)));
+    x2 = (aa * bb) % X_P;
+    z2 = xmod(e * (aa + 121665n * e));
+  }
+  if (swap) { x2 = x3; z2 = z3; }
+  return bigToLe((x2 * xpow(z2, X_P - 2n)) % X_P);
+}
+
+function bytesToB64url(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 1) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function concatBytes(...parts) {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) { out.set(p, at); at += p.length; }
+  return out;
+}
+
+/* Mismo cálculo que protocol.handshake_key / protocol.proof. */
+function pairHandshakeKey(secret, mode, id, pubPhone, pubPc, shared) {
+  const head = new TextEncoder().encode(`lazo/pair/1|${mode}|${id}|`);
+  return hmacSha256(secret, concatBytes(head, pubPhone, pubPc, shared));
+}
+
+function pairProof(hk, side) {
+  return toHex(hmacSha256(hk, new TextEncoder().encode(`lazo/pair/${side}`)));
+}

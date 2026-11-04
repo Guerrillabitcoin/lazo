@@ -22,9 +22,12 @@ while ($true) {
         $p = Wait-Op ($s.TryGetMediaPropertiesAsync()) $propType
         $tl = $s.GetTimelineProperties()
         $pos = $tl.Position.TotalSeconds
-        $st = [string]$s.GetPlaybackInfo().PlaybackStatus
+        $pi = $s.GetPlaybackInfo()
+        $st = [string]$pi.PlaybackStatus
+        $rate = $null
+        try { if ($pi.PlaybackRate -ne $null) { $rate = [math]::Round([double]$pi.PlaybackRate, 2) } } catch {}
         if ($st -eq 'Playing') { $pos += ((Get-Date).ToUniversalTime() - $tl.LastUpdatedTime.UtcDateTime).TotalSeconds }
-        $rows += [pscustomobject]@{ app = [string]$s.SourceAppUserModelId; status = $st; title = [string]$p.Title; artist = [string]$p.Artist; pos = [math]::Round($pos, 1); len = [math]::Round($tl.EndTime.TotalSeconds, 1) }
+        $rows += [pscustomobject]@{ app = [string]$s.SourceAppUserModelId; status = $st; title = [string]$p.Title; artist = [string]$p.Artist; pos = [math]::Round($pos, 1); len = [math]::Round($tl.EndTime.TotalSeconds, 1); rate = $rate }
       } catch {}
     }
   } catch {}
