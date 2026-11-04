@@ -483,7 +483,7 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 
 .about-deck { display: grid; gap: 10px; align-content: start; flex: none; overflow-wrap: anywhere; }
 .about-head { display: flex; gap: 12px; align-items: center; }
-.about-logo { font-size: 34px; flex: none; white-space: nowrap; }
+.about-logo { height: 34px; flex: none; }
 .about-name { margin: 0; font-weight: 700; font-size: 18px; }
 .about-row { display: flex; }
 .about-row > button { flex: 1; min-height: 46px; }
@@ -502,7 +502,7 @@ input[type="range"] { width: 100%; accent-color: var(--copper); }
 .about-qr svg { display: block; width: 100%; height: auto; }
 .about-addr { font-size: 12px; word-break: break-all; color: #f3eee6; }
 .about-pay button { min-height: 44px; }
-.about-logo { color: var(--copper); }
+
 
 .win-filter { width: 100%; box-sizing: border-box; min-height: 40px; margin: 6px 0; padding: 8px 12px; border-radius: 10px; border: 1px solid #333; background: #141414; color: #eee; font-size: 16px; }
 .win-group { list-style: none; }
@@ -657,10 +657,10 @@ button[data-cursor] { min-height: 44px; }
 /* 0.55: logotipo animado (static/logo.js). Anillo rojo = desconectado, infinito verde = conectado. */
 .lz-logo { display: inline-block; line-height: 0; }
 .lz-logo-svg { display: block; height: 100%; width: auto; overflow: visible; }
-.lz-logo[data-estado="esperando"] .lz-o:last-of-type { animation: lz-latido 1.6s ease-in-out infinite; }
+.lz-logo[data-estado="esperando"] .lz-anillo { animation: lz-latido 1.6s ease-in-out infinite; }
 @keyframes lz-latido { 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) {
-  .lz-logo[data-estado="esperando"] .lz-o:last-of-type { animation: none; }
+  .lz-logo[data-estado="esperando"] .lz-anillo { animation: none; }
 }
 .top .lz-logo { height: 30px; }
 .lz-logo.grande { height: 46px; margin: 4px auto 14px; display: block; width: max-content; }

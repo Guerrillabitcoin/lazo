@@ -90,10 +90,10 @@
       /* 0.55: logotipo animado (static/logo.js). Anillo rojo = desconectado, infinito verde = conectado. */
       .lz-logo { display: inline-block; line-height: 0; }
       .lz-logo-svg { display: block; height: 100%; width: auto; overflow: visible; }
-      .lz-logo[data-estado="esperando"] .lz-o:last-of-type { animation: lz-latido 1.6s ease-in-out infinite; }
+      .lz-logo[data-estado="esperando"] .lz-anillo { animation: lz-latido 1.6s ease-in-out infinite; }
       @keyframes lz-latido { 50% { opacity: 0.45; } }
       @media (prefers-reduced-motion: reduce) {
-        .lz-logo[data-estado="esperando"] .lz-o:last-of-type { animation: none; }
+        .lz-logo[data-estado="esperando"] .lz-anillo { animation: none; }
       }
       .top .lz-logo { height: 40px; }
     </style>
@@ -103,7 +103,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.55</p>
+          <p class="ver">0.56</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -465,6 +465,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.55"></script>
+    <script src="/logo.js?v=0.56"></script>
   </body>
 </html>

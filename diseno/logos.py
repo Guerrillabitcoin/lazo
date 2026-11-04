@@ -1,207 +1,246 @@
-"""Genera la identidad visual de LaZoo 0.55 (herramienta de desarrollo, no se empaqueta).
+"""Genera la identidad visual de LaZoo (herramienta de desarrollo, no se empaqueta).
 
-Recrea en vector las imágenes de static/img/original/:
-- wordmark «LaZoo»: letras L, a, Z de Poppins Bold (licencia OFL) convertidas a trazos,
-  y las dos «o» como anillos que se transforman en el infinito (misma geometría que static/logo.js);
-- el infinito (rojo, verde, naranja) en SVG, PNG, .ico multi-tamaño y mipmaps de Android.
+0.56: ya no se usa ninguna tipografía. Todo sale TRAZADO de las imágenes originales de
+static/img/original/ (mismas letras, espaciado, grosor y proporciones que el diseño):
 
-Uso (necesita fontTools y Pillow): python diseno/logos.py
+  1) python diseno/logos.py --trazar   (necesita Pillow, numpy y potracer: pip install potracer)
+     Vectoriza los originales ampliados x8 y guarda los contornos en diseno/trazos.json.
+  2) python diseno/logos.py            (solo Pillow)
+     A partir de diseno/trazos.json escribe los SVG y PNG de static/img, los .ico de la
+     bandeja y del .exe, los mipmaps y vectores de Android y las constantes de static/logo.js.
+
+Wordmark (unidades del original de 1280x720): «L», «a», «Z» y la primera «o» blancas, la
+última «o» roja; conectado, las dos «o» son el infinito verde (trazado de la imagen derecha y
+llevado a la misma escala que la izquierda). Los anillos y el infinito animados de logo.js se
+ajustaron a esos contornos (anillo: radio 42,4 y grosor 30,4; infinito: lemniscata ajustada).
 """
 
 from __future__ import annotations
 
-import math
+import json
+import re
+import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
 IMG = ROOT / "static" / "img"
+ORIG = IMG / "original"
 RES = ROOT / "android" / "res"
+TRAZOS = Path(__file__).resolve().parent / "trazos.json"
 
-
-def fuente() -> str:
-    """Poppins Bold: ruta en LAZOO_FUENTE o la que encuentre fontconfig (fc-match)."""
-    import os
-    import subprocess
-
-    ruta = os.environ.get("LAZOO_FUENTE")
-    if not ruta:
-        ruta = subprocess.run(["fc-match", "-f", "%{file}", "Poppins:bold"], capture_output=True, text=True).stdout
-    if "Poppins-Bold" not in ruta:
-        raise SystemExit("Falta Poppins Bold: instálala o indica su ruta en LAZOO_FUENTE")
-    return ruta
-
-ROJO = "#e8101c"
-VERDE = "#1a8f3a"          # verde del wordmark conectado
-VERDE_BANDEJA = "#5abf10"  # verde lima de la imagen de la bandeja (se ve bien a 16 px)
-NARANJA = "#ff8040"        # infinito de la APK y del móvil (marca: #e07a3d)
+# Colores medidos en los originales (mediana de los píxeles de cada forma).
+ROJO = "#ea0918"           # anillo del wordmark desconectado
+VERDE = "#158941"          # infinito del wordmark conectado
+NARANJA = "#ff813f"        # icono de la APK y del móvil (imagen 2)
+ROJO_BANDEJA = "#f71224"   # bandeja sin conexión (imagen 3)
+VERDE_BANDEJA = "#58c006"  # bandeja conectada (imagen 4)
 BLANCO = "#ffffff"
 
-# Geometría (unidades del wordmark original, 1280x720). La misma que static/logo.js.
-VIEW = (50, 258, 584, 166)        # x, y, ancho, alto del viewBox del wordmark
-ANILLO_R, TRAZO = 41.5, 27.5      # radio del anillo y grosor de trazo
-O1, O2, CY = 439.5, 556.0, 358.5  # centros de las dos «o»
-INF_C, INF_A, INF_SY = 505.5, 105.0, 1.25  # centro, semiancho y estiramiento vertical del infinito
-N = 48                            # puntos por bucle
+VIEW = (50, 258, 584, 166)  # x, y, ancho, alto del viewBox del wordmark
+
+# Del original derecho (conectado) al sistema del izquierdo: misma «L», «a», «Z».
+DER_A_IZQ = (697, 274, 58, 266, 0.994, 0.987)
 
 
-def lobulo(t: float) -> tuple[float, float]:
-    """Lemniscata de Bernoulli estirada en vertical (centro en 0,0)."""
-    d = 1 + math.sin(t) ** 2
-    return INF_A * math.cos(t) / d, INF_SY * INF_A * math.sin(t) * math.cos(t) / d
+# ---------------------------------------------------------------- 1) trazar (potrace)
+
+def _trazar(img: Image.Image, caja, tipo: str, tf=None, escala: int = 8, suave: float = 0.7, tolerancia: float = 0.4) -> str:
+    import numpy as np
+    import potrace
+    from PIL import ImageFilter
+
+    x0, y0, x1, y1 = caja
+    a = np.array(img.convert("RGB").crop(caja)).astype(float)
+    r, g, b = a[..., 0], a[..., 1], a[..., 2]
+    if tipo == "blanco":
+        v = np.minimum(np.minimum(r, g), b)
+    elif tipo == "verde":
+        v = np.clip((g - np.maximum(r, b)) * 255 / 72.0, 0, 255)
+    elif tipo == "rojo":
+        v = np.clip((r - np.maximum(g, b)) * 255 / 210.0, 0, 255)
+    else:  # color saturado sobre negro (iconos)
+        s = a.max(2) - a.min(2)
+        v = np.clip(s * 255 / np.median(s[s > 80]), 0, 255)
+    grande = Image.fromarray(v.astype("uint8")).resize(((x1 - x0) * escala, (y1 - y0) * escala), Image.BICUBIC)
+    grande = grande.filter(ImageFilter.GaussianBlur(escala * suave))
+    fondo = np.array(grande) <= 128  # potracer traza lo que es False
+    camino = potrace.Bitmap(fondo).trace(turdsize=40 * escala * escala, alphamax=1.0, opticurve=True, opttolerance=tolerancia)
+    tf = tf or (lambda x, y: (x, y))
+
+    def f(p):
+        x, y = tf(x0 + p.x / escala, y0 + p.y / escala)
+        return f"{x:.1f} {y:.1f}"
+
+    d = ""
+    for curva in camino:
+        d += "M" + f(curva.start_point)
+        for s in curva:
+            d += ("L" + f(s.c) + "L" + f(s.end_point)) if s.is_corner else ("C" + f(s.c1) + " " + f(s.c2) + " " + f(s.end_point))
+        d += "Z"
+    return d
 
 
-def bucles(p: float) -> list[list[tuple[float, float]]]:
-    """p=0: dos anillos («oo»); p=1: infinito. Mismo número de puntos en ambos."""
-    out = []
-    for lado, (cx, t0) in enumerate(((O1, math.pi / 2), (O2, -math.pi / 2))):
-        pts = []
-        for i in range(N):
-            t = t0 + math.pi * i / N
-            th = math.pi - 2 * t if lado == 0 else 2 * t  # mismo sentido que el lóbulo
-            ax, ay = cx + ANILLO_R * math.cos(th), CY + ANILLO_R * math.sin(th)
-            lx, ly = lobulo(t)
-            bx, by = INF_C + lx, CY + ly
-            pts.append((ax + (bx - ax) * p, ay + (by - ay) * p))
-        out.append(pts)
+def trazar() -> None:
+    w = Image.open(ORIG / "logo-wordmark.png")
+    ax, ay, bx, by, sx, sy = DER_A_IZQ
+    der = lambda x, y: (bx + (x - ax) / sx, by + (y - ay) / sy)
+    datos = {
+        "letras": _trazar(w, (50, 258, 383, 424), "blanco"),   # L a Z (la Z acaba en x=382)
+        "o1": _trazar(w, (383, 292, 500, 424), "blanco"),
+        "rojo": _trazar(w, (496, 292, 620, 424), "rojo"),
+        "verde": _trazar(w, (1021, 298, 1268, 432), "verde", tf=der, suave=1.0, tolerancia=0.8),
+    }
+    for clave, archivo in (("icono_naranja", "icono-apk-movil.png"), ("icono_rojo", "tray-desconectado.png"),
+                           ("icono_verde", "tray-conectado.png")):
+        im = Image.open(ORIG / archivo)
+        datos[clave] = _trazar(im, (0, 0, im.width, im.height), "color", escala=3, suave=1.6, tolerancia=1.0)
+    TRAZOS.write_text(json.dumps(datos, indent=1) + "\n", encoding="utf-8")
+    print("trazos:", TRAZOS)
+
+
+# ---------------------------------------------------------------- 2) generar (Pillow)
+
+def subcaminos(d: str):
+    """Contornos de un path con solo M, L, C y Z absolutos (lo que escribe trazar())."""
+    out, pts = [], []
+    toks = re.findall(r"[MLCZ]|-?\d+(?:\.\d+)?", d)
+    i, cur = 0, (0.0, 0.0)
+    while i < len(toks):
+        t = toks[i]
+        i += 1
+        if t == "M":
+            cur = (float(toks[i]), float(toks[i + 1]))
+            i += 2
+            pts = [cur]
+        elif t == "L":
+            cur = (float(toks[i]), float(toks[i + 1]))
+            i += 2
+            pts.append(cur)
+        elif t == "C":
+            c = [float(v) for v in toks[i:i + 6]]
+            i += 6
+            p0 = cur
+            for k in range(1, 13):
+                u = k / 12
+                m = 1 - u
+                pts.append((m ** 3 * p0[0] + 3 * m * m * u * c[0] + 3 * m * u * u * c[2] + u ** 3 * c[4],
+                            m ** 3 * p0[1] + 3 * m * m * u * c[1] + 3 * m * u * u * c[3] + u ** 3 * c[5]))
+            cur = (c[4], c[5])
+        elif t == "Z":
+            out.append(pts)
     return out
 
 
-def d_de(pts, dx=0.0, dy=0.0, k=1.0) -> str:
-    return "M" + "L".join(f"{(x + dx) * k:.2f} {(y + dy) * k:.2f}" for x, y in pts) + "Z"
+def caja(d: str):
+    xs = [x for s in subcaminos(d) for x, _ in s]
+    ys = [y for s in subcaminos(d) for _, y in s]
+    return min(xs), min(ys), max(xs), max(ys)
 
 
-def letras() -> str:
-    from fontTools.pens.svgPathPen import SVGPathPen
-    from fontTools.pens.transformPen import TransformPen
-    from fontTools.ttLib import TTFont
-
-    f = TTFont(fuente())
-    gs, cmap = f.getGlyphSet(), f.getBestCmap()
-    cap = f["OS/2"].sCapHeight
-    k = 148 / cap
-    base = 414.5
-    pen = SVGPathPen(gs, ntos=lambda v: f"{v:.1f}")
-    for ch, x in (("L", 58), ("a", 162), ("Z", 274)):
-        g = gs[cmap[ord(ch)]]
-        from fontTools.pens.boundsPen import BoundsPen
-        bp = BoundsPen(gs)
-        g.draw(bp)
-        xmin = bp.bounds[0]
-        g.draw(TransformPen(pen, (k, 0, 0, -k, x - xmin * k, base)))
-    return pen.getCommands()
+def transformar(d: str, k: float, dx: float, dy: float) -> str:
+    """Escala y mueve un path M/L/C/Z absoluto (los números van en pares «x y»)."""
+    return re.sub(r"(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)",
+                  lambda m: f"{float(m[1]) * k + dx:.2f} {float(m[2]) * k + dy:.2f}", d)
 
 
-def wordmark_svg(conectado: bool, d_letras: str) -> str:
-    a, b = bucles(1.0 if conectado else 0.0)
-    c1, c2 = (VERDE, VERDE) if conectado else (BLANCO, ROJO)
-    x, y, w, h = VIEW
-    attrs = f'fill="none" stroke-width="{TRAZO}" stroke-linejoin="round"'
-    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x} {y} {w} {h}" role="img" '
-            f'aria-label="LaZoo {"conectado" if conectado else "desconectado"}">'
-            f'<path fill="{BLANCO}" d="{d_letras}"/>'
-            f'<path {attrs} stroke="{c1}" d="{d_de(a)}"/><path {attrs} stroke="{c2}" d="{d_de(b)}"/></svg>\n')
+def encajar(d: str, lado: float, margen: float) -> str:
+    """Centra el path en un cuadrado de `lado`, con `margen` (fracción) a los lados."""
+    x0, y0, x1, y1 = caja(d)
+    k = lado * (1 - 2 * margen) / max(x1 - x0, y1 - y0)
+    return transformar(d, k, lado / 2 - (x0 + x1) / 2 * k, lado / 2 - (y0 + y1) / 2 * k)
 
 
-def infinito_pts(size: float, margen: float = 0.06):
-    """Bucles del infinito encajados en un cuadrado de lado `size`."""
-    a, b = bucles(1.0)
-    ancho = 2 * INF_A + TRAZO
-    k = size * (1 - 2 * margen) / ancho
-    dx, dy = -INF_C, -CY
-    tr = lambda pts: [((x + dx) * k + size / 2, (y + dy) * k + size / 2) for x, y in pts]
-    return tr(a), tr(b), TRAZO * k
+def pintar(d: str, size: int, color, fondo=None, ss: int = 8) -> Image.Image:
+    """Rasteriza con relleno par-impar (los agujeros de la «o» y del infinito)."""
+    big = size * ss
+    masc = Image.new("1", (big, big), 0)
+    for s in subcaminos(d):
+        capa = Image.new("1", (big, big), 0)
+        ImageDraw.Draw(capa).polygon([(x * ss, y * ss) for x, y in s], fill=1)
+        masc = ImageChops.logical_xor(masc, capa)
+    alfa = masc.convert("L").resize((size, size), Image.LANCZOS)
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0) if fondo is None else fondo)
+    tinta = Image.new("RGBA", (size, size), color)
+    im.paste(tinta, (0, 0), alfa)
+    return im
 
 
-def infinito_svg(color: str, fondo: str | None = None) -> str:
-    a, b, w = infinito_pts(100)
+def svg_icono(d: str, color: str, fondo: str | None = None, margen: float = 0.06) -> str:
     bg = f'<rect width="100" height="100" rx="22" fill="{fondo}"/>' if fondo else ""
     return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">{bg}'
-            f'<path fill="none" stroke="{color}" stroke-width="{w:.2f}" stroke-linejoin="round" '
-            f'd="{d_de(a)}{d_de(b)}"/></svg>\n')
+            f'<path fill="{color}" fill-rule="evenodd" d="{encajar(d, 100, margen)}"/></svg>\n')
 
 
-def infinito_png(size: int, color: str, fondo=None, margen=0.06, ss=8) -> Image.Image:
-    big = size * ss
-    im = Image.new("RGBA", (big, big), (0, 0, 0, 0) if fondo is None else fondo)
-    dr = ImageDraw.Draw(im)
-    a, b, w = infinito_pts(big, margen)
-    r = w / 2
-    for pts in (a, b):
-        ring = pts + [pts[0]]
-        dr.line(ring, fill=color, width=int(round(w)), joint="curve")
-        for x, y in ring:
-            dr.ellipse((x - r, y - r, x + r, y + r), fill=color)
-    return im.resize((size, size), Image.LANCZOS)
+def svg_wordmark(t: dict, conectado: bool) -> str:
+    x, y, w, h = VIEW
+    formas = (f'<path fill="{VERDE}" fill-rule="evenodd" d="{t["verde"]}"/>' if conectado else
+              f'<path fill="{BLANCO}" fill-rule="evenodd" d="{t["o1"]}"/><path fill="{ROJO}" fill-rule="evenodd" d="{t["rojo"]}"/>')
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{x} {y} {w} {h}" role="img" '
+            f'aria-label="LaZoo {"conectado" if conectado else "desconectado"}">'
+            f'<path fill="{BLANCO}" fill-rule="evenodd" d="{t["letras"]}"/>{formas}</svg>\n')
 
 
-def guardar_ico(color: str, ruta: Path) -> None:
+def guardar_ico(d: str, color: str, ruta: Path) -> None:
     tam = [16, 24, 32, 48, 64, 128, 256]
     # A tamaños pequeños, menos margen para que se vea grande en la bandeja.
-    imgs = [infinito_png(s, color, margen=0.02 if s <= 32 else 0.06) for s in tam]
+    imgs = []
+    for s in tam:
+        m = 0.02 if s <= 32 else 0.06
+        imgs.append(pintar(encajar(d, s, m), s, color))
     imgs[-1].save(ruta, format="ICO", sizes=[(s, s) for s in tam], append_images=imgs[:-1])
 
 
-def vector_android(color: str, ancho_dp: int, lienzo: float, escala: float) -> str:
-    """VectorDrawable del infinito centrado en un lienzo de `lienzo` unidades."""
-    a, b, w = infinito_pts(lienzo * escala, 0.0)
-    off = lienzo * (1 - escala) / 2
-    d = d_de(a, off / 1, off / 1) if False else None
-    sh = lambda pts: [(x + off, y + off) for x, y in pts]
-    d = d_de(sh(a)) + d_de(sh(b))
+def vector_android(d: str, color: str, ancho_dp: int, lienzo: float, escala: float) -> str:
+    """VectorDrawable del infinito (relleno par-impar) centrado en un lienzo."""
+    dd = encajar(d, lienzo, (1 - escala) / 2)
     return ('<?xml version="1.0" encoding="utf-8"?>\n'
             f'<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="{ancho_dp}dp" '
             f'android:height="{ancho_dp}dp" android:viewportWidth="{lienzo}" android:viewportHeight="{lienzo}">\n'
-            f'  <path android:strokeColor="{color}" android:strokeWidth="{w:.2f}" android:strokeLineJoin="round" '
-            f'android:fillColor="#00000000" android:pathData="{d}"/>\n</vector>\n')
+            f'  <path android:fillColor="{color}" android:fillType="evenOdd" android:pathData="{dd}"/>\n</vector>\n')
 
 
-def main() -> None:
+def generar() -> None:
+    t = json.loads(TRAZOS.read_text(encoding="utf-8"))
     IMG.mkdir(parents=True, exist_ok=True)
-    dl = letras()
-    (IMG / "logo-desconectado.svg").write_text(wordmark_svg(False, dl), encoding="utf-8")
-    (IMG / "logo-conectado.svg").write_text(wordmark_svg(True, dl), encoding="utf-8")
-    (IMG / "letras-laz.txt").write_text(dl + "\n", encoding="utf-8")
-    import re
-
+    (IMG / "logo-desconectado.svg").write_text(svg_wordmark(t, False), encoding="utf-8")
+    (IMG / "logo-conectado.svg").write_text(svg_wordmark(t, True), encoding="utf-8")
+    vieja = IMG / "letras-laz.txt"
+    if vieja.exists():
+        vieja.unlink()
     js = ROOT / "static" / "logo.js"
-    js.write_text(re.sub(r'var LETRAS = ".*?";', lambda _m: f'var LETRAS = "{dl}";', js.read_text(encoding="utf-8"), flags=re.S), encoding="utf-8")
-    for nombre, color in (("naranja", NARANJA), ("rojo", ROJO), ("verde", VERDE_BANDEJA)):
-        (IMG / f"infinito-{nombre}.svg").write_text(infinito_svg(color), encoding="utf-8")
-    (IMG / "icono-app.svg").write_text(infinito_svg(NARANJA, "#000000"), encoding="utf-8")
-    infinito_png(192, NARANJA, fondo=(0, 0, 0, 255), margen=0.1).save(IMG / "icono-192.png")
-    infinito_png(512, NARANJA, fondo=(0, 0, 0, 255), margen=0.1).save(IMG / "icono-512.png")
-    infinito_png(180, NARANJA, fondo=(0, 0, 0, 255), margen=0.1).save(IMG / "apple-touch-icon.png")
-    guardar_ico(NARANJA, ROOT / "static" / "lazoo.ico")
-    guardar_ico(ROJO, ROOT / "static" / "lazoo-rojo.ico")
-    guardar_ico(VERDE_BANDEJA, ROOT / "static" / "lazoo-verde.ico")
+    texto = js.read_text(encoding="utf-8")
+    for clave, nombre in (("letras", "LETRAS"), ("o1", "O1_TRAZO"), ("rojo", "ROJO_TRAZO"), ("verde", "VERDE_TRAZO")):
+        texto = re.sub(rf'var {nombre} = ".*?";', lambda _m, v=t[clave], n=nombre: f'var {n} = "{v}";', texto, flags=re.S)
+    js.write_text(texto, encoding="utf-8")
+    nar, roj, ver = t["icono_naranja"], t["icono_rojo"], t["icono_verde"]
+    (IMG / "infinito-naranja.svg").write_text(svg_icono(nar, NARANJA), encoding="utf-8")
+    (IMG / "infinito-rojo.svg").write_text(svg_icono(roj, ROJO_BANDEJA), encoding="utf-8")
+    (IMG / "infinito-verde.svg").write_text(svg_icono(ver, VERDE_BANDEJA), encoding="utf-8")
+    (IMG / "icono-app.svg").write_text(svg_icono(nar, NARANJA, "#000000", 0.1), encoding="utf-8")
+    for nombre, s in (("icono-192.png", 192), ("icono-512.png", 512), ("apple-touch-icon.png", 180)):
+        pintar(encajar(nar, s, 0.1), s, NARANJA, fondo=(0, 0, 0, 255)).save(IMG / nombre)
+    guardar_ico(nar, NARANJA, ROOT / "static" / "lazoo.ico")
+    guardar_ico(roj, ROJO_BANDEJA, ROOT / "static" / "lazoo-rojo.ico")
+    guardar_ico(ver, VERDE_BANDEJA, ROOT / "static" / "lazoo-verde.ico")
     # Android: mipmaps clásicos (fondo negro redondeado) + icono adaptable + notificación.
     for carpeta, s in (("mipmap-mdpi", 48), ("mipmap-hdpi", 72), ("mipmap-xhdpi", 96), ("mipmap-xxhdpi", 144), ("mipmap-xxxhdpi", 192)):
         (RES / carpeta).mkdir(parents=True, exist_ok=True)
         base = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-        mask = Image.new("L", (s * 4, s * 4), 0)
-        ImageDraw.Draw(mask).rounded_rectangle((0, 0, s * 4 - 1, s * 4 - 1), radius=s * 4 * 0.22, fill=255)
-        base.paste((0, 0, 0, 255), (0, 0), mask.resize((s, s), Image.LANCZOS))
-        base.alpha_composite(infinito_png(s, NARANJA, margen=0.12))
+        masc = Image.new("L", (s * 4, s * 4), 0)
+        ImageDraw.Draw(masc).rounded_rectangle((0, 0, s * 4 - 1, s * 4 - 1), radius=s * 4 * 0.22, fill=255)
+        base.paste((0, 0, 0, 255), (0, 0), masc.resize((s, s), Image.LANCZOS))
+        base.alpha_composite(pintar(encajar(nar, s, 0.12), s, NARANJA))
         base.save(RES / carpeta / "ic_launcher.png")
-    viejo = RES / "mipmap" / "ic_launcher.png"
-    if viejo.exists():
-        viejo.unlink()
-        viejo.parent.rmdir()
-    (RES / "mipmap-anydpi-v26").mkdir(exist_ok=True)
-    (RES / "mipmap-anydpi-v26" / "ic_launcher.xml").write_text(
-        '<?xml version="1.0" encoding="utf-8"?>\n<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'
-        '  <background android:drawable="@color/lazoo_fondo_icono"/>\n  <foreground android:drawable="@drawable/ic_launcher_foreground"/>\n'
-        '  <monochrome android:drawable="@drawable/ic_launcher_foreground"/>\n</adaptive-icon>\n', encoding="utf-8")
     (RES / "drawable").mkdir(exist_ok=True)
     # Zona segura del icono adaptable: 66 de 108 dp.
-    (RES / "drawable" / "ic_launcher_foreground.xml").write_text(vector_android(NARANJA, 108, 108, 0.6), encoding="utf-8")
-    (RES / "drawable" / "ic_notif.xml").write_text(vector_android("#FFFFFFFF", 24, 24, 0.92), encoding="utf-8")
-    (RES / "values" / "colors.xml").write_text(
-        '<?xml version="1.0" encoding="utf-8"?>\n<resources>\n  <color name="lazoo_fondo_icono">#000000</color>\n</resources>\n', encoding="utf-8")
+    (RES / "drawable" / "ic_launcher_foreground.xml").write_text(vector_android(nar, NARANJA, 108, 108, 0.6), encoding="utf-8")
+    (RES / "drawable" / "ic_notif.xml").write_text(vector_android(nar, "#FFFFFFFF", 24, 24, 0.92), encoding="utf-8")
     print("listo:", IMG)
 
 
 if __name__ == "__main__":
-    main()
+    if "--trazar" in sys.argv:
+        trazar()
+    generar()

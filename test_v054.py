@@ -149,7 +149,14 @@ class Server(unittest.TestCase):
         self.assertEqual(phone.key_from(data["box"]), lazo.PAIRING.key_text())
         self.assertNotIn(lazo.PAIRING.key_text(), json.dumps(data), "la clave va sellada, no en claro")
         self.assertNotEqual(token, lazo.PAIRING.token_text(), "la ficha del QR se renueva tras entregar")
-        self.assertEqual(phone.wait()[0], 401, "la sesión del saludo no se reutiliza")
+        # 0.56: una consulta repetida justo después recibe lo mismo (antes era 401 y el móvil
+        # volvía al PIN); pasado DELIVERED_SECONDS la sesión ya no vale.
+        again = phone.wait()
+        self.assertEqual(again[0], 200)
+        self.assertEqual(phone.key_from(again[1]["box"]), lazo.PAIRING.key_text())
+        self.assertEqual(token == lazo.PAIRING.token_text(), False)
+        lazo.PAIRING.sessions[phone.sid]["at"] -= protocol.PAIR_SECONDS
+        self.assertEqual(phone.wait()[0], 401, "la sesión del saludo no se reutiliza para siempre")
 
     def test_pin_no_key_until_approved_and_rejected_never(self):
         phone = Phone(self.port)
@@ -413,12 +420,12 @@ console.log(fitWords(el, {json.dumps(title)}));
         self.assertIn("/api/pair/hello", JS)
 
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.55")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.55")
-        self.assertIn("0.55", MESA)
-        self.assertIn("<title>LaZoo 0.55</title>", HTML)
-        self.assertIn('android:versionName="0.55"', APK)
-        self.assertIn('android:versionCode="55"', APK)
+        self.assertEqual(lazo.VERSION, "0.56")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.56")
+        self.assertIn("0.56", MESA)
+        self.assertIn("<title>LaZoo 0.56</title>", HTML)
+        self.assertIn('android:versionName="0.56"', APK)
+        self.assertIn('android:versionCode="56"', APK)
 
 
 if __name__ == "__main__":

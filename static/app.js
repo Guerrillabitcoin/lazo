@@ -8,6 +8,15 @@ const linkLabel = document.querySelector("#link-label");
 let wireKey = null;
 let authKey = null;
 let clockOffset = 0;
+/* 0.56: ajustes del ratón que se mandan al PC al entrar (antes salían a los 1,5 s de cargar,
+   sin clave todavía: 401 y el móvil saltaba al PIN en mitad del emparejamiento). */
+const PREF_PUSH = [];
+function pushMousePrefs() {
+  window.setTimeout(() => { if (authKey || onThisPcPage()) PREF_PUSH.forEach((fn) => fn()); }, 300);
+}
+function onThisPcPage() {
+  return ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+}
 localStorage.removeItem("lazo-token");
 const deviceId = localStorage.getItem("lazo-id") || (() => {
   const fresh = toHex(crypto.getRandomValues(new Uint8Array(16)));
@@ -125,6 +134,7 @@ async function api(path, body, method = "POST") {
     payload = wireKey ? sealText(raw, wireKey) : raw;
     if (!wireKey) headers["Content-Type"] = "application/json";
   }
+  const sentWith = authKey;
   const stop = new AbortController();
   const timer = window.setTimeout(() => stop.abort(), 25000);
   let res;
@@ -142,7 +152,10 @@ async function api(path, body, method = "POST") {
     throw new Error(data.error || "Pendiente de aprobación");
   }
   if (res.status === 401) {
-    showPin();
+    // 0.56: solo vuelve al PIN si la petición iba firmada con la clave actual y no hay un
+    // emparejamiento en marcha. Una respuesta vieja (sin clave, o de antes de recibirla) no
+    // puede echar al móvil justo después de que lo acepten en el PC.
+    if (sentWith && sentWith === authKey && !pairing) showPin();
     throw new Error(data.error || "PIN");
   }
   if (!res.ok) throw new Error(data.error || "No se pudo");
@@ -306,20 +319,39 @@ async function pairStart(mode, secretText) {
   return pairWait();
 }
 
-async function pairWait() {
-  if (!pairing) return "pin";
+/* 0.56: una sola consulta de espera a la vez. Antes, con Wi-Fi lenta, dos consultas se
+   cruzaban: la primera recibía la clave y la segunda (ya sin sesión en el PC) devolvía 401,
+   y el móvil volvía al PIN justo después de entrar («hace un amago de entrar pero no»). */
+let pairInFlight = null;
+
+function pairWait() {
+  if (!pairInFlight) pairInFlight = pairWaitOnce().finally(() => { pairInFlight = null; });
+  return pairInFlight;
+}
+
+async function pairWaitOnce() {
+  const mine = pairing;
+  if (!mine) return authKey ? "aprobado" : "pin";
   let got;
   try {
-    got = await pairPost("/api/pair/wait", { sid: pairing.sid, proof: pairing.proof });
+    got = await pairPost("/api/pair/wait", { sid: mine.sid, proof: mine.proof });
   } catch (_err) {
     return "error";
   }
+  if (pairing !== mine) return authKey ? "aprobado" : "pendiente";  // ya lo resolvió otra consulta
   if (got.res.status === 401) {
     pairing = null;
-    return "pin";
+    return authKey ? "aprobado" : "pin";
   }
   if (got.data.state === "aprobado" && got.data.box) {
-    const key = openText(b64urlToBytes(got.data.box), deriveKey(pairing.hk, "lazo/pair/box/1"));
+    let key;
+    try {
+      key = openText(b64urlToBytes(got.data.box), deriveKey(mine.hk, "lazo/pair/box/1"));
+      if (!key) throw new Error("vacía");
+      b64urlToBytes(key);
+    } catch (_err) {
+      return "error";
+    }
     pairing = null;
     setMasterKey(key);
     localStorage.setItem("lazo-key", key);
@@ -353,8 +385,21 @@ async function approvalState() {
   }
 }
 
+let approvalBusy = false;
+
 async function checkApproval() {
-  const state = pairing ? await pairWait() : await approvalState();
+  if (approvalBusy) return;  // 0.56: sin consultas solapadas
+  approvalBusy = true;
+  let state;
+  try {
+    state = pairing ? await pairWait() : await approvalState();
+  } finally {
+    approvalBusy = false;
+  }
+  if (state === "aprobado" && !app.hidden) {
+    window.clearInterval(waitTimer);
+    return;  // ya dentro
+  }
   if (state === "aprobado") {
     window.clearInterval(waitTimer);
     waitPanel.hidden = true;
@@ -383,6 +428,10 @@ async function showApp() {
 document.querySelector("#wait-retry").addEventListener("click", checkApproval);
 
 function enterApp() {
+  window.clearInterval(waitTimer);
+  window.clearInterval(poll);  // 0.56: entrar dos veces no duplica los temporizadores
+  window.clearInterval(clipsTimer);
+  window.clearInterval(caretTimer);
   waitPanel.hidden = true;
   waitNotice(false);
   pinPanel.hidden = true;
@@ -398,6 +447,7 @@ function enterApp() {
   caretTimer = window.setInterval(watchCaret, 700);
   connectPointer();
   loadWindows();
+  pushMousePrefs();
   if (!localStorage.getItem("lazo-hint")) {
     localStorage.setItem("lazo-hint", "1");
     window.setTimeout(() => say("Mantén pulsada una pastilla y arrástrala para ordenar"), 900);
@@ -1278,7 +1328,12 @@ if (fromQr && !(onThisPc && fromTray)) {
   // 0.54: el QR trae una ficha para pedir permiso, no la clave.
   pinPanel.hidden = true;
   say("Pidiendo permiso al PC…");
-  syncClock().then(() => pairStart("qr", fromQr)).then(showPaired).catch((err) => {
+  syncClock().then(() => pairStart("qr", fromQr)).then(showPaired).catch(async (err) => {
+    // 0.56: un QR viejo (p. ej. la APK reabre la última dirección) no debe tirar una clave buena.
+    if (authKey && (await approvalState()) === "aprobado") {
+      enterApp();
+      return;
+    }
     say(err.message || "Sin respuesta del PC");
     showPin();
   });
@@ -3175,7 +3230,7 @@ if (smoothBox) {
     localStorage.setItem("lazo-smooth", smoothBox.checked ? "1" : "0");
     pushSmooth();
   });
-  if (smoothBox.checked) window.setTimeout(pushSmooth, 1500);
+  PREF_PUSH.push(() => { if (smoothBox.checked) pushSmooth(); });
 }
 
 /* 0.50: «Movimiento continuo» en el PC (activado por defecto). */
@@ -3187,7 +3242,7 @@ if (contBox) {
     localStorage.setItem("lazo-continuo", contBox.checked ? "1" : "0");
     pushCont();
   });
-  if (!contBox.checked) window.setTimeout(pushCont, 1500);
+  PREF_PUSH.push(() => { if (!contBox.checked) pushCont(); });
 }
 
 /* 0.51: «Predicción de movimiento» (activada por defecto) e «Inercia al soltar» (apagada). */
@@ -3199,7 +3254,7 @@ if (predBox) {
     localStorage.setItem("lazo-pred", predBox.checked ? "1" : "0");
     pushPred();
   });
-  window.setTimeout(pushPred, 1500);
+  PREF_PUSH.push(pushPred);
 }
 const inerBox = document.querySelector("#aim-inercia");
 const inerLvl = document.querySelector("#aim-inercia-nivel");
@@ -3208,13 +3263,13 @@ if (inerBox && inerLvl) {
   inerBox.checked = ["poca", "media", "mucha"].includes(saved);
   if (inerBox.checked) inerLvl.value = saved;
   const pushIner = () => api("/api/inercia", { nivel: inerBox.checked ? inerLvl.value : null }).catch(() => {});
+  PREF_PUSH.push(pushIner);
   const save = () => {
     localStorage.setItem("lazo-inercia", inerBox.checked ? inerLvl.value : "");
     pushIner();
   };
   inerBox.addEventListener("change", save);
   inerLvl.addEventListener("change", save);
-  window.setTimeout(pushIner, 1500);
 }
 
 /* 0.53: ajuste fino del ratón (dentro de «Ajuste fino / stats»). El PC valida cada valor;
@@ -3277,9 +3332,9 @@ if (document.querySelector("#fino")) {
   document.querySelector("#fino-reset").addEventListener("click", () => fineSend({ preset: "equilibrado" }));
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem("lazo-ajuste") || "null"); } catch (_e) { saved = null; }
-  window.setTimeout(() => {
+  PREF_PUSH.push(() => {
     if (saved && saved.preset && saved.preset !== "personalizado") fineSend({ preset: saved.preset });
     else if (saved && saved.opciones) fineSend({ opciones: saved.opciones });
     else fineSend({});
-  }, 1600);
+  });
 }

@@ -181,7 +181,8 @@ public class MainActivity extends Activity {
 
     void openHost(String url) {
         if (!allowedUrl(url)) return;
-        prefs().edit().putString("last", url).apply();
+        int cut = url.indexOf('#');  // 0.56: sin la ficha del QR (#p=...), que caduca al usarla
+        prefs().edit().putString("last", cut >= 0 ? url.substring(0, cut) : url).apply();
         web.loadUrl(url);
     }
 

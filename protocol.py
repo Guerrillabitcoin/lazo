@@ -172,6 +172,7 @@ def sign_request(auth_key: bytes, method: str, path: str, stamp: int, nonce: str
 _P = 2 ** 255 - 19
 _A24 = 121665
 PAIR_SECONDS = 120
+DELIVERED_SECONDS = 30  # 0.56: la entrega se puede repetir durante este rato
 MAX_SESSIONS = 32
 
 
@@ -394,12 +395,20 @@ class Pairing:
         return row
 
     def deliver(self, sid: str) -> str:
-        """Entrega la clave sellada con la del saludo y cierra la sesión."""
+        """Entrega la clave sellada con la del saludo.
+
+        0.56: la sesión no se borra al entregar; queda DELIVERED_SECONDS para que una consulta
+        repetida o cruzada del mismo móvil (Wi-Fi lenta) reciba la misma respuesta en vez de un
+        401 que lo devolvía al PIN. Solo sirve con la prueba del saludo, que solo tiene ese móvil."""
         with self._lock:
-            row = self.sessions.pop(sid, None)
-        if not row or not row["hk"]:
-            raise ProtocolError("sesión no válida")
-        if row["mode"] == "qr":
+            row = self.sessions.get(sid)
+            if not row or not row["hk"]:
+                raise ProtocolError("sesión no válida")
+            first = not row.get("done")
+            if first:
+                row["done"] = time.time()
+                row["at"] = time.time() - PAIR_SECONDS + DELIVERED_SECONDS
+        if first and row["mode"] == "qr":
             self.new_token()  # un QR fotografiado no vale para otro dispositivo
         return b64u(seal(self.key_text().encode(), derive(row["hk"], "lazo/pair/box/1")))
 
