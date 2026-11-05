@@ -46,6 +46,19 @@ Una fase por encargo. No empieces la siguiente si la anterior no arranca.
 
 Después, y solo después: fluidez del ratón, barra de subida del puente, ignorar IPs `172.*` virtuales, y la copia local de fotos. No son el primer trabajo.
 
+## Trabajo con otros agentes (acuerdo del 5 nov 2026)
+
+El dueño aprobó un acuerdo común para todos sus agentes (Grok Bot, los bots de cada proyecto, Claude, Claude Code y Copilot). Está en el tablero de crosswalk `guerrillaagents`, archivo `files/ACUERDO.md`; léelo antes de trabajar. En lo técnico de LaZoo manda este archivo, y una decisión del dueño posterior manda sobre los dos.
+
+- `main` es la estable histórica (0.31). No se toca hasta que el dueño pruebe el `.exe` y la APK en el Xiaomi y en GrapheneOS y lo pida.
+- El bot LaZoo trabaja directo en `beta`: función, pruebas, versión, `LaZoo-X.Y.zip` y etiqueta `vX.Y.0` (Actions construye `.exe` y APK).
+- Otro agente trabaja en `<agente>/<tarea>` creada desde `beta`. El bot LaZoo la revisa y la integra en `beta` con merge o cherry-pick, con su versión y su etiqueta.
+- Siempre `fetch` antes de empezar; nunca `force-push`. Autor de los commits: `GUERRILLA <guerrilla@users.noreply.github.com>`.
+- Las pruebas se hacen en una copia temporal, nunca en el LaZoo del puerto 8787 del dueño.
+- Las etiquetas `v1.0.0`–`v1.5.0` son la línea temprana «Lazo» del 28 oct, de antes de renumerar a 0.x. Se conservan salvo que el dueño pida borrarlas.
+- Un fallo sin reproducir es una hipótesis: antes de tocar el emparejamiento, el sello o el ratón, una prueba que lo reproduzca.
+- Trabajo de varios agentes, de seguridad o que toque este archivo, los workflows o los secretos: tarea en el tablero, revisión por otro agente y autorización del dueño. El trabajo diario del bot en `beta` sigue como hasta ahora.
+
 ## Firmas y claves (0.58)
 
 - **Nunca** generes, guardes ni subas claves privadas, keystores, certificados de revocación ni contraseñas, ni en el repo ni en la box. Solo scripts (`firmas/`) y guías (`docs/FIRMAS.md`) para que el usuario las cree en su PC. La única clave en el repo es la pública `GUERRILLA.asc`.
