@@ -19,7 +19,7 @@ class QrWaitsWithoutPin(unittest.TestCase):
         start = js.index("if (authKey) {\n  pinPanel.hidden = true;")
         block = js[start:start + 900]
         pend = block.index("res.status === 403 && (data.pending || data.rejected)")
-        drop = block.index('localStorage.removeItem("lazo-key")')
+        drop = block.index("forgetKey();")  # 0.57: forgetKey() borra la clave
         self.assertLess(pend, drop, "el 403 pendiente debe tratarse antes de borrar la clave")
         self.assertIn("showWait(", block[pend:drop])
 

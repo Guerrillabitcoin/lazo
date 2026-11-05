@@ -13,3 +13,24 @@ Fotos/
 build/
 dist/
 LaZoo.spec
+# 0.58: claves y secretos de firma. NUNCA en el repositorio (ver docs/FIRMAS.md).
+# La única clave que sí se sube es la PÚBLICA: GUERRILLA.asc (excepción de abajo).
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pvk
+*.snk
+*.key
+*.gpg
+*.kbx
+*.rev
+*.idsig
+*secreta*.asc
+*secret*.asc
+*privada*.asc
+*private*.asc
+revocacion-*.asc
+LaZoo-claves/
+.gnupg/
+!GUERRILLA.asc

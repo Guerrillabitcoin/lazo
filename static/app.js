@@ -26,7 +26,7 @@ const deviceId = localStorage.getItem("lazo-id") || (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.57";
+const PAGE_VERSION = "0.58";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -3015,10 +3015,28 @@ async function aboutOpen() {
       list.append(li);
     });
     aboutDonations(data.donations || []);
+    aboutPrints(data.fingerprints || []);
     aboutDevices();
   } catch (_err) {
     say("No se pudo leer Sobre LaZoo");
   }
+}
+
+// 0.58: huellas PGP y de la APK (de about.json), solo texto.
+function aboutPrints(items) {
+  const box = document.querySelector("#about-prints-box");
+  const list = document.querySelector("#about-prints");
+  if (!box || !list) return;
+  list.replaceChildren();
+  items.forEach((item) => {
+    const li = document.createElement("li");
+    const code = document.createElement("code");
+    code.className = "about-addr";
+    code.textContent = String(item.value || "");
+    li.append(`${String(item.label || "")}: `, code);
+    list.append(li);
+  });
+  box.hidden = !items.length;
 }
 
 function aboutDonations(items) {

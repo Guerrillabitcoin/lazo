@@ -46,7 +46,16 @@ Una fase por encargo. No empieces la siguiente si la anterior no arranca.
 
 Después, y solo después: fluidez del ratón, barra de subida del puente, ignorar IPs `172.*` virtuales, y la copia local de fotos. No son el primer trabajo.
 
-## Estado (0.57)
+## Firmas y claves (0.58)
+
+- **Nunca** generes, guardes ni subas claves privadas, keystores, certificados de revocación ni contraseñas, ni en el repo ni en la box. Solo scripts (`firmas/`) y guías (`docs/FIRMAS.md`) para que el usuario las cree en su PC. La única clave en el repo es la pública `GUERRILLA.asc`.
+- Identidad: `GUERRILLA <guerrilla@users.noreply.github.com>` (PGP) y `CN=GUERRILLA, O=LaZoo` (APK). Sin nombre real ni ciudad.
+- Todo paso de firma en `ci/construir.yml` es opcional: sin secretos el build sale como siempre. Secretos: `firmas/preparar_secretos.md`.
+- Los agentes no pueden subir `.github/workflows`: se edita `ci/construir.yml` y se avisa al usuario de copiarlo.
+
+## Estado (0.58)
+
+- 0.58: andamiaje de firmas. `docs/FIRMAS.md`, `firmas/generar_pgp.{ps1,sh}`, `generar_keystore.{ps1,sh}`, `verificar.{ps1,sh}`, `preparar_secretos.md`. `android/construir_apk.sh` firma con `LAZOO_FIRMA_KS` + `LAZOO_FIRMA_KS_PASS` (contraseñas por `env:`) y si no, la clave de pruebas de siempre. `ci/construir.yml`: keystore desde `ANDROID_KEYSTORE_B64` (condicional por `env.HAY_KEYSTORE`, borrado al final), trabajo `publicar` solo en tags `v*` (`SHA256SUMS`, PGP si `PGP_PRIVATE_KEY`, `attest-build-provenance@v2` con `continue-on-error`, `gh release create --prerelease` en 0.x), hueco SignPath comentado. `sobre.clean_fingerprint` + `about.json` `pgp_huella`/`apk_huella` → «Comprobar descargas» en «Sobre LaZoo» (oculto si vacío). `.gitignore` de claves. APK 0.58/58. Prueba: `test_v058.py`.
 
 - 0.57: conexión tras aceptar. Causa real (en `%LOCALAPPDATA%\LaZoo\lazoo.log` del .exe): `control._dpapi` (portapapeles, cada 1,5 s) ponía `ctypes.windll.crypt32.CryptProtectData.argtypes` con su `DATA_BLOB`; `ctypes.windll` es global y `recordar._dpapi` lanzaba `ctypes.ArgumentError` (no OSError) en `persist_devices()` dentro de `/api/pair/wait` → conexión cortada sin respuesta, el móvil nunca recibía la clave. Arreglo: `recordar._dpapi_fns()` con `ctypes.WinDLL("crypt32")` propio (argtypes `c_void_p`, `addressof`); `control._dpapi` delega en él; `persist_devices`/`load_remembered`/`Store.load` nunca lanzan; `/api/pair/wait` responde y luego guarda (solo la 1.ª entrega); `_pair` captura todo (500 con fase). Registro `lazo.CONN_LOG`/`conn_log` (sin secretos; `print` protegido: una consola cp1252 tumbaba el emparejamiento con «→») y `conn_diag()` en `/api/conexion.diag` → botón `#conn-diag` del Panel. `/api/time` y `hello` dicen `version` y `proto` (`PROTO = 2`). Expulsar: `lazo.kick_device`/`kick_everyone` (bandeja y Panel) meten el id en `KICKED` → 401 `{kicked}` sin sellar hasta que empareje otra vez (`claim` lo saca); clave vieja → 401 `{stale}`. Móvil: `forgetKey()` + `showPin(motivo)` (`#pin-msg`) en cualquier 401 de la clave actual, sin bucles; `retryBoot` cada 5 s si el PC no contesta; mensajes «Paso 1 (saludo) / Paso 2 (QR/PIN) / espera de la clave»; `conn`/`connStep`/`connDiagText()` y botones `.conn-diag`; `stopTimers` tolera `pointerSocket` sin declarar. APK `LaZooApp.version()`. APK 0.57/57. Prueba: `test_v057.py` (Chrome + Playwright: QR, recarga, reinicio con/sin recordar, expulsar, olvidar, rechazo, dos móviles, sin bucles).
 

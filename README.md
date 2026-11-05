@@ -1,4 +1,4 @@
-# LaZoo 0.57
+# LaZoo 0.58
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.58:** preparación de las firmas, sin cambiar nada de uso. Guía en [docs/FIRMAS.md](docs/FIRMAS.md) y scripts en `firmas/` para crear **en tu PC** la clave PGP de GUERRILLA y la clave de lanzamiento de la APK, más `verificar.ps1`/`verificar.sh` para que cualquiera compruebe una descarga. El workflow nuevo (en `ci/construir.yml`) crea `SHA256SUMS`, firma PGP, atestación de GitHub y una Release, todo opcional: sin secretos sale igual que antes. «Sobre LaZoo» puede enseñar las huellas (`pgp_huella`, `apk_huella` en `about.json`).
 
 **Novedad 0.57:** arreglada de verdad la conexión del móvil tras aceptarlo en el PC. Con el `.exe` (y con «Recordar dispositivos», activado de serie), al aceptar el móvil el PC fallaba al guardar la clave cifrada (DPAPI): el vigilante del portapapeles cambiaba una pieza de Windows que compartía con «Recordar», y la respuesta con la clave nunca llegaba al móvil. Ahora cada parte usa la suya, el PC responde primero y guarda después, y un fallo al guardar ya no corta nada. Además: un móvil expulsado o tras «Olvidar todos» vuelve solo a la pantalla del QR/PIN con el motivo (sin bucles con la clave vieja) y puede emparejar de nuevo; si al abrir no contesta el PC, reintenta cada 5 s sin borrar la clave; los mensajes dicen en qué paso falló; y hay un botón **«Copiar diagnóstico de conexión»** en el móvil (pantalla del PIN y de espera) y en el Panel de LaZoo, con la fase, el último error y las versiones (nunca la clave ni el PIN).
 
@@ -115,6 +117,16 @@ Desde la 0.54 la clave no va en el QR ni sale por el PIN: el móvil y el PC hace
 Para pararlo: `Ctrl+C` en la terminal.
 
 MIT. Úsalo en tus propios equipos.
+
+## Comprobar descargas
+
+Guía completa: [docs/FIRMAS.md](docs/FIRMAS.md). En cada Release habrá `SHA256SUMS` y, cuando estén activas, su firma `SHA256SUMS.asc` y la atestación de GitHub.
+
+- Huella PGP de GUERRILLA: *pendiente (0.59)*. Clave pública: `GUERRILLA.asc` en la raíz del repo.
+- Huella SHA-256 del certificado de la APK: *pendiente (0.59)*. Hasta entonces la APK va firmada con una clave de pruebas que cambia en cada build.
+- `.exe`: sin firma de Windows todavía (SmartScreen avisa).
+
+Comprobar: `firmas/verificar.sh CARPETA` o `powershell -ExecutionPolicy Bypass -File firmas\verificar.ps1 -Carpeta CARPETA`, y `gh attestation verify ARCHIVO -R Guerrillabitcoin/lazo`.
 
 ## Identidad visual
 

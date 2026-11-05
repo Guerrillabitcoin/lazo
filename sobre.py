@@ -39,6 +39,24 @@ _DONATE = {
         r"|(?:wpkh|tr|sh|wsh)\([0-9A-Za-z\[\]/'h*(),]{20,400}\)(?:#[0-9a-z]{8})?)$"
     ),
 }
+# 0.58: huellas para comprobar descargas (opcionales). PGP: 40 hex (v4) o 64 hex (v5/v6).
+# APK: SHA-256 del certificado de firma (64 hex, con o sin «:»). Se muestran en mayúsculas
+# agrupadas; nada se consulta fuera.
+_HEX_RE = re.compile(r"[\s:]")
+FINGERPRINT_FIELDS = {"pgp_huella": ("Huella PGP (GUERRILLA)", (40, 64)), "apk_huella": ("Huella SHA-256 de la APK", (64,))}
+
+
+def clean_fingerprint(field: str, value: Any) -> str:
+    if field not in FINGERPRINT_FIELDS or not isinstance(value, str) or len(value) > 200:
+        return ""
+    hexa = _HEX_RE.sub("", value).upper()
+    if len(hexa) not in FINGERPRINT_FIELDS[field][1] or not re.fullmatch(r"[0-9A-F]+", hexa):
+        return ""
+    step = 4 if field == "pgp_huella" else 2
+    sep = " " if field == "pgp_huella" else ":"
+    return sep.join(hexa[i:i + step] for i in range(0, len(hexa), step))
+
+
 DONATE_LABELS = {
     "lightning": "Lightning",
     "bolt12": "Lightning (BOLT12)",
@@ -85,7 +103,12 @@ def load_config(root: Path) -> dict[str, Any]:
         value = clean_donation(kind, raw.get(kind))
         if value:
             donations.append({"kind": kind, "label": DONATE_LABELS[kind], "value": value})
-    return {"links": links, "donations": donations}
+    prints = []
+    for field, (label, _sizes) in FINGERPRINT_FIELDS.items():
+        value = clean_fingerprint(field, raw.get(field))
+        if value:
+            prints.append({"kind": field, "label": label, "value": value})
+    return {"links": links, "donations": donations, "fingerprints": prints}
 
 
 def about(root: Path, version: str, qr: Callable[[str], str] | None = None) -> dict[str, Any]:

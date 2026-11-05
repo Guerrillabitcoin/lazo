@@ -112,14 +112,14 @@ class Fuente(unittest.TestCase):
     def test_cliente(self):
         self.assertIn("forgetKey();", JS)
         self.assertIn("connDiagText", JS)
-        self.assertIn('const PAGE_VERSION = "0.57"', JS)
+        self.assertIn('const PAGE_VERSION = "0.58"', JS)
 
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.57")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.57")
+        self.assertEqual(lazo.VERSION, "0.58")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.58")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        self.assertIn('android:versionCode="57"', apk)
-        self.assertIn("# LaZoo 0.57", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn('android:versionCode="58"', apk)
+        self.assertIn("# LaZoo 0.58", (ROOT / "README.md").read_text(encoding="utf-8"))
 
 
 def _ip():
@@ -265,8 +265,8 @@ class Navegador(Base):
                 await asyncio.sleep(0.3)
             self.assertEqual(await pg.evaluate("document.querySelector('#wait').dataset.state"), "rechazado")
             diag = await pg.evaluate("connDiagText()")
-            self.assertIn("página 0.57", diag)
-            self.assertIn("PC 0.57", diag)
+            self.assertIn("página 0.58", diag)
+            self.assertIn("PC 0.58", diag)
             self.assertNotIn("123456", diag)
 
             # (7) Dos móviles a la vez.

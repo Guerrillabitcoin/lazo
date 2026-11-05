@@ -76,12 +76,12 @@ def jerk(per, t0, t1):
 
 class Version(unittest.TestCase):
     def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.57")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.57")
-        self.assertIn('android:versionName="0.57"', APK)
-        self.assertIn('android:versionCode="57"', APK)
-        self.assertIn("0.57", (ROOT / "static" / "mesa.html").read_text(encoding="utf-8"))
-        self.assertIn("LaZoo 0.57", HTML)
+        self.assertEqual(lazo.VERSION, "0.58")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.58")
+        self.assertIn('android:versionName="0.58"', APK)
+        self.assertIn('android:versionCode="58"', APK)
+        self.assertIn("0.58", (ROOT / "static" / "mesa.html").read_text(encoding="utf-8"))
+        self.assertIn("LaZoo 0.58", HTML)
 
 
 class CorreccionSuave(unittest.TestCase):

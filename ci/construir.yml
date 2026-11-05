@@ -1,6 +1,14 @@
-# LaZoo: construye LaZoo.exe (Windows) y LaZoo.apk (Android) y los deja como artefactos.
-# Se lanza al subir una etiqueta v* (por ejemplo v0.47.0) o a mano desde la pestaña Actions.
-# No usa secretos: la APK va firmada con una clave de PRUEBAS creada en cada ejecución.
+# LaZoo: construye LaZoo.exe (Windows) y LaZoo.apk (Android).
+# Se lanza al subir una etiqueta v* (por ejemplo v0.58.0) o a mano desde la pestaña Actions.
+#
+# 0.58: firmas OPCIONALES (guía: docs/FIRMAS.md, secretos: firmas/preparar_secretos.md).
+#  - Sin ningún secreto se comporta como antes: APK con clave de PRUEBAS y .exe sin firmar.
+#  - ANDROID_KEYSTORE_B64 + ANDROID_KEYSTORE_PASSWORD (+ ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD):
+#    la APK sale con la clave de LANZAMIENTO.
+#  - PGP_PRIVATE_KEY (+ PGP_PASSPHRASE): firma separada .asc de SHA256SUMS y de cada archivo.
+#  - Siempre en etiquetas v*: SHA256SUMS, atestación de GitHub y Release (prerelease en 0.x).
+#  - SignPath (.exe): hueco comentado en el trabajo «exe», ver docs/FIRMAS.md.
+# Este archivo vive en ci/. Para activarlo hay que copiarlo a .github/workflows/construir.yml.
 name: Construir LaZoo
 
 on:
@@ -30,6 +38,23 @@ jobs:
             --add-data "permitir.ps1;." --add-data "about.example.json;." `
             --distpath dist --workpath build LaZoo.pyw
           if (-not (Test-Path dist\LaZoo\LaZoo.exe)) { throw "No salió LaZoo.exe" }
+      # --- SignPath (desactivado). Para activarlo (cuando SignPath Foundation apruebe el proyecto):
+      # 1) Crea el secreto SIGNPATH_API_TOKEN y las variables del repo SIGNPATH_ORGANIZATION_ID,
+      #    SIGNPATH_PROJECT_SLUG y SIGNPATH_POLICY_SLUG (los da SignPath).
+      # 2) Descomenta los dos pasos y añade al trabajo:  permissions: { contents: read, actions: read }
+      # 3) Cambia la subida de abajo para que use dist/LaZoo-firmado en vez de dist/LaZoo.
+      # - id: sin-firmar
+      #   uses: actions/upload-artifact@v4
+      #   with: { name: LaZoo-windows-sin-firmar, path: dist/LaZoo }
+      # - uses: signpath/github-action-submit-signing-request@v1
+      #   with:
+      #     api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #     organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+      #     project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+      #     signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+      #     github-artifact-id: ${{ steps.sin-firmar.outputs.artifact-id }}
+      #     wait-for-completion: true
+      #     output-artifact-directory: dist/LaZoo-firmado
       - uses: actions/upload-artifact@v4
         with:
           name: LaZoo-windows
@@ -37,8 +62,10 @@ jobs:
           retention-days: 30
 
   apk:
-    name: LaZoo.apk (Android, firma de pruebas)
+    name: LaZoo.apk (Android)
     runs-on: ubuntu-24.04
+    env:
+      HAY_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_B64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -50,14 +77,106 @@ jobs:
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
           yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK" "platforms;android-34" "build-tools;34.0.0" >/dev/null
           echo "ANDROID_SDK=$SDK" >> "$GITHUB_ENV"
+      - name: Restaurar keystore de lanzamiento (solo si existe el secreto)
+        if: env.HAY_KEYSTORE == 'true'
+        env:
+          KS_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          umask 077
+          printf '%s' "$KS_B64" | base64 -d > "$RUNNER_TEMP/lazoo-lanzamiento.jks"
+          echo "LAZOO_FIRMA_KS=$RUNNER_TEMP/lazoo-lanzamiento.jks" >> "$GITHUB_ENV"
       - name: Construir
         env:
           LAZOO_KEYSTORE: ${{ runner.temp }}/lazoo-pruebas.jks
+          LAZOO_FIRMA_KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          LAZOO_FIRMA_KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          LAZOO_FIRMA_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
+          [ -n "$LAZOO_FIRMA_ALIAS" ] || unset LAZOO_FIRMA_ALIAS
+          [ -n "$LAZOO_FIRMA_KEY_PASS" ] || unset LAZOO_FIRMA_KEY_PASS
           chmod +x android/construir_apk.sh
           android/construir_apk.sh "$PWD/LaZoo.apk"
+          if [ "$HAY_KEYSTORE" = "true" ]; then echo "lanzamiento" > firma-apk.txt
+          else echo "pruebas (sin firma de lanzamiento)" > firma-apk.txt; echo "::warning::APK sin firma de lanzamiento (falta ANDROID_KEYSTORE_B64)"; fi
+      - name: Borrar keystore del runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/lazoo-lanzamiento.jks" "$RUNNER_TEMP/lazoo-pruebas.jks"
       - uses: actions/upload-artifact@v4
         with:
-          name: LaZoo-android-pruebas
-          path: LaZoo.apk
+          name: LaZoo-android
+          path: |
+            LaZoo.apk
+            firma-apk.txt
           retention-days: 30
+
+  publicar:
+    name: SHA256SUMS, firmas y Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [exe, apk]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write      # crear la Release
+      id-token: write      # atestación (Sigstore)
+      attestations: write  # atestación
+    env:
+      HAY_PGP: ${{ secrets.PGP_PRIVATE_KEY != '' }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: artefactos
+      - name: Empaquetar
+        run: |
+          VER="$(tr -d '\r\n' < VERSION.txt)"
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          mkdir -p salida
+          (cd artefactos/LaZoo-windows && zip -qr -X "../../salida/LaZoo-$VER-windows.zip" .)
+          cp artefactos/LaZoo-android/LaZoo.apk "salida/LaZoo-$VER.apk"
+          echo "FIRMA_APK=$(cat artefactos/LaZoo-android/firma-apk.txt)" >> "$GITHUB_ENV"
+          git archive --format=zip --prefix="LaZoo-$VER/" -o "salida/LaZoo-$VER.zip" "$TAG"
+          cd salida && sha256sum LaZoo-* > SHA256SUMS && cat SHA256SUMS
+      - name: Firma PGP (solo si existe el secreto)
+        if: env.HAY_PGP == 'true'
+        env:
+          PGP_PRIVATE_KEY: ${{ secrets.PGP_PRIVATE_KEY }}
+          PGP_PASSPHRASE: ${{ secrets.PGP_PASSPHRASE }}
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 -p "$GNUPGHOME"
+          printf '%s\n' "$PGP_PRIVATE_KEY" | gpg --batch --quiet --import
+          cd salida
+          for f in SHA256SUMS LaZoo-*; do
+            printf '%s' "$PGP_PASSPHRASE" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+              --armor --detach-sign -o "$f.asc" "$f"
+          done
+          gpg --batch --verify SHA256SUMS.asc SHA256SUMS
+      - name: Borrar clave PGP del runner
+        if: always()
+        run: rm -rf "$RUNNER_TEMP/gnupg"
+      - name: Atestación de origen (GitHub)
+        uses: actions/attest-build-provenance@v2
+        continue-on-error: true
+        with:
+          subject-path: "salida/LaZoo-*"
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          case "$VER" in 0.*) PRE="--prerelease" ;; *) PRE="" ;; esac
+          if [ "$HAY_PGP" = "true" ]; then PGPTXT="SHA256SUMS y cada archivo llevan firma PGP (.asc) de GUERRILLA."
+          else PGPTXT="Sin firma PGP en esta versión: comprueba solo SHA256SUMS y la atestación."; fi
+          {
+            echo "LaZoo $VER (rama beta)."
+            echo
+            echo "- APK: firma de $FIRMA_APK."
+            echo "- .exe: sin firma de Windows (SmartScreen avisará)."
+            echo "- $PGPTXT"
+            echo "- Atestación: gh attestation verify ARCHIVO -R ${{ github.repository }}"
+            echo
+            echo "Cómo comprobar: docs/FIRMAS.md y firmas/verificar.sh / verificar.ps1."
+          } > notas.md
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" $PRE --verify-tag --title "LaZoo $VER" --notes-file notas.md
+          gh release upload "$TAG" salida/* --clobber

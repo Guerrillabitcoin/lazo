@@ -18,14 +18,28 @@ javac --release 11 -nowarn -classpath "$JAR" -d build/classes $(find src build/g
 cp build/base.apk build/unsigned.apk
 python3 -c "import zipfile; zipfile.ZipFile('build/unsigned.apk','a').write('build/dex/classes.dex','classes.dex')"
 "$BT/zipalign" -f -p 4 build/unsigned.apk build/aligned.apk
-# Clave propia de pruebas (no de Google Play). Se crea una vez y se reutiliza.
-KS="${LAZOO_KEYSTORE:-$HOME/.lazoo/lazoo-pruebas.jks}"
-if [ ! -f "$KS" ]; then
-  mkdir -p "$(dirname "$KS")"
-  keytool -genkeypair -keystore "$KS" -storepass lazoopruebas -keypass lazoopruebas -alias lazoo \
-    -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=GUERRILLA, O=LaZoo" >/dev/null
-fi
 mkdir -p "$(dirname "$OUT")"
-"$BT/apksigner" sign --ks "$KS" --ks-pass pass:lazoopruebas --ks-key-alias lazoo --out "$OUT" build/aligned.apk
+# 0.58: firma de LANZAMIENTO opcional. Si existen LAZOO_FIRMA_KS (ruta al .jks) y
+# LAZOO_FIRMA_KS_PASS, se firma con esa clave; las contraseñas se leen de variables de
+# entorno (apksigner env:...), nunca en la línea de órdenes ni en el registro.
+# Si no, se mantiene lo de siempre: clave de PRUEBAS (no es una identidad, no sirve para
+# actualizar encima de una APK firmada con la clave de lanzamiento).
+if [ -n "${LAZOO_FIRMA_KS:-}" ] && [ -f "${LAZOO_FIRMA_KS}" ] && [ -n "${LAZOO_FIRMA_KS_PASS:-}" ]; then
+  export LAZOO_FIRMA_KEY_PASS="${LAZOO_FIRMA_KEY_PASS:-$LAZOO_FIRMA_KS_PASS}"
+  "$BT/apksigner" sign --ks "$LAZOO_FIRMA_KS" --ks-pass env:LAZOO_FIRMA_KS_PASS \
+    --ks-key-alias "${LAZOO_FIRMA_ALIAS:-lazoo}" --key-pass env:LAZOO_FIRMA_KEY_PASS \
+    --out "$OUT" build/aligned.apk
+  echo "Firma: LANZAMIENTO (alias ${LAZOO_FIRMA_ALIAS:-lazoo})"
+else
+  # Clave propia de pruebas (no de Google Play). Se crea una vez y se reutiliza.
+  KS="${LAZOO_KEYSTORE:-$HOME/.lazoo/lazoo-pruebas.jks}"
+  if [ ! -f "$KS" ]; then
+    mkdir -p "$(dirname "$KS")"
+    keytool -genkeypair -keystore "$KS" -storepass lazoopruebas -keypass lazoopruebas -alias lazoo \
+      -keyalg RSA -keysize 3072 -validity 10000 -dname "CN=GUERRILLA, O=LaZoo" >/dev/null
+  fi
+  "$BT/apksigner" sign --ks "$KS" --ks-pass pass:lazoopruebas --ks-key-alias lazoo --out "$OUT" build/aligned.apk
+  echo "Firma: PRUEBAS (sin firma de lanzamiento)"
+fi
 "$BT/apksigner" verify --print-certs "$OUT" | head -3
 echo "Listo: $OUT"
