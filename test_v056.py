@@ -290,14 +290,14 @@ class Logo(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.58")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.58")
-        self.assertIn("<title>LaZoo 0.58</title>", HTML)
-        self.assertIn("/logo.js?v=0.58", MESA)
-        self.assertIn('android:versionName="0.58"', APK)
-        self.assertIn('android:versionCode="58"', APK)
-        self.assertIn("# LaZoo 0.58", (ROOT / "README.md").read_text(encoding="utf-8"))
-        self.assertIn("## Estado (0.58)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
+        self.assertEqual(lazo.VERSION, "0.59")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.59")
+        self.assertIn("<title>LaZoo 0.59</title>", HTML)
+        self.assertIn("/logo.js?v=0.59", MESA)
+        self.assertIn('android:versionName="0.59"', APK)
+        self.assertIn('android:versionCode="59"', APK)
+        self.assertIn("# LaZoo 0.59", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("## Estado (0.59)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

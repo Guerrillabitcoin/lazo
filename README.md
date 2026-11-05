@@ -1,4 +1,4 @@
-# LaZoo 0.58
+# LaZoo 0.59
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.59:** YouTube ya no se queda parado en «Vídeo en pausa. ¿Quieres seguir viendo?». Si aparece, el PC pulsa «Sí» por accesibilidad de Windows (UI Automation): no mueve el ratón, no pulsa teclas y no trae la ventana delante. Se apaga en el Panel o en la pestaña YouTube del móvil («Evitar el aviso ‘¿Sigues ahí?’ de YouTube»), o con `--sin-sigues`. Solo Windows por ahora.
 
 **Novedad 0.58:** preparación de las firmas, sin cambiar nada de uso. Guía en [docs/FIRMAS.md](docs/FIRMAS.md) y scripts en `firmas/` para crear **en tu PC** la clave PGP de GUERRILLA y la clave de lanzamiento de la APK, más `verificar.ps1`/`verificar.sh` para que cualquiera compruebe una descarga. El workflow nuevo (en `ci/construir.yml`) crea `SHA256SUMS`, firma PGP, atestación de GitHub y una Release, todo opcional: sin secretos sale igual que antes. «Sobre LaZoo» puede enseñar las huellas (`pgp_huella`, `apk_huella` en `about.json`).
 

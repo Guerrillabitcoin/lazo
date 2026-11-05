@@ -26,7 +26,7 @@ const deviceId = localStorage.getItem("lazo-id") || (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.58";
+const PAGE_VERSION = "0.59";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -3484,5 +3484,18 @@ if (document.querySelector("#fino")) {
     if (saved && saved.preset && saved.preset !== "personalizado") fineSend({ preset: saved.preset });
     else if (saved && saved.opciones) fineSend({ opciones: saved.opciones });
     else fineSend({});
+  });
+}
+
+// 0.59: «¿Sigues ahí?» de YouTube. El PC guarda el ajuste; aquí solo se enseña y se cambia.
+const ytSigues = document.querySelector("#yt-sigues");
+if (ytSigues) {
+  const syncSigues = () => api("/api/sigues", {}).then((st) => {
+    ytSigues.disabled = !st.available || !!st.disabled;
+    if (document.activeElement !== ytSigues) ytSigues.checked = !!st.on;
+  }).catch(() => {});
+  PREF_PUSH.push(syncSigues);
+  ytSigues.addEventListener("change", () => {
+    api("/api/sigues", { on: ytSigues.checked }).then((st) => { ytSigues.checked = !!st.on; }).catch(() => syncSigues());
   });
 }

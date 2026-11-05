@@ -29,12 +29,13 @@ import control
 import protocol
 import puente
 import recordar
+import sigues
 import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.58"
+VERSION = "0.59"
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
@@ -273,6 +274,7 @@ def connection_info() -> dict:
         "waiting": [{"label": d["label"], "ip": d["ip"], "short": d["short"], "left": d["left"], "fp": d.get("fp", "")}
                     for d in APPROVALS.listing() if d["state"] == "pendiente"],
         "recordar": STORE.enabled(),
+        "sigues": sigues.SIGUES.status()["on"],
         "approve_where": approve_where(),
         "version": VERSION,
         "diag": conn_diag(),
@@ -766,6 +768,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/recordar":
             self._local_only(lambda _body: {"recordar": STORE.enabled(), "devices": APPROVALS.approved_rows()})
             return
+        if path == "/api/sigues":
+            self._guard(lambda _body: sigues.SIGUES.status())
+            return
         if path == "/api/status":
             self._guard(lambda _body: {**control.status(), "version": VERSION})
             return
@@ -829,6 +834,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/recordar":
             self._local_only(lambda body: set_remember(bool(body.get("on"))))
+            return
+        if path == "/api/sigues":
+            # 0.59: el Panel (local) y el móvil (sellado) pueden encenderlo o apagarlo.
+            self._guard(lambda body: sigues.SIGUES.set_on(body.get("on")))
             return
         if path == "/api/olvidar":
             self._local_only(lambda _body: forget_all())
@@ -1355,6 +1364,8 @@ def start(argv: list[str] | None = None, console: bool = True):
     parser.add_argument("--max-gb", type=float, default=0, help="Tope por archivo del puente (8 por defecto)")
     parser.add_argument("--permitir-ip", action="append", default=[], metavar="CIDR",
                         help="Acepta también este rango (p. ej. una VPN 100.64.0.0/10). Repetible.")
+    parser.add_argument("--sin-sigues", action="store_true",
+                        help="No contesta el aviso «¿Sigues ahí?» de YouTube (igual que LAZO_SIN_SIGUES=1)")
     parser.add_argument("--sin-vigilante", action="store_true",
                         help="No pone el vigilante del ratón del PC (igual que LAZO_SIN_VIGILANTE=1)")
     parser.add_argument("--sin-portapapeles", action="store_true",
@@ -1371,6 +1382,8 @@ def start(argv: list[str] | None = None, console: bool = True):
         print(f"  Aviso: amplías el acceso a {net}. Cualquiera en ese rango puede intentar el PIN.")
     if args.sin_vigilante:
         control.VIGILANTE.enabled = False
+    if args.sin_sigues:
+        sigues.SIGUES.disabled = True
     if args.sin_portapapeles:
         control.CLIP_WATCH.enabled = False
     APPROVALS.auto = args.auto_aprobar or os.environ.get("LAZO_AUTOAPPROVE") == "1"
@@ -1429,6 +1442,10 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         control.watch_clipboard()
+    except Exception:
+        pass
+    try:
+        sigues.watch()
     except Exception:
         pass
     if not args.no_browser:

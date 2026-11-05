@@ -190,13 +190,13 @@ class ScriptsReales(unittest.TestCase):
 class Version(unittest.TestCase):
     def test_version(self):
         import lazo
-        self.assertEqual(lazo.VERSION, "0.58")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.58")
+        self.assertEqual(lazo.VERSION, "0.59")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.59")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        self.assertIn('android:versionCode="58"', apk)
-        self.assertIn('android:versionName="0.58"', apk)
-        self.assertIn("# LaZoo 0.58", (ROOT / "README.md").read_text(encoding="utf-8"))
-        self.assertIn("## Estado (0.58)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
+        self.assertIn('android:versionCode="59"', apk)
+        self.assertIn('android:versionName="0.59"', apk)
+        self.assertIn("# LaZoo 0.59", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("## Estado (0.59)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

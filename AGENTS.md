@@ -53,7 +53,9 @@ Después, y solo después: fluidez del ratón, barra de subida del puente, ignor
 - Todo paso de firma en `ci/construir.yml` es opcional: sin secretos el build sale como siempre. Secretos: `firmas/preparar_secretos.md`.
 - Los agentes no pueden subir `.github/workflows`: se edita `ci/construir.yml` y se avisa al usuario de copiarlo.
 
-## Estado (0.58)
+## Estado (0.59)
+
+- 0.59: «¿Sigues ahí?» de YouTube. `sigues.py` (`SIGUES`, hilo `lazo-sigues`, cada `INTERVALO` 15 s, solo Windows): con una ventana de YouTube (`control._find_youtube_unlocked`, sin enfocar) manda su hwnd a un PowerShell oculto (`-EncodedCommand`, así el .exe no necesita otro archivo ni tocar el workflow) que con UI Automation busca un botón «Yes/Sí/…» (`SI`) cuyo entorno más cercano (hasta 4 padres; si hay varios, el más cercano al texto) tenga un texto del aviso (`AVISO`, varios idiomas) y lo pulsa con `InvokePattern`: sin cursor, sin teclas, sin foco, sin JavaScript. Ajuste en `ajustes.json` (`recordar.data_dir()`, clave `sigues`, por defecto sí); `GET/POST /api/sigues {on}` (Panel local y móvil sellado; `{}` consulta). `/api/conexion` lleva `sigues`. Panel: chip `#sigues`; móvil: `#yt-sigues` en YouTube. Apagar: `--sin-sigues` / `LAZO_SIN_SIGUES=1`. No arranca con unittest/pytest. APK 0.59/59. Prueba: `test_v059.py`.
 
 - 0.58: andamiaje de firmas. `docs/FIRMAS.md`, `firmas/generar_pgp.{ps1,sh}`, `generar_keystore.{ps1,sh}`, `verificar.{ps1,sh}`, `preparar_secretos.md`. `android/construir_apk.sh` firma con `LAZOO_FIRMA_KS` + `LAZOO_FIRMA_KS_PASS` (contraseñas por `env:`) y si no, la clave de pruebas de siempre. `ci/construir.yml`: keystore desde `ANDROID_KEYSTORE_B64` (condicional por `env.HAY_KEYSTORE`, borrado al final), trabajo `publicar` solo en tags `v*` (`SHA256SUMS`, PGP si `PGP_PRIVATE_KEY`, `attest-build-provenance@v2` con `continue-on-error`, `gh release create --prerelease` en 0.x), hueco SignPath comentado. `sobre.clean_fingerprint` + `about.json` `pgp_huella`/`apk_huella` → «Comprobar descargas» en «Sobre LaZoo» (oculto si vacío). `.gitignore` de claves. APK 0.58/58. Prueba: `test_v058.py`.
 

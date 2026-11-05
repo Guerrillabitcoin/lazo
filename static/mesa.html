@@ -103,7 +103,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.58</p>
+          <p class="ver">0.59</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -112,6 +112,9 @@
         <div class="grow"></div>
         <label class="chip" title="Guarda la clave cifrada en este PC para que los móviles aprobados se reconecten solos tras reiniciar">
           <input id="recordar" type="checkbox" /> Recordar dispositivos
+        </label>
+        <label class="chip" title="Si YouTube pregunta «¿Quieres seguir viendo?», LaZoo pulsa «Sí» por accesibilidad, sin mover el ratón ni traer la ventana delante">
+          <input id="sigues" type="checkbox" /> Evitar el aviso «¿Sigues ahí?» de YouTube
         </label>
       </header>
       <!-- 0.54: el Panel solo informa. Se acepta o rechaza en el aviso de Windows o en el icono de la bandeja. -->
@@ -416,6 +419,7 @@
           $("#st-wait").className = waiting.length ? "estado-pendiente" : "";
           $("#st-rec").textContent = data.recordar ? "Sí" : "No";
           $("#recordar").checked = !!data.recordar;
+          if (document.activeElement !== $("#sigues")) $("#sigues").checked = !!data.sigues;
           $("#st-net").textContent = (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red";
         } catch (_err) {}
       }
@@ -453,6 +457,9 @@
         if (!confirm("¿Olvidar todos los dispositivos? Se borra la clave guardada y la lista, se cierran las sesiones y todos tendrán que emparejarse y ser aceptados otra vez.")) return;
         devCall("/api/olvidar", {}).then(() => { loadDevices(); watchConn(); }).catch(() => {});
       });
+      $("#sigues").addEventListener("change", (event) => {
+        devCall("/api/sigues", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
+      });
       $("#recordar").addEventListener("change", (event) => {
         devCall("/api/recordar", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
@@ -474,6 +481,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.58"></script>
+    <script src="/logo.js?v=0.59"></script>
   </body>
 </html>
