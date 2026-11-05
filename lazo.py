@@ -397,6 +397,13 @@ def load_remembered() -> int:
     if not saved:
         return 0
     key, rows = saved
+    if key is None:
+        # 0.62: clave de 0.61 o anterior, que tenían todos los móviles. Clave nueva (la de arranque)
+        # y se guarda ya; los aprobados siguen en la lista y solo vuelven a escanear el QR una vez.
+        APPROVALS.preload(rows)
+        persist_devices()
+        conn_log(f"clave de antes de 0.62: clave nueva; {len(rows)} recordados vuelven a escanear el QR")
+        return len(rows)
     PAIRING.set_key(key)
     APPROVALS.preload(rows)
     conn_log(f"recordados al arrancar: {len(rows)}")
@@ -540,6 +547,11 @@ class Handler(BaseHTTPRequestHandler):
 
     remote = True
     denied = ""
+    peer: str | None = None  # 0.62: id del móvil ya verificado en esta petición (su clave sella y abre)
+
+    def handle_one_request(self) -> None:
+        self.peer = None  # cada petición de una conexión keep-alive empieza sin móvil verificado
+        super().handle_one_request()
 
     def _loopback(self) -> bool:
         return self.client_address[0] in ("127.0.0.1", "::1")
@@ -563,6 +575,7 @@ class Handler(BaseHTTPRequestHandler):
         móvil firma cada petición con la clave del QR; ver protocol.py."""
         self.remote = not self._loopback()
         self.denied = ""
+        self.peer = None
         if not self.remote:
             if not self._host_ok():
                 return False
@@ -579,7 +592,10 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "0") or 0)
         if not got[2] or self._who(ws) == self.client_address[0]:
             return False
-        self.denied = PAIRING.verify(self.command, path, length, *got)
+        # 0.62: la firma tiene que ser de la clave de ESTE id (cambiar el id ya no sirve).
+        self.denied = PAIRING.verify(self.command, path, length, *got, who=self._who(ws))
+        if self.denied in ("ok", "hora"):
+            self.peer = self._who(ws)  # firma de su clave: la respuesta (también «reloj distinto») va sellada para él
         if self.denied != "ok":
             _deny_note(self._who(ws), self.denied)
             return False
@@ -632,7 +648,7 @@ class Handler(BaseHTTPRequestHandler):
     def _send(self, code: int, payload: dict | None = None, body: bytes | None = None, content_type: str = "application/json", seal: bool = True) -> None:
         data = body if body is not None else json.dumps(payload or {}, ensure_ascii=False).encode()
         if body is None and seal and self.headers.get("X-Seal") == "1":
-            data = PAIRING.seal(data)
+            data = PAIRING.seal(data, self.peer)
             content_type = "application/octet-stream"
         self.send_response(code)
         self.send_header("Content-Type", content_type)
@@ -650,7 +666,7 @@ class Handler(BaseHTTPRequestHandler):
             raise control.ControlError("hace falta cifrado")
         if raw.startswith(protocol.MAGIC):
             try:
-                raw = PAIRING.open(raw)
+                raw = PAIRING.open(raw, self.peer)
             except protocol.ProtocolError as exc:
                 raise control.ControlError(str(exc)) from exc
         try:
@@ -1075,7 +1091,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if data.startswith(protocol.MAGIC):
             try:
-                data = PAIRING.open(data)
+                data = PAIRING.open(data, self.peer)
             except protocol.ProtocolError as exc:
                 self._send(400, {"error": str(exc)})
                 return
@@ -1110,7 +1126,7 @@ class Handler(BaseHTTPRequestHandler):
         data = b"".join(parts)
         if data.startswith(protocol.MAGIC) and self.headers.get("X-Seal") == "1":
             try:
-                data = PAIRING.open(data)
+                data = PAIRING.open(data, self.peer)
             except protocol.ProtocolError:
                 self._send(400, {"error": "Trozo dañado"})
                 return
@@ -1161,7 +1177,7 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             self._send(404, {"error": "ese archivo ya no está"})
             return
-        body = PAIRING.seal(piece) if sealed else piece
+        body = PAIRING.seal(piece, self.peer) if sealed else piece
         self._send(200, body=body, content_type="application/octet-stream")
 
     def _photo_check(self) -> None:
@@ -1208,7 +1224,7 @@ class Handler(BaseHTTPRequestHandler):
         part, final = started
         try:
             if sealed:
-                PAIRING.open_to(self.rfile, length, part)
+                PAIRING.open_to(self.rfile, length, part, self.peer)
             else:
                 remaining = length
                 with part.open("wb") as out:
@@ -1253,7 +1269,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "ese archivo ya no está"})
             return
         if self.headers.get("X-Seal") == "1":
-            data = PAIRING.seal(data)
+            data = PAIRING.seal(data, self.peer)
         self.send_response(200)
         self.send_header("Content-Type", "application/octet-stream")
         self.send_header("Content-Length", str(len(data)))

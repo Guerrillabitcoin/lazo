@@ -144,8 +144,8 @@ class SignedRoute(unittest.TestCase):
 
     def call(self, method: str, path: str, body: bytes = b"", seal: bool = True) -> tuple[int, dict | bytes]:
         if seal and body:
-            body = lazo.PAIRING.seal(body)
-        headers = lazo.PAIRING.sign(method, path, len(body))
+            body = lazo.PAIRING.seal(body, "ab" * 8)  # 0.62: clave de este móvil
+        headers = lazo.PAIRING.sign(method, path, len(body), who="ab" * 8)
         headers[protocol.H_ID] = "ab" * 8
         if seal:
             headers["X-Seal"] = "1"
@@ -155,7 +155,7 @@ class SignedRoute(unittest.TestCase):
         raw = res.read()
         conn.close()
         if raw.startswith(protocol.MAGIC):
-            raw = lazo.PAIRING.open(raw)
+            raw = lazo.PAIRING.open(raw, "ab" * 8)
         try:
             return res.status, json.loads(raw)
         except ValueError:

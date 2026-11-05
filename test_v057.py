@@ -66,7 +66,7 @@ class Servidor(Base):
         lazo.APPROVALS.decide(phone.who, True)
         status, data = phone.wait()
         self.assertEqual(status, 200)
-        self.assertEqual(phone.key_from(data["box"]), lazo.PAIRING.key_text())
+        self.assertEqual(phone.key_from(data["box"]), lazo.PAIRING.device_key_text(phone.who))
         for _ in range(40):  # se guarda justo después de responder
             if any("no pude guardar" in line for line in lazo.CONN_LOG):
                 break
@@ -99,7 +99,7 @@ class Servidor(Base):
         phone.wait()
         text = lazo.conn_diag()
         self.assertIn("aceptado", text)
-        for secreto in (lazo.PAIRING.pin, lazo.PAIRING.key_text(), lazo.PAIRING.token_text(), phone.proof):
+        for secreto in (lazo.PAIRING.pin, lazo.PAIRING.key_text(), lazo.PAIRING.device_key_text(phone.who), lazo.PAIRING.token_text(), phone.proof):
             self.assertNotIn(secreto, text)
 
 
@@ -218,7 +218,10 @@ class Navegador(Base):
             # (1) QR: aprobar, quedarse, recargar y reconectar.
             await pg.goto(lazo.PAIRING.phone_url("http", self.ip, self.port))
             st = await self._hasta(pg, lambda s: s["app"] and s["link"] == "on", aprobar=True)
-            self.assertEqual(st["key"], lazo.PAIRING.key_text())
+            # 0.62: el móvil guarda SU clave (la de su id aprobado), nunca la maestra.
+            aprobados = {d["id"] for d in lazo.APPROVALS.listing() if d["state"] == "aprobado"}
+            self.assertIn(st["key"], {lazo.PAIRING.device_key_text(w) for w in aprobados})
+            self.assertNotEqual(st["key"], lazo.PAIRING.key_text())
             await asyncio.sleep(3)
             self.assertTrue((await self._estado(pg))["app"], "se salió tras entrar")
             await pg.reload()
