@@ -35,7 +35,7 @@ import sobre
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.60"
+VERSION = "0.61"
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
@@ -871,6 +871,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/photos/open":
             self._photo_open()
             return
+        if path == "/api/photos/carpeta":
+            # 0.61: cambiar la carpeta de archivos recibidos (solo Panel del PC).
+            self._local_only(lambda _body: control.choose_photos_dir())
+            return
         if path == "/api/bye":
             PAIRING.phone_gone(parse_qs(urlsplit(self.path).query).get("i", [self._who()])[0])
             self._send(200, {"ok": True})
@@ -1260,6 +1264,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:  # noqa: N802
         path = self.path.split("?", 1)[0]
+        # 0.61: quitar nota del portapapeles o foto recibida (solo Panel local).
+        if path.startswith("/api/clipboard/"):
+            self._local_only(lambda _body: control.delete_clipboard(path.rsplit("/", 1)[-1]))
+            return
+        if path.startswith("/api/photos/") and path not in ("/api/photos/open", "/api/photos/check", "/api/photos/carpeta"):
+            name = unquote(path[len("/api/photos/"):])
+            self._local_only(lambda _body: control.delete_photo(name))
+            return
         if not path.startswith("/api/files/"):
             self._send(404, {"error": "no está"})
             return
@@ -1439,6 +1451,10 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         control.watch_physical_mouse()
+    except Exception:
+        pass
+    try:
+        control.apply_saved_photos_dir()
     except Exception:
         pass
     try:

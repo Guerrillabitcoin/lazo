@@ -140,13 +140,13 @@ console.log(JSON.stringify([
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.60")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.60")
+        self.assertEqual(lazo.VERSION, "0.61")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.61")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        self.assertIn('android:versionCode="60"', apk)
-        self.assertIn('android:versionName="0.60"', apk)
-        self.assertIn('<p class="ver">0.60', MESA)
-        self.assertIn("## Estado (0.60)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
+        self.assertIn('android:versionCode="61"', apk)
+        self.assertIn('android:versionName="0.61"', apk)
+        self.assertIn('<p class="ver">0.61', MESA)
+        self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

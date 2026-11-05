@@ -1,4 +1,4 @@
-# LaZoo 0.60
+# LaZoo 0.61
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.61:** el Panel se rediseña: caja «Conectar» a la izquierda (se oculta al conectar), «Portapapeles Móvil ↔ PC» con papelera en cada nota, y una sola caja «Archivos» (carpeta de recibidos + drop + lista con PC→móvil / móvil→PC).
 
 **Novedad 0.60:** el Panel cuenta cuántas veces LaZoo ha quitado el aviso «¿Sigues ahí?» de YouTube («Avisos quitados: N · hoy: H · último: hoy 14:32»). Solo cuenta si el aviso desapareció de verdad; se guarda al reiniciar y se pone a cero con «Poner a cero».
 

@@ -63,7 +63,8 @@ class TrayModel(unittest.TestCase):
 
     def test_mesa_anchors(self):
         html = (ROOT / "static" / "mesa.html").read_text(encoding="utf-8")
-        self.assertIn('id="puente"', html)
+        self.assertIn('id="archivos"', html)
+        self.assertIn('want === "puente"', html)
         self.assertIn('id="dispositivos"', html)
 
     def test_pyw_exists(self):

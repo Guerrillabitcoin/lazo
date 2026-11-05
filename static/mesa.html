@@ -10,62 +10,67 @@
       * { box-sizing: border-box; }
       html, body { margin: 0; min-height: 100%; }
       body { background: var(--fondo); color: var(--texto); font-family: "Segoe UI", system-ui, sans-serif; font-size: 15px; }
-      /* 0.54: Panel apaisado pensado para escritorio (de 1100 a 1600 px de ancho). */
       main { max-width: 1600px; margin: 0 auto; padding: 0 28px 32px; }
       h2 { margin: 0 0 10px; font-size: 1rem; color: var(--naranja); letter-spacing: 0.02em; }
       p { color: var(--suave); margin: 0 0 8px; }
       small { color: var(--suave); }
-      .top { display: flex; align-items: center; gap: 18px; margin: 0 -28px 20px; padding: 12px 28px; background: var(--caja); border-bottom: 1px solid var(--borde); }
+      .top { display: flex; align-items: center; gap: 18px; margin: 0 -28px 20px; padding: 12px 28px; background: var(--caja); border-bottom: 1px solid var(--borde); flex-wrap: wrap; }
       .ver { margin: 2px 0 0; font-size: 11px; letter-spacing: 0.12em; color: var(--suave); }
       .title { margin: 0; font-size: 1.25rem; font-weight: 600; color: var(--texto); }
       #link-label { margin: 0; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
       .top[data-link="on"] #link-label { color: #3dbe6e; }
       .top[data-link="off"] #link-label { color: #e23b3b; }
-      .top .grow { flex: 1; }
+      .top .grow { flex: 1; min-width: 8px; }
       .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px; background: var(--hondo); border: 1px solid var(--borde); color: var(--suave); font-size: 13px; }
       .chip input { accent-color: var(--naranja); width: 18px; height: 18px; margin: 0; }
       textarea, button, input { font: inherit; color: inherit; }
       button, .drop { border: 0; border-radius: 12px; background: #3a332b; min-height: 42px; cursor: pointer; }
       button:hover { filter: brightness(1.12); }
+      button:disabled { opacity: 0.45; cursor: default; filter: none; }
       button.primary { background: var(--naranja); color: var(--fondo); font-weight: 650; }
       button.danger { background: #8e2a22; color: #fff; }
+      button.icon, .icon-btn { flex: none; width: 42px; min-width: 42px; padding: 0; display: grid; place-items: center; background: #3a332b; }
+      button.icon:hover, .icon-btn:hover { background: #5a2a22; color: #fff; }
       .waiting { display: grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center; margin: 0 0 18px; padding: 14px 18px; border-radius: 14px; border: 2px solid var(--naranja); background: #2b1f15; }
       .waiting[hidden] { display: none; }
       .waiting .dot { width: 14px; height: 14px; border-radius: 50%; background: var(--naranja); box-shadow: 0 0 14px var(--naranja); animation: late 1.2s ease-in-out infinite; }
       .waiting p { margin: 0; color: var(--texto); }
       .waiting b { color: var(--naranja); }
       @keyframes late { 50% { opacity: 0.35; } }
-      /* Esperando conexión: QR | PIN y direcciones | menú */
-      .conn { display: grid; grid-template-columns: 300px minmax(320px, 1fr) 300px; gap: 28px; align-items: stretch; margin: 0 0 20px; padding: 22px; border-radius: 18px; background: #1d1915; border: 2px solid var(--naranja); }
-      .conn[hidden] { display: none; }
-      .conn .qr { width: 300px; height: 300px; background: #fff; padding: 14px; border-radius: 10px; }
-      .conn .qr svg { width: 100%; height: 100%; display: block; }
-      .conn h2 { font-size: 1.45rem; margin-bottom: 6px; }
-      .conn .pin { font-size: 3rem; letter-spacing: 0.22em; color: #fff; margin: 6px 0 12px; font-weight: 650; font-variant-numeric: tabular-nums; }
-      .conn .url { font-size: 1.1rem; color: #fff; word-break: break-all; margin: 0 0 4px; }
-      .conn ol { margin: 10px 0 0; padding-left: 20px; color: var(--suave); line-height: 1.6; }
-      .conn .menu { display: grid; align-content: start; gap: 10px; padding-left: 24px; border-left: 1px solid var(--borde); }
-      .conn .menu a, .conn .menu button { min-height: 46px; padding: 0 16px; border-radius: 12px; display: grid; place-items: center; background: #3a332b; color: var(--texto); text-decoration: none; border: 0; font: inherit; cursor: pointer; }
-      .conn .menu .primary { background: var(--naranja); color: var(--fondo); font-weight: 650; }
-      /* Rejilla de trabajo: estado y dispositivos a la izquierda, puente a la derecha */
-      .board { display: grid; grid-template-columns: 340px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "side clip files" "side recv recv"; gap: 20px; align-items: start; }
-      .side { grid-area: side; display: grid; gap: 20px; min-width: 0; }
+      /* 0.61: Conectar a la izquierda (QR pequeño); se oculta con móvil conectado. */
+      .board { display: grid; grid-template-columns: 280px 280px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "conn side clip files"; gap: 18px; align-items: start; }
+      body.connected .board { grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "side clip files"; }
       .board > * { min-width: 0; }
-      #clip-box { grid-area: clip; }
-      #files-box { grid-area: files; }
-      #puente { grid-area: recv; }
+      #conexion { grid-area: conn; }
+      .side { grid-area: side; display: grid; gap: 18px; }
+      #clip-box { grid-area: clip; min-height: 420px; }
+      #archivos { grid-area: files; min-height: 420px; }
+      .conn { display: grid; gap: 12px; justify-items: center; text-align: center; padding: 16px; border-radius: 18px; background: #1d1915; border: 2px solid var(--naranja); }
+      .conn[hidden] { display: none !important; }
+      body.connected #conexion { display: none !important; }
+      .conn .qr { width: 140px; height: 140px; background: #fff; padding: 8px; border-radius: 10px; }
+      .conn .qr svg { width: 100%; height: 100%; display: block; }
+      .conn h2 { font-size: 1.05rem; margin: 0; }
+      .conn .pin { font-size: 1.85rem; letter-spacing: 0.18em; color: #fff; margin: 0; font-weight: 650; font-variant-numeric: tabular-nums; }
+      .conn .url { font-size: 0.85rem; color: var(--texto); word-break: break-all; margin: 0; }
+      .conn .links { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; width: 100%; }
+      .conn .links a, .conn .links button { min-height: 34px; padding: 0 12px; border-radius: 10px; font-size: 12px; background: #3a332b; color: var(--texto); text-decoration: none; border: 0; cursor: pointer; }
       section.box { background: var(--caja); border-radius: 18px; padding: 16px 18px; border: 1px solid #2f2822; }
-      #clip-box, #files-box { min-height: 420px; }
-      textarea { width: 100%; min-height: 96px; border: 1px solid var(--borde); border-radius: 12px; background: var(--hondo); padding: 10px 12px; resize: vertical; }
-      .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-      .drop { display: grid; place-items: center; min-height: 96px; border: 1px dashed var(--borde); color: var(--suave); margin-bottom: 10px; background: var(--hondo); }
+      textarea { width: 100%; min-height: 110px; border: 1px solid var(--borde); border-radius: 12px; background: var(--hondo); padding: 10px 12px; resize: vertical; }
+      .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; align-items: center; }
+      #save { width: 100%; min-height: 48px; font-size: 1.05rem; }
+      .drop { display: grid; place-items: center; min-height: 88px; border: 1px dashed var(--borde); color: var(--suave); margin: 10px 0; background: var(--hondo); border-radius: 12px; }
+      .drop:focus { outline: 2px solid var(--naranja); }
       ul { list-style: none; margin: 12px 0 0; padding: 0; }
       li { display: flex; gap: 8px; align-items: stretch; margin-bottom: 8px; }
-      li button, li a { flex: 1; text-align: left; padding: 8px 12px; overflow: hidden; text-overflow: ellipsis; }
-      li .copy { flex: none; width: 88px; text-align: center; }
+      li .body { flex: 1; text-align: left; padding: 8px 12px; overflow: hidden; text-overflow: ellipsis; background: var(--hondo); border-radius: 12px; border: 0; color: inherit; cursor: pointer; min-width: 0; }
+      li .copy { flex: none; width: 76px; text-align: center; }
       li small { align-self: center; white-space: nowrap; }
-      a { color: var(--texto); text-decoration: none; background: var(--hondo); border-radius: 12px; padding: 10px 12px; }
+      a.file { flex: 1; color: var(--texto); text-decoration: none; background: var(--hondo); border-radius: 12px; padding: 10px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #clips, #files { max-height: 52vh; overflow: auto; }
+      .badge { flex: none; align-self: center; font-size: 11px; letter-spacing: 0.04em; padding: 4px 8px; border-radius: 99px; background: #2b241c; color: var(--naranja); border: 1px solid var(--borde); white-space: nowrap; }
+      .badge.in { color: #3dbe6e; }
+      .path { flex: 1; margin: 0; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--suave); }
       .stat { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; }
       .stat dt { color: var(--suave); }
       .stat dd { margin: 0; color: var(--texto); text-align: right; }
@@ -74,28 +79,19 @@
       .devs li small { grid-column: 1; white-space: normal; overflow-wrap: anywhere; }
       .devs li button { grid-row: 1 / span 2; grid-column: 2; flex: none; padding: 0 12px; min-height: 36px; }
       .estado-pendiente { color: var(--naranja) !important; }
-      #fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 12px; }
-      #fotos li { margin: 0; color: var(--suave); }
-      body.connected .conn { display: none; }
-      @media (max-width: 1180px) {
-        .conn { grid-template-columns: 260px 1fr; }
-        .conn .qr { width: 260px; height: 260px; }
-        .conn .menu { grid-column: 1 / -1; padding-left: 0; border-left: 0; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-        .board { grid-template-columns: 300px minmax(0, 1fr); grid-template-areas: "side clip" "side files" "recv recv"; }
-      }
-      @media (max-width: 760px) {
-        .conn, .board { grid-template-columns: 1fr; grid-template-areas: "side" "clip" "files" "recv"; }
-        .conn { justify-items: center; text-align: center; }
-      }
-      /* 0.55: logotipo animado (static/logo.js). Anillo rojo = desconectado, infinito verde = conectado. */
       .lz-logo { display: inline-block; line-height: 0; }
       .lz-logo-svg { display: block; height: 100%; width: auto; overflow: visible; }
       .lz-logo[data-estado="esperando"] .lz-anillo { animation: lz-latido 1.6s ease-in-out infinite; }
       @keyframes lz-latido { 50% { opacity: 0.45; } }
-      @media (prefers-reduced-motion: reduce) {
-        .lz-logo[data-estado="esperando"] .lz-anillo { animation: none; }
-      }
+      @media (prefers-reduced-motion: reduce) { .lz-logo[data-estado="esperando"] .lz-anillo { animation: none; } }
       .top .lz-logo { height: 40px; }
+      @media (max-width: 1280px) {
+        .board { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "conn clip" "side clip" "files files"; }
+        body.connected .board { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "side clip" "files files"; }
+      }
+      @media (max-width: 760px) {
+        .board, body.connected .board { grid-template-columns: 1fr; grid-template-areas: "conn" "side" "clip" "files"; }
+      }
     </style>
   </head>
   <body>
@@ -103,7 +99,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.60</p>
+          <p class="ver">0.61</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -119,35 +115,24 @@
         <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
         <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
       </header>
-      <!-- 0.54: el Panel solo informa. Se acepta o rechaza en el aviso de Windows o en el icono de la bandeja. -->
       <div id="ask" class="waiting" role="status" aria-live="polite" hidden>
         <span class="dot" aria-hidden="true"></span>
         <p id="ask-text">Hay un dispositivo esperando aprobación: acéptalo desde el aviso de Windows o el icono de la bandeja.</p>
       </div>
-      <section id="conexion" class="conn" aria-label="Conectar un móvil" hidden>
-        <div id="conn-qr" class="qr" aria-label="Código QR para conectar"></div>
-        <div>
-          <h2>Conecta tu móvil</h2>
-          <p>Escanea el QR con la app LaZoo o la cámara del móvil. Sin cámara, abre la dirección y escribe este PIN:</p>
+      <div class="board">
+        <section id="conexion" class="conn" aria-label="Conectar" hidden>
+          <h2>Conectar</h2>
+          <div id="conn-qr" class="qr" aria-label="Código QR para conectar"></div>
           <p id="conn-pin" class="pin"></p>
           <div id="conn-urls"></div>
-          <ol>
-            <li>El móvil pide permiso con el QR o el PIN (no recibe aún la clave).</li>
-            <li>Acéptalo <span id="conn-where">en el aviso de Windows o en el icono de la bandeja</span>.</li>
-            <li>Solo entonces le llega la clave cifrada y queda conectado.</li>
-          </ol>
-        </div>
-        <div class="menu">
-          <a class="primary" href="/conectar" target="_blank" rel="noopener">QR a pantalla completa</a>
-          <button id="conn-puente" type="button">Recibido del móvil</button>
-          <button id="conn-devs" type="button">Dispositivos</button>
-          <button id="conn-diag" type="button" title="Pasos de conexión sin claves ni PIN, para pegarlos si algo falla">Copiar diagnóstico de conexión</button>
-          <p><small>Misma Wi-Fi. Este bloque se oculta al conectar un móvil y vuelve cuando no queda ninguno.</small></p>
-        </div>
-      </section>
-      <div class="board">
+          <p class="url" style="color:var(--suave);font-size:12px">Acéptalo <span id="conn-where">en el aviso de Windows o en el icono de la bandeja</span>.</p>
+          <div class="links">
+            <a class="primary" href="/conectar" target="_blank" rel="noopener">QR a pantalla completa</a>
+            <button id="conn-diag" type="button" title="Pasos de conexión sin claves ni PIN">Diagnóstico</button>
+          </div>
+        </section>
         <div class="side">
-          <section class="box" aria-label="Estado">
+          <section class="box">
             <h2>Estado</h2>
             <dl class="stat">
               <dt>Móviles conectados</dt><dd id="st-on">0</dd>
@@ -158,7 +143,6 @@
           </section>
           <section id="dispositivos" class="box devs">
             <h2>Dispositivos</h2>
-            <p><small>Solo red local. Los móviles nuevos se aceptan en el aviso de Windows o en el icono de la bandeja; aquí solo se ven.</small></p>
             <ul id="devs"></ul>
             <div class="row">
               <button id="kick-all" type="button">Expulsar a todos</button>
@@ -167,22 +151,22 @@
           </section>
         </div>
         <section id="clip-box" class="box">
-          <h2>Portapapeles</h2>
-          <textarea id="paste" placeholder="Pega aquí un texto del PC"></textarea>
+          <h2>Portapapeles Móvil ↔ PC</h2>
+          <textarea id="paste" placeholder="Pega aquí un texto"></textarea>
           <div class="row"><button id="save" class="primary" type="button">Guardar en el móvil</button></div>
           <ul id="clips"></ul>
         </section>
-        <section id="files-box" class="box">
-          <h2>Archivos para el móvil</h2>
-          <div id="drop" class="drop" role="button" tabindex="0" aria-label="Suelta archivos o pulsa para elegir">Suelta archivos aquí (cualquier tipo y tamaño)</div>
+        <section id="archivos" class="box">
+          <h2>Archivos</h2>
+          <div class="row">
+            <p id="fotos-path" class="path" title="">—</p>
+            <button id="change-fotos" type="button">Cambiar carpeta</button>
+            <button id="open-fotos" type="button">Abrir</button>
+          </div>
+          <div id="drop" class="drop" role="button" tabindex="0" aria-label="Suelta archivos o pulsa para elegir">Suelta archivos aquí · PC → móvil</div>
           <input id="file" type="file" multiple aria-label="Elegir archivos para el móvil" hidden />
           <p id="up-stat" aria-live="polite"><small></small></p>
           <ul id="files"></ul>
-        </section>
-        <section id="puente" class="box">
-          <h2>Recibido del móvil</h2>
-          <div class="row" style="align-items:center;margin:0 0 6px"><p id="fotos-path" style="flex:1;margin:0">Todavía no ha llegado nada.</p><button id="open-fotos" type="button">Abrir carpeta</button></div>
-          <ul id="fotos"></ul>
         </section>
       </div>
     </main>
@@ -194,6 +178,8 @@
       const files = document.querySelector("#files");
       let seen = "";
       let primed = false;
+
+      const TRASH = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12V7H6v14z"/></svg>';
 
       async function pushText(text, auto) {
         const clean = text || "";
@@ -216,22 +202,14 @@
       async function watchClipboard() {
         try {
           const text = await navigator.clipboard.readText();
-          if (!primed) {
-            primed = true;
-            seen = text || "";
-            return;
-          }
+          if (!primed) { primed = true; seen = text || ""; return; }
           await pushText(text, true);
         } catch (_err) {}
       }
 
       function stamp(at) {
         if (!at) return "";
-        return new Date(at * 1000).toLocaleTimeString("es", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        });
+        return new Date(at * 1000).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       }
 
       function size(bytes) {
@@ -241,6 +219,24 @@
         return (bytes / (1024 * 1024 * 1024)).toFixed(2).replace(".", ",") + " GB";
       }
 
+      function shortPath(p) {
+        if (!p) return "—";
+        const parts = String(p).replace(/\\/g, "/").split("/").filter(Boolean);
+        if (parts.length <= 3) return p;
+        return "…/" + parts.slice(-3).join("/");
+      }
+
+      function trashBtn(title, onClick) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "icon";
+        b.title = title;
+        b.setAttribute("aria-label", title);
+        b.innerHTML = TRASH;
+        b.addEventListener("click", onClick);
+        return b;
+      }
+
       async function load() {
         const data = await fetch("/api/clipboard").then((res) => res.json());
         clips.replaceChildren();
@@ -248,6 +244,7 @@
           const row = document.createElement("li");
           const button = document.createElement("button");
           button.type = "button";
+          button.className = "body";
           button.textContent = item.text.slice(0, 180);
           const copy = document.createElement("button");
           copy.type = "button";
@@ -261,40 +258,57 @@
           copy.addEventListener("click", take);
           const when = document.createElement("small");
           when.textContent = stamp(item.at);
-          row.append(button, copy, when);
-          clips.append(row);
-        }
-        const listed = await fetch("/api/files").then((res) => res.json());
-        files.replaceChildren();
-        for (const item of listed.files || []) {
-          const row = document.createElement("li");
-          const link = document.createElement("a");
-          link.href = "/api/files/" + item.id;
-          link.download = item.name;
-          link.textContent = item.name + " · " + size(item.size);
-          const remove = document.createElement("button");
-          remove.type = "button";
-          remove.textContent = "Quitar";
-          remove.addEventListener("click", async () => {
-            await fetch("/api/files/" + item.id, { method: "DELETE" });
+          const del = trashBtn("Eliminar nota", async () => {
+            await fetch("/api/clipboard/" + encodeURIComponent(item.id), { method: "DELETE" });
             load();
           });
-          row.append(link, remove);
-          files.append(row);
+          row.append(button, copy, when, del);
+          clips.append(row);
         }
+
+        const listed = await fetch("/api/files").then((res) => res.json());
         const photos = await fetch("/api/photos").then((res) => res.json());
-        const path = document.querySelector("#fotos-path");
-        const list = document.querySelector("#fotos");
-        path.textContent = photos.count
-          ? photos.count + " archivos (" + size(photos.bytes || 0) + ") en " + photos.folder
-          : "Todavía no ha llegado nada. La carpeta es " + (photos.folder || "Fotos");
-        list.replaceChildren();
+        const pathEl = document.querySelector("#fotos-path");
+        pathEl.textContent = shortPath(photos.folder || "");
+        pathEl.title = photos.folder || "";
+        if (photos.count) pathEl.textContent = shortPath(photos.folder) + " · " + photos.count + " · " + size(photos.bytes || 0);
+
+        const mixed = [];
+        for (const item of listed.files || []) {
+          mixed.push({ kind: "out", at: item.at || 0, item });
+        }
         for (const item of photos.photos || []) {
-          const row = document.createElement("li");
-          const label = document.createElement("span");
-          label.textContent = item.name + " · " + size(item.size);
-          row.append(label);
-          list.append(row);
+          mixed.push({ kind: "in", at: item.at || 0, item });
+        }
+        mixed.sort((a, b) => (b.at || 0) - (a.at || 0));
+        files.replaceChildren();
+        for (const row of mixed) {
+          const li = document.createElement("li");
+          const badge = document.createElement("span");
+          badge.className = "badge" + (row.kind === "in" ? " in" : "");
+          badge.textContent = row.kind === "in" ? "móvil→PC" : "PC→móvil";
+          if (row.kind === "out") {
+            const link = document.createElement("a");
+            link.className = "file";
+            link.href = "/api/files/" + row.item.id;
+            link.download = row.item.name;
+            link.textContent = row.item.name + " · " + size(row.item.size);
+            const remove = trashBtn("Quitar", async () => {
+              await fetch("/api/files/" + row.item.id, { method: "DELETE" });
+              load();
+            });
+            li.append(badge, link, remove);
+          } else {
+            const label = document.createElement("span");
+            label.className = "file";
+            label.textContent = row.item.name + " · " + size(row.item.size);
+            const remove = trashBtn("Eliminar del PC", async () => {
+              await fetch("/api/photos/" + encodeURIComponent(row.item.name), { method: "DELETE" });
+              load();
+            });
+            li.append(badge, label, remove);
+          }
+          files.append(li);
         }
       }
 
@@ -309,10 +323,7 @@
 
       function nextUpload() {
         const file = upQueue.shift();
-        if (!file) {
-          upBusy = false;
-          return;
-        }
+        if (!file) { upBusy = false; return; }
         upBusy = true;
         const xhr = new XMLHttpRequest();
         xhr.open("POST", "/api/files");
@@ -323,21 +334,14 @@
           const pct = event.total ? Math.round((event.loaded / event.total) * 100) : 0;
           upStat.textContent = `${file.name} · ${pct}% · pendientes ${upQueue.length}`;
         };
-        const done = (text) => {
-          upStat.textContent = text;
-          load();
-          nextUpload();
-        };
+        const done = (text) => { upStat.textContent = text; load(); nextUpload(); };
         xhr.onload = () => {
           let data = {};
           try { data = JSON.parse(xhr.responseText || "{}"); } catch (_err) {}
-          done(xhr.status === 200 ? `«${file.name}» listo para el móvil` : `«${file.name}»: ${data.error || "no se pudo guardar"}`);
+          done(xhr.status === 200 ? `«${file.name}» listo` : `«${file.name}»: ${data.error || "no se pudo guardar"}`);
         };
         xhr.onerror = () => done(`«${file.name}»: se cortó el envío`);
-        if (!file.size) {
-          done(`«${file.name}» está vacío`);
-          return;
-        }
+        if (!file.size) { done(`«${file.name}» está vacío`); return; }
         xhr.send(file);
       }
 
@@ -358,9 +362,18 @@
       document.querySelector("#open-fotos").addEventListener("click", () => {
         fetch("/api/photos/open", { method: "POST" });
       });
+      document.querySelector("#change-fotos").addEventListener("click", async () => {
+        const btn = document.querySelector("#change-fotos");
+        btn.disabled = true;
+        try {
+          const data = await fetch("/api/photos/carpeta", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then((r) => r.json());
+          if (!data.cancelled) load();
+        } catch (_err) {}
+        btn.disabled = false;
+      });
+
       const $ = (sel) => document.querySelector(sel);
       const STATES = { aprobado: "Conectado", pendiente: "Esperando aprobación", rechazado: "Rechazado (5 min)" };
-      // 0.60: «Avisos quitados: N · hoy: H · último: hoy 14:32».
       function siguesTexto(info, now) {
         const total = Number(info.total) || 0;
         let txt = "Avisos quitados: " + total;
@@ -392,14 +405,13 @@
         } catch (_err) {}
       }
 
-      // Solo estado: aquí no hay botones de aceptar ni rechazar (eso va en Windows/bandeja).
       let connShown = null;
-      let connDiag = "";  // 0.57
+      let connDiag = "";
       document.querySelector("#conn-diag").addEventListener("click", async (ev) => {
         const btn = ev.currentTarget;
-        try { await navigator.clipboard.writeText(connDiag); btn.textContent = "Copiado: pégalo en el chat"; }
+        try { await navigator.clipboard.writeText(connDiag); btn.textContent = "Copiado"; }
         catch (_err) { window.prompt("Copia este diagnóstico:", connDiag); }
-        window.setTimeout(() => { btn.textContent = "Copiar diagnóstico de conexión"; }, 2500);
+        window.setTimeout(() => { btn.textContent = "Diagnóstico"; }, 2500);
       });
       async function watchConn() {
         try {
@@ -414,7 +426,8 @@
             urls.replaceChildren(...(data.targets || []).map((t) => {
               const p = document.createElement("p");
               p.className = "url";
-              p.textContent = t.url + "  (" + t.label + ")";
+              p.textContent = t.url;
+              p.title = t.label;
               return p;
             }));
           }
@@ -442,15 +455,13 @@
           $("#st-net").textContent = (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red";
         } catch (_err) {}
       }
-      document.querySelector("#conn-puente").addEventListener("click", () => document.querySelector("#puente").scrollIntoView({ behavior: "smooth" }));
-      document.querySelector("#conn-devs").addEventListener("click", () => document.querySelector("#dispositivos").scrollIntoView({ behavior: "smooth" }));
 
       async function loadDevices() {
         let list = [];
         try { list = (await devCall("/api/dispositivos")).devices || []; } catch (_err) { return; }
         $("#devs").replaceChildren(...(list.length ? list : [null]).map((d) => {
           const li = document.createElement("li");
-          if (!d) { li.textContent = "Ningún dispositivo todavía."; return li; }
+          if (!d) { li.textContent = "Ninguno."; return li; }
           const t = document.createElement("span");
           t.textContent = `${d.label} · ${STATES[d.state] || d.state}`;
           if (d.state === "pendiente") t.className = "estado-pendiente";
@@ -469,11 +480,11 @@
         $("#kick-all").disabled = !list.some((d) => d.state === "aprobado");
       }
       $("#kick-all").addEventListener("click", () => {
-        if (!confirm("¿Expulsar a todos los dispositivos? Tendrán que volver a ser aprobados en este PC.")) return;
+        if (!confirm("¿Expulsar a todos los dispositivos?")) return;
         devCall("/api/dispositivos/expulsar", { all: true }).then(loadDevices).catch(() => {});
       });
       $("#forget-all").addEventListener("click", () => {
-        if (!confirm("¿Olvidar todos los dispositivos? Se borra la clave guardada y la lista, se cierran las sesiones y todos tendrán que emparejarse y ser aceptados otra vez.")) return;
+        if (!confirm("¿Olvidar todos? Se borra la clave guardada y tendrán que emparejarse otra vez.")) return;
         devCall("/api/olvidar", {}).then(() => { loadDevices(); watchConn(); }).catch(() => {});
       });
       $("#sigues-cero").addEventListener("click", () => {
@@ -497,13 +508,13 @@
       setInterval(() => { if (!document.hidden) watchLink(); }, 2000);
       setInterval(() => { if (!document.hidden) watchClipboard(); }, 2000);
 
-      // La bandeja abre /mesa#pastilla=puente o #pastilla=dispositivos.
       (() => {
-        const want = new URLSearchParams(location.hash.slice(1)).get("pastilla");
+        let want = new URLSearchParams(location.hash.slice(1)).get("pastilla");
+        if (want === "puente") want = "archivos";
         const box = want && document.getElementById(want);
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.60"></script>
+    <script src="/logo.js?v=0.61"></script>
   </body>
 </html>

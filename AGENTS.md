@@ -53,7 +53,9 @@ Después, y solo después: fluidez del ratón, barra de subida del puente, ignor
 - Todo paso de firma en `ci/construir.yml` es opcional: sin secretos el build sale como siempre. Secretos: `firmas/preparar_secretos.md`.
 - Los agentes no pueden subir `.github/workflows`: se edita `ci/construir.yml` y se avisa al usuario de copiarlo.
 
-## Estado (0.60)
+## Estado (0.61)
+
+- 0.61: Panel rediseñado. `static/mesa.html`: caja fija `#conexion` «Conectar» (QR ~140 px, PIN, Wi-Fi; se oculta con `body.connected`); «Portapapeles Móvil ↔ PC» con `#save` grande y papelera por nota; una sola `#archivos` (ruta + Cambiar/Abrir, drop PC→móvil, lista mezclada con badges PC→móvil / móvil→PC y papelera). Menos texto (sin ol de pasos). APIs: `DELETE /api/clipboard/<id>` y `DELETE /api/photos/<name>` (solo Panel local, path traversal rechazado); `POST /api/photos/carpeta` → `control.choose_photos_dir` (FolderBrowserDialog / zenity / osascript, oculto); `photos_dir` en `ajustes.json` + `apply_saved_photos_dir` al arrancar. Hash `#pastilla=puente` → `#archivos`. APK 0.61/61. Prueba: `test_v061.py`.
 
 - 0.60: contador de avisos quitados. El PowerShell de `sigues.py` vuelve a buscar el aviso tras pulsar (hasta 4×400 ms, función `Buscar`) y responde `verificado`; `Sigues.check_once` solo llama a `contar()` si `pulsado` y `verificado`. `ajustes.json` guarda `contador {total, hoy, dia, ultimo}` (sin datos personales); `status()` da `total`, `hoy`, `sesion`, `ultimo`. `POST /api/sigues {reset: true}` lo pone a cero (solo desde el PC). `/api/conexion` lleva `sigues_info`; el Panel enseña `#sigues-cuenta` («Avisos quitados: N · hoy: H · último: hoy 14:32», `siguesTexto`) y `#sigues-cero`. APK 0.60/60. Prueba: `test_v060.py`.
 

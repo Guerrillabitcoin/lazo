@@ -3075,6 +3075,21 @@ def set_history_path(path: Path) -> None:
     _clip_seq = 0
 
 
+
+def delete_clipboard(clip_id: str) -> dict[str, Any]:
+    """Quita una nota del historial (Panel local). El archivo sigue cifrado."""
+    if not isinstance(clip_id, str) or not clip_id or len(clip_id) > 32:
+        raise ControlError("esa nota ya no está")
+    with _clip_lock:
+        _load_history()
+        before = len(_history)
+        _history[:] = [item for item in _history if str(item.get("id")) != clip_id]
+        if len(_history) == before:
+            raise ControlError("esa nota ya no está")
+        _save_history()
+        return {"ok": True, "items": [dict(item) for item in _history]}
+
+
 def clipboard_history(text: str | None = None, auto: bool = False) -> dict[str, Any]:
     with _clip_lock:
         _load_history()
@@ -3600,6 +3615,137 @@ def finish_photo(part: Path, final: Path, size: int) -> dict[str, Any]:
         raise ControlError("nombre no válido")
     part.replace(final)
     return {"name": final.name, "size": int(size), "folder": str(_photos_dir)}
+
+
+
+def delete_photo(name: str) -> dict[str, Any]:
+    """Borra un archivo recibido del móvil. Solo dentro de la carpeta de Fotos."""
+    import os
+
+    clean = _photo_name(name)
+    with _photo_lock:
+        root = _photos_dir.resolve()
+        path = (root / clean).resolve()
+        if path.parent != root or not path.is_file() or path.name.endswith(".part"):
+            raise ControlError("ese archivo ya no está")
+        path.unlink()
+    return {"ok": True, "name": clean}
+
+
+def photos_dir_ajustes() -> Path | None:
+    """Ruta guardada en ajustes.json (misma carpeta de datos que Recordar/Sigues)."""
+    try:
+        import recordar
+
+        data = json.loads((recordar.data_dir() / "ajustes.json").read_text(encoding="utf-8"))
+        raw = data.get("photos_dir")
+        if isinstance(raw, str) and raw.strip():
+            path = Path(raw).expanduser()
+            if path.is_dir():
+                return path.resolve()
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def save_photos_dir_ajuste(path: Path) -> None:
+    try:
+        import recordar
+
+        file = recordar.data_dir() / "ajustes.json"
+        file.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if file.is_file():
+            try:
+                data = json.loads(file.read_text(encoding="utf-8"))
+            except ValueError:
+                data = {}
+        data["photos_dir"] = str(path)
+        tmp = file.with_name(f"{file.name}.{os.getpid()}.tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, file)
+    except OSError:
+        pass
+
+
+def apply_saved_photos_dir() -> Path:
+    """Al arrancar: si hay carpeta guardada, úsala."""
+    saved = photos_dir_ajustes()
+    if saved is not None:
+        set_photos_dir(saved)
+    return _photos_dir
+
+
+def choose_photos_dir() -> dict[str, Any]:
+    """Diálogo de carpeta (Windows: FolderBrowserDialog oculto; Linux/Mac: zenity/osascript)."""
+    picked = _pick_folder(str(_photos_dir.resolve() if _photos_dir.exists() else Path.home()))
+    if not picked:
+        return {**list_photos(), "cancelled": True}
+    path = Path(picked).expanduser().resolve()
+    if not path.is_dir():
+        raise ControlError("esa carpeta no existe")
+    set_photos_dir(path)
+    save_photos_dir_ajuste(path)
+    return list_photos()
+
+
+def _pick_folder(start: str) -> str | None:
+    if SYSTEM == "Windows":
+        return _pick_folder_windows(start)
+    if SYSTEM == "Darwin":
+        return _pick_folder_mac(start)
+    return _pick_folder_linux(start)
+
+
+def _pick_folder_windows(start: str) -> str | None:
+    # FolderBrowserDialog: la ventana del diálogo sí se ve; la consola de PowerShell no.
+    script = (
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "$d = New-Object Windows.Forms.FolderBrowserDialog; "
+        "$d.Description = 'Carpeta de archivos recibidos del móvil (LaZoo)'; "
+        f"$d.SelectedPath = {json.dumps(start)}; "
+        "$d.ShowNewFolderButton = $true; "
+        "if ($d.ShowDialog() -eq [Windows.Forms.DialogResult]::OK) { "
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+        "Write-Output $d.SelectedPath }"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    line = (result.stdout or "").strip().splitlines()
+    return line[-1].strip() if line else None
+
+
+def _pick_folder_mac(start: str) -> str | None:
+    script = f'POSIX path of (choose folder with prompt "Carpeta de archivos recibidos del móvil" default location POSIX file {json.dumps(start)})'
+    try:
+        result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=300)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    path = (result.stdout or "").strip()
+    return path.rstrip("/") if path else None
+
+
+def _pick_folder_linux(start: str) -> str | None:
+    for cmd in (
+        ["zenity", "--file-selection", "--directory", "--title=Carpeta de archivos recibidos del móvil", f"--filename={start}/"],
+        ["kdialog", "--getexistingdirectory", start, "Carpeta de archivos recibidos del móvil"],
+    ):
+        if not shutil.which(cmd[0]):
+            continue
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        path = (result.stdout or "").strip()
+        if path:
+            return path
+    return None
 
 
 def open_photos_folder() -> dict[str, Any]:
