@@ -35,7 +35,7 @@ import sobre
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.59"
+VERSION = "0.60"
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
@@ -275,6 +275,7 @@ def connection_info() -> dict:
                     for d in APPROVALS.listing() if d["state"] == "pendiente"],
         "recordar": STORE.enabled(),
         "sigues": sigues.SIGUES.status()["on"],
+        "sigues_info": {k: sigues.SIGUES.status()[k] for k in ("total", "hoy", "sesion", "ultimo")},
         "approve_where": approve_where(),
         "version": VERSION,
         "diag": conn_diag(),
@@ -837,7 +838,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/sigues":
             # 0.59: el Panel (local) y el móvil (sellado) pueden encenderlo o apagarlo.
-            self._guard(lambda body: sigues.SIGUES.set_on(body.get("on")))
+            self._guard(lambda body: sigues.SIGUES.set_on(body.get("on"), bool(body.get("reset")) and not self.remote))
             return
         if path == "/api/olvidar":
             self._local_only(lambda _body: forget_all())

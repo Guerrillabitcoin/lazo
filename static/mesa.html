@@ -103,7 +103,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.59</p>
+          <p class="ver">0.60</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -116,6 +116,8 @@
         <label class="chip" title="Si YouTube pregunta «¿Quieres seguir viendo?», LaZoo pulsa «Sí» por accesibilidad, sin mover el ratón ni traer la ventana delante">
           <input id="sigues" type="checkbox" /> Evitar el aviso «¿Sigues ahí?» de YouTube
         </label>
+        <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
+        <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
       </header>
       <!-- 0.54: el Panel solo informa. Se acepta o rechaza en el aviso de Windows o en el icono de la bandeja. -->
       <div id="ask" class="waiting" role="status" aria-live="polite" hidden>
@@ -358,6 +360,22 @@
       });
       const $ = (sel) => document.querySelector(sel);
       const STATES = { aprobado: "Conectado", pendiente: "Esperando aprobación", rechazado: "Rechazado (5 min)" };
+      // 0.60: «Avisos quitados: N · hoy: H · último: hoy 14:32».
+      function siguesTexto(info, now) {
+        const total = Number(info.total) || 0;
+        let txt = "Avisos quitados: " + total;
+        if (total) txt += " · hoy: " + (Number(info.hoy) || 0);
+        if (info.ultimo) {
+          const d = new Date(info.ultimo * 1000);
+          const hm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+          const ayer = new Date(now); ayer.setDate(ayer.getDate() - 1);
+          const dia = d.toDateString() === now.toDateString() ? "hoy" : d.toDateString() === ayer.toDateString() ? "ayer"
+            : String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0") + "/" + d.getFullYear();
+          txt += " · último: " + dia + " " + hm;
+        }
+        return txt;
+      }
+
       async function devCall(path, body) {
         const res = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const data = await res.json().catch(() => ({}));
@@ -420,6 +438,7 @@
           $("#st-rec").textContent = data.recordar ? "Sí" : "No";
           $("#recordar").checked = !!data.recordar;
           if (document.activeElement !== $("#sigues")) $("#sigues").checked = !!data.sigues;
+          if (data.sigues_info) $("#sigues-cuenta").textContent = siguesTexto(data.sigues_info, new Date());
           $("#st-net").textContent = (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red";
         } catch (_err) {}
       }
@@ -457,6 +476,10 @@
         if (!confirm("¿Olvidar todos los dispositivos? Se borra la clave guardada y la lista, se cierran las sesiones y todos tendrán que emparejarse y ser aceptados otra vez.")) return;
         devCall("/api/olvidar", {}).then(() => { loadDevices(); watchConn(); }).catch(() => {});
       });
+      $("#sigues-cero").addEventListener("click", () => {
+        if (!window.confirm("¿Poner a cero el contador de avisos quitados?")) return;
+        devCall("/api/sigues", { reset: true }).then(watchConn).catch(() => watchConn());
+      });
       $("#sigues").addEventListener("change", (event) => {
         devCall("/api/sigues", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
@@ -481,6 +504,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.59"></script>
+    <script src="/logo.js?v=0.60"></script>
   </body>
 </html>

@@ -53,7 +53,9 @@ Después, y solo después: fluidez del ratón, barra de subida del puente, ignor
 - Todo paso de firma en `ci/construir.yml` es opcional: sin secretos el build sale como siempre. Secretos: `firmas/preparar_secretos.md`.
 - Los agentes no pueden subir `.github/workflows`: se edita `ci/construir.yml` y se avisa al usuario de copiarlo.
 
-## Estado (0.59)
+## Estado (0.60)
+
+- 0.60: contador de avisos quitados. El PowerShell de `sigues.py` vuelve a buscar el aviso tras pulsar (hasta 4×400 ms, función `Buscar`) y responde `verificado`; `Sigues.check_once` solo llama a `contar()` si `pulsado` y `verificado`. `ajustes.json` guarda `contador {total, hoy, dia, ultimo}` (sin datos personales); `status()` da `total`, `hoy`, `sesion`, `ultimo`. `POST /api/sigues {reset: true}` lo pone a cero (solo desde el PC). `/api/conexion` lleva `sigues_info`; el Panel enseña `#sigues-cuenta` («Avisos quitados: N · hoy: H · último: hoy 14:32», `siguesTexto`) y `#sigues-cero`. APK 0.60/60. Prueba: `test_v060.py`.
 
 - 0.59: «¿Sigues ahí?» de YouTube. `sigues.py` (`SIGUES`, hilo `lazo-sigues`, cada `INTERVALO` 15 s, solo Windows): con una ventana de YouTube (`control._find_youtube_unlocked`, sin enfocar) manda su hwnd a un PowerShell oculto (`-EncodedCommand`, así el .exe no necesita otro archivo ni tocar el workflow) que con UI Automation busca un botón «Yes/Sí/…» (`SI`) cuyo entorno más cercano (hasta 4 padres; si hay varios, el más cercano al texto) tenga un texto del aviso (`AVISO`, varios idiomas) y lo pulsa con `InvokePattern`: sin cursor, sin teclas, sin foco, sin JavaScript. Ajuste en `ajustes.json` (`recordar.data_dir()`, clave `sigues`, por defecto sí); `GET/POST /api/sigues {on}` (Panel local y móvil sellado; `{}` consulta). `/api/conexion` lleva `sigues`. Panel: chip `#sigues`; móvil: `#yt-sigues` en YouTube. Apagar: `--sin-sigues` / `LAZO_SIN_SIGUES=1`. No arranca con unittest/pytest. APK 0.59/59. Prueba: `test_v059.py`.
 

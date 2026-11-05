@@ -77,20 +77,25 @@ function Nivel($el) {
   }
   return 99
 }
+function Buscar($win) {
+  $mejor = $null; $nivel = 99
+  foreach ($b in $win.FindAll([Windows.Automation.TreeScope]::Descendants, $btn)) {
+    $n = ($b.Current.Name).Trim().TrimEnd('.', '!').ToLower()
+    if ($si -notcontains $n) { continue }
+    $lv = Nivel $b
+    if ($lv -lt $nivel) { $mejor = $b; $nivel = $lv }
+  }
+  if ($nivel -ge 99) { return $null }
+  return $mejor
+}
 while ($true) {
   $line = [Console]::In.ReadLine()
   if ($line -eq $null -or $line -eq 'fin') { break }
-  $out = @{ ok = $true; visto = $false; pulsado = $false; ms = 0 }
+  $out = @{ ok = $true; visto = $false; pulsado = $false; verificado = $false; ms = 0 }
   $t = [Diagnostics.Stopwatch]::StartNew()
   try {
     $win = [Windows.Automation.AutomationElement]::FromHandle([IntPtr][Int64]$line)
-    $mejor = $null; $nivel = 99
-    foreach ($b in $win.FindAll([Windows.Automation.TreeScope]::Descendants, $btn)) {
-      $n = ($b.Current.Name).Trim().TrimEnd('.', '!').ToLower()
-      if ($si -notcontains $n) { continue }
-      $lv = Nivel $b
-      if ($lv -lt $nivel) { $mejor = $b; $nivel = $lv }
-    }
+    $mejor = Buscar $win
     if ($mejor) {
       $out.visto = $true
       $ip = $null
@@ -103,6 +108,11 @@ while ($true) {
           $ahora = [LaZoo.Foco]::GetForegroundWindow()
           if ($antes -ne [IntPtr]::Zero -and $ahora -ne $antes) { $out.foco = [bool][LaZoo.Foco]::SetForegroundWindow($antes) }
         } catch { }
+        # 0.60: solo cuenta si el aviso ha desaparecido de verdad.
+        for ($r = 0; $r -lt 4; $r++) {
+          Start-Sleep -Milliseconds 400
+          try { if (-not (Buscar $win)) { $out.verificado = $true; break } } catch { $out.verificado = $true; break }
+        }
       }
     }
   } catch { $out.ok = $false; $out.error = $_.Exception.GetType().Name }
@@ -134,8 +144,10 @@ class Sigues:
         self.proc: subprocess.Popen | None = None
         self.thread: threading.Thread | None = None
         self.stop_ev = threading.Event()
-        self.pulsados = 0
+        self.pulsados = 0  # esta sesión
         self.ultimo = 0.0
+        self.total, self.hoy, self.dia = 0, 0, ""
+        self._load_count()
         self.ultima_ms = 0
         self.error = ""
         self.revisiones = 0
@@ -157,6 +169,38 @@ class Sigues:
         except Exception:  # noqa: BLE001 (archivo roto: valor por defecto)
             return DEFAULT_ON
 
+    def _load_count(self) -> None:
+        p = self._path()
+        try:
+            data = json.loads(p.read_text(encoding="utf-8")) if p and p.is_file() else {}
+            c = data.get("contador") or {}
+            self.total = max(0, int(c.get("total", 0)))
+            self.ultimo = float(c.get("ultimo", 0) or 0)
+            self.dia = str(c.get("dia", ""))
+            self.hoy = max(0, int(c.get("hoy", 0)))
+        except Exception:  # noqa: BLE001
+            self.total, self.hoy, self.dia = 0, 0, ""
+
+    def _hoy(self) -> int:
+        return self.hoy if self.dia == time.strftime("%Y-%m-%d") else 0
+
+    def contar(self, now: float | None = None) -> None:
+        now = time.time() if now is None else now
+        dia = time.strftime("%Y-%m-%d", time.localtime(now))
+        if dia != self.dia:
+            self.dia, self.hoy = dia, 0
+        self.total += 1
+        self.hoy += 1
+        self.pulsados += 1
+        self.ultimo = now
+        self._save()
+
+    def reset(self) -> dict[str, Any]:
+        self.total = self.hoy = self.pulsados = 0
+        self.ultimo, self.dia = 0.0, ""
+        self._save()
+        return self.status()
+
     def _save(self) -> None:
         p = self._path()
         if not p:
@@ -170,6 +214,7 @@ class Sigues:
                 except ValueError:
                     data = {}
             data["sigues"] = self.on
+            data["contador"] = {"total": self.total, "hoy": self.hoy, "dia": self.dia, "ultimo": self.ultimo}
             tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
             tmp.write_text(json.dumps(data), encoding="utf-8")
             os.replace(tmp, p)
@@ -181,10 +226,13 @@ class Sigues:
 
     def status(self) -> dict[str, Any]:
         return {"on": self.on and not self.disabled, "available": self.available(), "disabled": self.disabled,
-                "pulsados": self.pulsados, "ultimo": self.ultimo, "ultima_ms": self.ultima_ms,
+                "pulsados": self.pulsados, "ultimo": self.ultimo,
+                "total": self.total, "hoy": self._hoy(), "sesion": self.pulsados, "ultima_ms": self.ultima_ms,
                 "revisiones": self.revisiones, "error": self.error, "intervalo_s": INTERVALO}
 
-    def set_on(self, on: object) -> dict[str, Any]:
+    def set_on(self, on: object, reset: bool = False) -> dict[str, Any]:
+        if reset:
+            self.reset()
         if on is not None:
             self.on = bool(on)
             self._save()
@@ -206,9 +254,8 @@ class Sigues:
         self.revisiones += 1
         self.ultima_ms = int(res.get("ms", 0) or 0)
         self.error = str(res.get("error", "")) if not res.get("ok", True) else ""
-        if res.get("pulsado"):
-            self.pulsados += 1
-            self.ultimo = time.time()
+        if res.get("pulsado") and res.get("verificado"):
+            self.contar()
             try:
                 print("  YouTube preguntó «¿Sigues ahí?»: contestado «Sí» sin tocar el ratón.", flush=True)
             except Exception:  # noqa: BLE001 (sin consola o consola cp1252)

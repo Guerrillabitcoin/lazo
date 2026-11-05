@@ -26,7 +26,7 @@ const deviceId = localStorage.getItem("lazo-id") || (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.59";
+const PAGE_VERSION = "0.60";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
