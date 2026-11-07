@@ -291,13 +291,13 @@ class Logo(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.61")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.61")
-        self.assertIn("<title>LaZoo 0.61</title>", HTML)
-        self.assertIn("/logo.js?v=0.61", MESA)
-        self.assertIn('android:versionName="0.61"', APK)
-        self.assertIn('android:versionCode="61"', APK)
-        self.assertIn("# LaZoo 0.61", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertEqual(lazo.VERSION, "0.63")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.63")
+        self.assertIn("<title>LaZoo 0.63</title>", HTML)
+        self.assertIn("/logo.js?v=0.63", MESA)
+        self.assertIn('android:versionName="0.63"', APK)
+        self.assertIn('android:versionCode="63"', APK)
+        self.assertIn("# LaZoo 0.63", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 
