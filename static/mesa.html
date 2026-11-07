@@ -482,8 +482,9 @@
           const li = document.createElement("li");
           if (!d) { li.textContent = "Ninguno."; return li; }
           const t = document.createElement("span");
-          t.textContent = `${d.label} · ${STATES[d.state] || d.state}`;
+          t.textContent = `${d.label} · ${d.duplicado ? "id antiguo (parece el mismo móvil; si vuelve, entra solo)" : STATES[d.state] || d.state}`;
           if (d.state === "pendiente") t.className = "estado-pendiente";
+          if (d.duplicado) li.style.opacity = "0.6";
           const s = document.createElement("small");
           const ago = Number(d.ago) || 0;  // 0.63: «visto» separa el móvil real de un id viejo
           const visto = ago < 0 ? "sin ver desde que se abrió LaZoo" : ago < 20 ? "visto ahora" : ago < 3600 ? `visto hace ${Math.max(1, Math.round(ago / 60))} min` : ago < 86400 ? `visto hace ${Math.round(ago / 3600)} h` : `visto hace ${Math.round(ago / 86400)} d`;
@@ -492,7 +493,7 @@
           if (d.state === "aprobado") {
             const b = document.createElement("button");
             b.type = "button";
-            b.textContent = "Expulsar";
+            b.textContent = d.duplicado ? "Quitar" : "Expulsar";
             b.addEventListener("click", () => devCall("/api/dispositivos/expulsar", { id: d.id }).then(loadDevices).catch(() => {}));
             li.append(b);
           }

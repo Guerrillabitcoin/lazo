@@ -86,6 +86,8 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         holdWifi(true);
+        // 0.63: al volver del bolsillo, la página reconecta ya (WebSocket nuevo, sin QR ni PIN).
+        if (web != null) web.evaluateJavascript("window.lazooDespierta && window.lazooDespierta()", null);
     }
 
     @Override

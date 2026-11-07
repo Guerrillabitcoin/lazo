@@ -55,72 +55,102 @@ def _idle(ap, who):
 
 
 class UnMovilUnaSesion(unittest.TestCase):
+    """El mismo móvil con un id viejo se MARCA como antiguo; nunca se expulsa por eso."""
+
     def setUp(self):
         self.ap = aprobacion.Approvals()
-        self.gone = []
-        self.ap.on_retire.append(self.gone.append)
 
-    def test_mismo_movil_con_id_nuevo_retira_el_viejo(self):
+    def ids(self, old=None):
+        rows = self.ap.listing()
+        return [d["id"][0] for d in rows if old is None or d["duplicado"] == old]
+
+    def test_mismo_movil_con_id_nuevo_marca_el_viejo(self):
         _approve(self.ap, "a" * 32)
         _idle(self.ap, "a" * 32)
         _approve(self.ap, "b" * 32)
-        self.assertEqual([d["id"] for d in self.ap.listing()], ["b" * 32])
-        self.assertEqual(self.gone, ["a" * 32])
+        self.assertEqual((self.ids(old=False), self.ids(old=True)), (["b"], ["a"]))
+        self.assertTrue(self.ap.is_ok("a" * 32))  # sigue aprobado: no se expulsa
 
-    def test_dos_moviles_iguales_en_uso_se_quedan_los_dos(self):
-        # Mismo modelo y navegador detrás de un repetidor que hace NAT (misma IP): los dos en uso.
+    def test_el_viejo_vuelve_dias_despues_y_entra_al_momento(self):
+        changed = []
+        self.ap.on_change.append(lambda: changed.append(1))
+        _approve(self.ap, "a" * 32)
+        _idle(self.ap, "a" * 32)
+        _approve(self.ap, "b" * 32)
+        self.ap.devices["a" * 32]["seen"] -= 3 * 86400  # tres días en el bolsillo
+        self.assertEqual(self.ap.check("a" * 32, CHROME, "192.168.1.20"), "ok")  # sin QR ni aviso
+        self.assertEqual(self.ids(old=True), [])
+        self.assertTrue(changed)  # se guarda ya desmarcado
+
+    def test_dos_moviles_iguales_en_uso_no_se_marcan(self):
         _approve(self.ap, "a" * 32)
         _approve(self.ap, "b" * 32)
-        self.assertEqual(len(self.ap.listing()), 2)
-        self.assertEqual(self.gone, [])
+        self.assertEqual(self.ids(old=True), [])
 
     def test_otro_movil_o_otra_ip_no(self):
         _approve(self.ap, "a" * 32)
+        _idle(self.ap, "a" * 32)
         _approve(self.ap, "b" * 32, ip="192.168.1.21")          # otro móvil
         _approve(self.ap, "c" * 32, ua=WEBVIEW)                  # la APK en el mismo móvil
         _approve(self.ap, "d" * 32, ua="Mozilla/5.0 (iPhone) Safari/605.1")
-        self.assertEqual(len(self.ap.listing()), 4)
-        self.assertEqual(self.gone, [])
+        self.assertEqual(self.ids(old=True), [])
 
     def test_desde_el_propio_pc_nunca(self):
         _approve(self.ap, "a" * 32, ip="127.0.0.1")
+        _idle(self.ap, "a" * 32)
         _approve(self.ap, "b" * 32, ip="127.0.0.1")
-        self.assertEqual(len(self.ap.listing()), 2)
+        self.assertEqual(self.ids(old=True), [])
 
-    def test_rechazar_no_retira(self):
+    def test_rechazar_no_marca(self):
         _approve(self.ap, "a" * 32)
         _idle(self.ap, "a" * 32)
         self.ap.check("b" * 32, CHROME, "192.168.1.20")
         self.ap.decide("b" * 32, False)
-        self.assertIn("a" * 32, [d["id"] for d in self.ap.listing()])
-        self.assertEqual(self.gone, [])
+        self.assertEqual(self.ids(old=True), [])
 
-    def test_recordado_con_ip_tambien_se_junta(self):
-        self.ap.preload([{"id": "a" * 32, "label": "Android · Chrome", "ip": "192.168.1.20"}])
-        row = self.ap.listing()[0]
-        self.assertEqual(row["ago"], -1)  # sin ver desde que arrancó
-        self.assertEqual(self.ap.approved_rows()[0]["ip"], "192.168.1.20")
-        _approve(self.ap, "b" * 32)
-        self.assertEqual([d["id"] for d in self.ap.listing()], ["b" * 32])
+    def test_recordado_con_ip_y_marca(self):
+        self.ap.preload([{"id": "a" * 32, "label": "Android · Chrome", "ip": "192.168.1.20"},
+                         {"id": "c" * 32, "label": "Android · Chrome", "ip": "192.168.1.30", "duplicado": "1"}])
+        rows = {d["id"][0]: d for d in self.ap.listing()}
+        self.assertEqual(rows["a"]["ago"], -1)  # sin ver desde que arrancó
+        self.assertTrue(rows["c"]["duplicado"])
+        saved = {r["id"][0]: r for r in self.ap.approved_rows()}
+        self.assertEqual((saved["a"]["ip"], saved["a"]["duplicado"], saved["c"]["duplicado"]), ("192.168.1.20", "", "1"))
+        _approve(self.ap, "b" * 32)  # «a» no habló desde el arranque: queda como antiguo
+        self.assertEqual(sorted(self.ids(old=True)), ["a", "c"])
 
     def test_etiqueta_de_la_apk(self):
         self.assertEqual(aprobacion.device_label(WEBVIEW), "Android · App LaZoo")
         self.assertEqual(aprobacion.device_label(CHROME), "Android · Chrome")
 
-    def test_retirado_queda_fuera(self):
-        lazo.KICKED.discard("e" * 32)
-        lazo.retire_device("e" * 32)
-        self.assertIn("e" * 32, lazo.KICKED)
-        lazo.KICKED.discard("e" * 32)
-        self.assertIn("APPROVALS.on_retire.append(retire_device)", LAZO)
+    def test_nada_se_expulsa_solo(self):
+        self.assertNotIn("retire_device", LAZO)
+        self.assertNotIn("on_retire", (ROOT / "aprobacion.py").read_text(encoding="utf-8"))
 
-    def test_recordar_guarda_la_ip(self):
+    def test_recordar_guarda_ip_y_marca(self):
         import recordar
 
         with tempfile.TemporaryDirectory() as tmp:
             store = recordar.Store(Path(tmp))
-            store._save_list(True, [{"id": "a" * 32, "label": "x", "ip": "192.168.1.9"}])
-            self.assertEqual(store.devices()[0]["ip"], "192.168.1.9")
+            store._save_list(True, [{"id": "a" * 32, "label": "x", "ip": "192.168.1.9", "duplicado": "1"}])
+            self.assertEqual((store.devices()[0]["ip"], store.devices()[0]["duplicado"]), ("192.168.1.9", "1"))
+
+
+class Despertar(unittest.TestCase):
+    """Móvil bloqueado en el bolsillo horas o días: al abrirlo, reconecta ya y sin QR."""
+
+    def test_movil(self):
+        for piece in ("async function wakeUp(", "pointerSocket.close()", "connectPointer();",
+                      'window.addEventListener("online"', "window.lazooDespierta = ", "now - lastTick > WAKE_AFTER_MS",
+                      "Date.now() - hiddenAt > WAKE_AFTER_MS"):
+            self.assertIn(piece, JS)
+        body = JS[JS.index("async function wakeUp("):JS.index("window.setInterval(() => {\n  const now = Date.now();")]
+        self.assertNotIn("forgetKey", body)   # despertar nunca borra la clave
+        self.assertNotIn("showPin", body)
+
+    def test_apk(self):
+        on_resume = JAVA[JAVA.index("protected void onResume()"):JAVA.index("protected void onPause()")]
+        self.assertIn("window.lazooDespierta", on_resume)
 
 
 class IdFijoDeLaApk(unittest.TestCase):
@@ -138,7 +168,8 @@ class IdFijoDeLaApk(unittest.TestCase):
         self.assertIn('mine ? "Este móvil" : d.label', JS)
         self.assertIn('"visto " + seenText(d.ago)', JS)
         self.assertIn("visto hace", MESA)
-        self.assertIn('mine ? "Salir" : "Expulsar"', JS)
+        self.assertIn('mine ? "Salir" : d.duplicado ? "Quitar" : "Expulsar"', JS)
+        self.assertIn("id antiguo", MESA)
 
 
 class SaltarAnuncios(unittest.TestCase):
@@ -406,3 +437,50 @@ class Notas(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+import asyncio  # noqa: E402
+import test_v057  # noqa: E402
+
+
+@unittest.skipUnless(test_v057.CHROME and test_v057.importlib.util.find_spec("playwright"), "sin Chrome/Playwright")
+class DespertarEnChrome(test_v057.Navegador):
+    """El JS real: tras «dormir» (y con el PC sin contestar un momento), vuelve solo, con la
+    misma clave, sin QR ni PIN, y abre un WebSocket nuevo para el ratón."""
+
+    test_ciclo_completo = None  # ese ya corre en test_v057
+
+    def test_vuelve_solo(self):
+        asyncio.run(self._despertar())
+
+    async def _despertar(self):
+        from playwright.async_api import async_playwright
+
+        lazo.set_remember(True)
+        async with async_playwright() as p:
+            b = await p.chromium.launch(executable_path=test_v057.CHROME, args=["--no-sandbox"])
+            pg = await (await b.new_context(viewport={"width": 400, "height": 800})).new_page()
+            errores, sockets = [], []
+            pg.on("pageerror", lambda e: errores.append(str(e)))
+            pg.on("websocket", lambda ws: sockets.append(ws))
+            await pg.goto(lazo.PAIRING.phone_url("http", self.ip, self.port))
+            st = await self._hasta(pg, lambda s: s["app"] and s["link"] == "on", aprobar=True)
+            key = st["key"]
+            await pg.evaluate("connectPointer()")
+            await asyncio.sleep(0.5)
+            antes = len(sockets)
+            # El PC deja de contestar (como la Wi-Fi al desbloquear) y vuelve a los ~2 s.
+            self.server.shutdown()
+            self.server.server_close()
+            await pg.evaluate("window.lazooDespierta()")
+            await asyncio.sleep(2)
+            self._restart()
+            st = await self._hasta(pg, lambda s: s["app"] and s["link"] == "on" and not s["pin"])
+            for _ in range(30):
+                if len(sockets) > antes:
+                    break
+                await asyncio.sleep(0.2)
+            self.assertGreater(len(sockets), antes, "no abrió un WebSocket nuevo al despertar")
+            self.assertEqual(st["key"], key, "despertar no debe cambiar ni borrar la clave")
+            await b.close()
+            self.assertEqual(errores, [])

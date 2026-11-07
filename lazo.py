@@ -377,14 +377,6 @@ def kick_device(who: str) -> bool:
     return done
 
 
-def retire_device(who: str) -> None:
-    """0.63: id viejo del mismo móvil (ver Approvals._twins_unlocked). Su clave deja de valer
-    y, si alguien la usa, el móvil ve el QR/PIN en vez de reintentar."""
-    KICKED.add(who)
-    PAIRING.phone_gone(who)
-    conn_log(f"{who[:4]} era el mismo móvil con otro id: retirado")
-
-
 def kick_everyone() -> int:
     KICKED.update(d["id"] for d in APPROVALS.listing() if d["state"] == "aprobado")
     count = APPROVALS.kick_all()
@@ -1467,8 +1459,6 @@ def start(argv: list[str] | None = None, console: bool = True):
         APPROVALS.on_decide.append(_log_decision)
     if persist_devices not in APPROVALS.on_change:
         APPROVALS.on_change.append(persist_devices)
-    if retire_device not in APPROVALS.on_retire:
-        APPROVALS.on_retire.append(retire_device)
     PORT = args.port
     try:
         server, PORT = listen(args.host, args.port)

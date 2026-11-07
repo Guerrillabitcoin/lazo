@@ -68,9 +68,8 @@ class RejectLog:
 
 
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
-# 0.63: un id viejo solo se retira si lleva este tiempo sin hablar con el PC. Dos móviles
-# DISTINTOS que salgan con la misma IP (un repetidor Wi-Fi en modo router hace NAT) y estén
-# en uso a la vez se quedan los dos.
+# 0.63: un id solo se marca como «antiguo» si lleva este tiempo sin hablar con el PC. Nunca se
+# expulsa por eso: si vuelve con su clave, entra al momento y deja de estar marcado.
 TWIN_IDLE = 600
 
 
@@ -107,7 +106,6 @@ class Approvals:
         self.on_new: list[Callable[[str, dict], None]] = []
         self.on_change: list[Callable[[], None]] = []  # aprobado, expulsado u olvidado
         self.on_decide: list[Callable[[str, bool], None]] = []  # 0.57: registro de conexión
-        self.on_retire: list[Callable[[str], None]] = []  # 0.63: el mismo móvil con un id viejo
 
     def _changed(self) -> None:
         for hook in self.on_change:
@@ -126,7 +124,8 @@ class Approvals:
                     continue
                 self.devices[who] = {"state": "aprobado", "since": now, "label": str(row.get("label") or "Dispositivo")[:60],
                                      "ip": str(row.get("ip") or "")[:46], "seen": 0.0, "fp": str(row.get("fp", ""))[:40],
-                                     "fecha": str(row.get("fecha", ""))[:20], "recordado": True}
+                                     "fecha": str(row.get("fecha", ""))[:20], "recordado": True,
+                                     "duplicado": str(row.get("duplicado", "")) == "1"}
             return len(self.devices)
 
     def note_meta(self, who: str, **meta) -> None:
@@ -137,16 +136,17 @@ class Approvals:
 
     def approved_rows(self) -> list[dict]:
         with self.lock:
-            return [{"id": who, "label": row["label"], "fp": row.get("fp", ""), "fecha": row.get("fecha", ""), "ip": row.get("ip", "")}
+            return [{"id": who, "label": row["label"], "fp": row.get("fp", ""), "fecha": row.get("fecha", ""), "ip": row.get("ip", ""),
+                     "duplicado": "1" if row.get("duplicado") else ""}
                     for who, row in self.devices.items() if row["state"] == "aprobado"]
 
     def _twins_unlocked(self, who: str) -> list[str]:
-        """0.63: otros ids aprobados del MISMO móvil: misma IP de la red local y mismo tipo
-        (p. ej. «Android · Chrome»). Pasa cuando el navegador del móvil pierde su id (cambió la
-        IP del PC, se borraron datos, otro QR): antes salían dos «sesiones» del mismo móvil y
-        expulsar una parecía echar a las dos. Solo si el viejo lleva `TWIN_IDLE` sin hablar
-        (o no ha hablado desde que arrancó LaZoo): uno en uso nunca se toca. Desde el propio PC
-        (127.0.0.1) no se junta nada."""
+        """0.63: ids aprobados que PARECEN el mismo móvil con un id viejo: misma IP de la red
+        local, mismo tipo (p. ej. «Android · Chrome») y `TWIN_IDLE` sin hablar (o sin hablar
+        desde que arrancó LaZoo). Pasa cuando el navegador pierde su id (cambió la IP del PC,
+        se borraron datos). Solo se MARCAN («id antiguo») para que la lista no enseñe dos
+        sesiones; no se expulsan: un móvil de verdad que vuelva del bolsillo días después
+        entra al momento con su clave y se desmarca. Desde 127.0.0.1 no se junta nada."""
         row = self.devices.get(who)
         if not row or not row.get("ip") or row["ip"] in LOOPBACK:
             return []
@@ -155,14 +155,9 @@ class Approvals:
                 if other != who and r["state"] == "aprobado" and r.get("ip") == row["ip"] and r.get("label") == row["label"]
                 and now - (r.get("seen") or 0) >= TWIN_IDLE]
 
-    def _retire(self, gone: list[str]) -> None:
-        for other in gone:
-            print(f"  Mismo dispositivo con un id antiguo ({other[:4]}): se quita de la lista.", flush=True)
-            for hook in self.on_retire:
-                try:
-                    hook(other)
-                except Exception:
-                    pass
+    def _mark_old(self, old: list[str]) -> None:
+        for other in old:
+            print(f"  Parece el mismo dispositivo que {other[:4]} (sin usar): ese id queda como antiguo.", flush=True)
 
     def _expire(self, now: float) -> None:
         for who, row in list(self.devices.items()):
@@ -187,7 +182,10 @@ class Approvals:
             row["seen"] = now
             if ip:
                 row["ip"] = ip
+            back = bool(row.pop("duplicado", False))  # 0.63: ha vuelto: es un móvil de verdad
             state = row["state"]
+        if back:
+            self._changed()
         if self.auto and fresh is None and row.get("since") == now:
             self._changed()
         if fresh:
@@ -219,16 +217,16 @@ class Approvals:
             row["until"] = now + BLOCK_SECONDS
             if ok and not row.get("fecha"):
                 row["fecha"] = time.strftime("%Y-%m-%d %H:%M")
-            gone = self._twins_unlocked(who) if ok else []
-            for other in gone:
-                del self.devices[other]
+            old = self._twins_unlocked(who) if ok else []
+            for other in old:
+                self.devices[other]["duplicado"] = True
         print(f"  {'Aceptado' if ok else 'Rechazado'}: {row['label']} ({row['ip']})", flush=True)
         for hook in self.on_decide:
             try:
                 hook(who, ok)
             except Exception:
                 pass
-        self._retire(gone)
+        self._mark_old(old)
         if ok:
             self._changed()
         return True
@@ -255,7 +253,7 @@ class Approvals:
                 {"id": who, "short": who[:4], "state": row["state"], "label": row["label"], "ip": row["ip"],
                  "left": max(0, int(WAIT_SECONDS - (now - row["since"]))) if row["state"] == "pendiente" else 0,
                  "ago": int(now - row["seen"]) if row["seen"] else -1, "fp": row.get("fp", ""), "fecha": row.get("fecha", ""),
-                 "recordado": bool(row.get("recordado"))}
+                 "recordado": bool(row.get("recordado")), "duplicado": bool(row.get("duplicado"))}
                 for who, row in sorted(self.devices.items(), key=lambda kv: kv[1]["since"])
             ]
 

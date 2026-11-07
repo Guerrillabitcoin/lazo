@@ -3156,12 +3156,14 @@ async function aboutDevices() {
     const text = document.createElement("span");
     const mine = d.id === data.me;
     text.textContent = [mine ? "Este móvil" : d.label, d.ip, "id " + (d.short || d.id.slice(0, 4)),
-      DEV_STATES[d.state] || d.state, "visto " + seenText(d.ago)].filter(Boolean).join(" · ");
+      d.duplicado ? "id antiguo de un móvil (si vuelve, entra solo)" : DEV_STATES[d.state] || d.state,
+      "visto " + seenText(d.ago)].filter(Boolean).join(" · ");
+    if (d.duplicado) li.className = "dev-old";
     li.append(text);
     if (d.state === "aprobado") {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = mine ? "Salir" : "Expulsar";
+      b.textContent = mine ? "Salir" : d.duplicado ? "Quitar" : "Expulsar";
       b.addEventListener("click", async () => {
         if (mine && !(await askConfirm("¿Salir de este PC?", "Este móvil tendrá que volver a escanear el QR o poner el PIN.", "Salir"))) return;
         await api("/api/dispositivos/expulsar", { id: d.id }).catch((err) => say(err.message));
@@ -3209,12 +3211,56 @@ document.querySelector("#about-check").addEventListener("click", async (ev) => {
 });
 
 /* Con la pestaña oculta no se consulta al PC (batería). Al volver, se pone al día. */
+let hiddenAt = 0;
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden || app.hidden) return;
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (app.hidden) return;
+  if (hiddenAt && Date.now() - hiddenAt > WAKE_AFTER_MS) { wakeUp("visible"); return; }
   refreshStatus();
   syncClipboard();
   if (tab === "youtube" || tab === "spotify") mediaPoll();
 });
+
+/* 0.63: al sacar el móvil del bolsillo (bloqueado minutos, horas o días), reconectar YA.
+   - El WebSocket del ratón puede quedar «medio muerto» (abierto para el navegador, cerrado de
+     verdad): se cierra y se abre uno nuevo, sin esperar al primer toque.
+   - La Wi-Fi tarda 1-3 s en volver: se insiste unas veces seguidas en vez de esperar al
+     sondeo de 4 s, y sin enseñar «LaZoo cerrado» mientras tanto.
+   - En la APK la página a veces ni se entera de que estuvo dormida: un reloj que se queda
+     parado más de WAKE_AFTER_MS también cuenta como despertar (y la APK nueva avisa en onResume).
+   La clave del móvil no caduca: no hace falta QR ni PIN para volver. */
+const WAKE_AFTER_MS = 12000;
+const WAKE_TRIES = [0, 600, 1300, 2300, 4000, 7000];
+let wakeRun = 0;
+let lastTick = Date.now();
+async function wakeUp(_why) {
+  if (app.hidden || document.hidden || !authKey) return;
+  const run = ++wakeRun;
+  try { if (pointerSocket) pointerSocket.close(); } catch (_err) { /* ya estaba cerrado */ }
+  pointerSocket = null;
+  for (const wait of WAKE_TRIES) {
+    if (wait) await new Promise((ok) => window.setTimeout(ok, wait));
+    if (run !== wakeRun || document.hidden || app.hidden) return;
+    try {
+      await api("/api/status", null, "GET");
+      missedPolls = 0;
+      setLink("on");
+      connectPointer();
+      syncClipboard();
+      if (tab === "youtube" || tab === "spotify") mediaPoll();
+      return;
+    } catch (_err) { /* la Wi-Fi aún no ha vuelto: otra vez en un momento */ }
+  }
+  refreshStatus();  // sigue sin PC: el sondeo normal dirá «LaZoo cerrado»
+}
+window.setInterval(() => {
+  const now = Date.now();
+  if (now - lastTick > WAKE_AFTER_MS) wakeUp("siesta");
+  lastTick = now;
+}, 2000);
+window.addEventListener("online", () => wakeUp("red"));
+window.addEventListener("pageshow", (event) => { if (event.persisted) wakeUp("vuelta"); });
+window.lazooDespierta = () => wakeUp("apk");
 
 /* ---- Escanear el QR del PC ----
    Por HTTP en la Wi-Fi (sin certificado) Chrome y Safari NO dejan usar la cámara en

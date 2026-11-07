@@ -674,3 +674,4 @@ button[data-cursor] { min-height: 44px; }
 .pasar-privado b { color: #f1e7dc; }
 .clip-row .clip-trash { flex: none; align-self: center; width: 38px; min-width: 38px; min-height: 34px; margin: 0 0 0 4px; padding: 0; border-radius: 99px; background: #3a2a24; font-size: 15px; }
 .clips-clear { margin-top: 8px; width: 100%; background: #3a2a24; color: #e8b3a6; }
+.dev-old { opacity: 0.6; }
