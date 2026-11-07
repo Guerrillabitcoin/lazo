@@ -3336,6 +3336,16 @@ async function qrLive() {
 }
 
 function qrStart() {
+  // En la APK la página del PC va por HTTP y el WebView abre el selector de archivos en vez
+  // de la cámara. El escáner propio de la APK sí tiene cámara en directo: se vuelve a él.
+  const appBridge = window.LaZooApp;
+  try {
+    if (appBridge && typeof appBridge.scan === "function") {
+      qrStopLive();
+      appBridge.scan();
+      return;
+    }
+  } catch (_err) { /* APK vieja: sigue como en el navegador */ }
   // Cámara en directo solo donde el navegador la permite (HTTPS o localhost).
   if (window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     qrLoadLib().catch(() => {});
