@@ -50,6 +50,10 @@ def _approve(ap, who, ua=CHROME, ip="192.168.1.20"):
     ap.decide(who, True)
 
 
+def _idle(ap, who):
+    ap.devices[who]["seen"] -= aprobacion.TWIN_IDLE + 1  # lleva rato sin hablar con el PC
+
+
 class UnMovilUnaSesion(unittest.TestCase):
     def setUp(self):
         self.ap = aprobacion.Approvals()
@@ -58,9 +62,17 @@ class UnMovilUnaSesion(unittest.TestCase):
 
     def test_mismo_movil_con_id_nuevo_retira_el_viejo(self):
         _approve(self.ap, "a" * 32)
+        _idle(self.ap, "a" * 32)
         _approve(self.ap, "b" * 32)
         self.assertEqual([d["id"] for d in self.ap.listing()], ["b" * 32])
         self.assertEqual(self.gone, ["a" * 32])
+
+    def test_dos_moviles_iguales_en_uso_se_quedan_los_dos(self):
+        # Mismo modelo y navegador detrás de un repetidor que hace NAT (misma IP): los dos en uso.
+        _approve(self.ap, "a" * 32)
+        _approve(self.ap, "b" * 32)
+        self.assertEqual(len(self.ap.listing()), 2)
+        self.assertEqual(self.gone, [])
 
     def test_otro_movil_o_otra_ip_no(self):
         _approve(self.ap, "a" * 32)
@@ -77,6 +89,7 @@ class UnMovilUnaSesion(unittest.TestCase):
 
     def test_rechazar_no_retira(self):
         _approve(self.ap, "a" * 32)
+        _idle(self.ap, "a" * 32)
         self.ap.check("b" * 32, CHROME, "192.168.1.20")
         self.ap.decide("b" * 32, False)
         self.assertIn("a" * 32, [d["id"] for d in self.ap.listing()])

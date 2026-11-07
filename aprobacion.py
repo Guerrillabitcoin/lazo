@@ -68,6 +68,10 @@ class RejectLog:
 
 
 LOOPBACK = ("127.0.0.1", "::1", "localhost")
+# 0.63: un id viejo solo se retira si lleva este tiempo sin hablar con el PC. Dos móviles
+# DISTINTOS que salgan con la misma IP (un repetidor Wi-Fi en modo router hace NAT) y estén
+# en uso a la vez se quedan los dos.
+TWIN_IDLE = 600
 
 
 def device_label(ua: str) -> str:
@@ -140,12 +144,16 @@ class Approvals:
         """0.63: otros ids aprobados del MISMO móvil: misma IP de la red local y mismo tipo
         (p. ej. «Android · Chrome»). Pasa cuando el navegador del móvil pierde su id (cambió la
         IP del PC, se borraron datos, otro QR): antes salían dos «sesiones» del mismo móvil y
-        expulsar una parecía echar a las dos. Desde el propio PC (127.0.0.1) no se junta nada."""
+        expulsar una parecía echar a las dos. Solo si el viejo lleva `TWIN_IDLE` sin hablar
+        (o no ha hablado desde que arrancó LaZoo): uno en uso nunca se toca. Desde el propio PC
+        (127.0.0.1) no se junta nada."""
         row = self.devices.get(who)
         if not row or not row.get("ip") or row["ip"] in LOOPBACK:
             return []
+        now = time.time()
         return [other for other, r in self.devices.items()
-                if other != who and r["state"] == "aprobado" and r.get("ip") == row["ip"] and r.get("label") == row["label"]]
+                if other != who and r["state"] == "aprobado" and r.get("ip") == row["ip"] and r.get("label") == row["label"]
+                and now - (r.get("seen") or 0) >= TWIN_IDLE]
 
     def _retire(self, gone: list[str]) -> None:
         for other in gone:

@@ -272,11 +272,10 @@ class Navegador(Base):
             self.assertIn("PC 0.61", diag)
             self.assertNotIn("123456", diag)
 
-            # (7) Dos móviles a la vez. 0.63: desde la misma IP y el mismo navegador sería el MISMO
-            # móvil con otro id (se retira el viejo); para dos móviles, el segundo es otro navegador.
+            # (7) Dos móviles a la vez (0.63: mismo navegador y misma IP, los dos en uso: se quedan los dos).
             lazo.APPROVALS.devices.clear()
             m1 = await (await b.new_context()).new_page()
-            m2 = await (await b.new_context(user_agent="Mozilla/5.0 (Android 14; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0")).new_page()
+            m2 = await (await b.new_context()).new_page()
             for m in (m1, m2):
                 m.on("pageerror", lambda e: errores.append(str(e)))
                 await self._pin(m)
