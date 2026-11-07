@@ -41,8 +41,8 @@ ID_REMEMBER, ID_FORGET = 1009, 1010
 PANEL = "Panel de LaZoo"
 ID_CUBE, ID_KICK, ID_ACCEPT, ID_REJECT = 1100, 2000, 3000, 4000
 
-CUBES = [("mouse", "Ratón"), ("bridge", "Puente Wi-Fi"), ("windows", "Ventanas"), ("youtube", "YouTube"),
-         ("spotify", "Spotify"), ("notes", "Notas"), ("system", "Sistema"), ("lab", "Pruebas"), ("about", "Sobre LaZoo")]
+CUBES = [("mouse", "Ratón"), ("bridge", "Pasar por wifi"), ("windows", "Ventanas"), ("youtube", "YouTube"),
+         ("spotify", "Spotify"), ("system", "Sistema"), ("lab", "Pruebas"), ("about", "Sobre LaZoo")]
 
 AVAILABLE = sys.platform == "win32"
 
@@ -354,8 +354,8 @@ class Tray:
         u.AppendMenuW(menu, MF_POPUP, devs, f"Dispositivos conectados ({len(model['approved'])})")
         bridge = u.CreatePopupMenu()
         u.AppendMenuW(bridge, MF_STRING, ID_FOLDER, "Abrir carpeta «Recibido del móvil»")
-        u.AppendMenuW(bridge, MF_STRING, ID_BRIDGE, f"Abrir el puente en el {PANEL}")
-        u.AppendMenuW(menu, MF_POPUP, bridge, "Puente Wi-Fi")
+        u.AppendMenuW(bridge, MF_STRING, ID_BRIDGE, f"Abrir «Pasar por wifi» en el {PANEL}")
+        u.AppendMenuW(menu, MF_POPUP, bridge, "Pasar por wifi")
         u.AppendMenuW(menu, MF_SEP, 0, None)
         u.AppendMenuW(menu, MF_STRING, ID_PROPS, "Propiedades…")
         u.AppendMenuW(menu, MF_STRING | (MF_CHECKED if autorun_enabled() else 0), ID_AUTORUN, "Iniciar con Windows")

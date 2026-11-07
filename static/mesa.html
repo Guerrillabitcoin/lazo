@@ -38,13 +38,19 @@
       .waiting b { color: var(--naranja); }
       @keyframes late { 50% { opacity: 0.35; } }
       /* 0.61: Conectar a la izquierda (QR pequeño); se oculta con móvil conectado. */
-      .board { display: grid; grid-template-columns: 280px 280px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "conn side clip files"; gap: 18px; align-items: start; }
-      body.connected .board { grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "side clip files"; }
+      .board { display: grid; grid-template-columns: 280px 280px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "conn side pasar pasar"; gap: 18px; align-items: start; }
+      body.connected .board { grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "side pasar pasar"; }
       .board > * { min-width: 0; }
       #conexion { grid-area: conn; }
       .side { grid-area: side; display: grid; gap: 18px; }
-      #clip-box { grid-area: clip; min-height: 420px; }
-      #archivos { grid-area: files; min-height: 420px; }
+      /* 0.63: «Pasar por wifi» junta portapapeles/notas y archivos en una sola caja. */
+      #pasar { grid-area: pasar; }
+      #pasar > h2 { margin: 0 0 4px; }
+      .privado { margin: 0 0 14px; padding: 8px 12px; border-left: 3px solid var(--naranja); background: rgba(224,122,61,0.08); border-radius: 8px; font-size: 13px; line-height: 1.45; color: var(--suave); }
+      .privado b { color: var(--texto); }
+      .pasar-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+      .pasar-cols > section { min-width: 0; min-height: 380px; }
+      .pasar-cols h3 { margin: 0 0 10px; font-size: 1rem; }
       .conn { display: grid; gap: 12px; justify-items: center; text-align: center; padding: 16px; border-radius: 18px; background: #1d1915; border: 2px solid var(--naranja); }
       .conn[hidden] { display: none !important; }
       body.connected #conexion { display: none !important; }
@@ -86,11 +92,12 @@
       @media (prefers-reduced-motion: reduce) { .lz-logo[data-estado="esperando"] .lz-anillo { animation: none; } }
       .top .lz-logo { height: 40px; }
       @media (max-width: 1280px) {
-        .board { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "conn clip" "side clip" "files files"; }
-        body.connected .board { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "side clip" "files files"; }
+        .board { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "conn pasar" "side pasar"; }
+        body.connected .board { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "side pasar"; }
       }
       @media (max-width: 760px) {
-        .board, body.connected .board { grid-template-columns: 1fr; grid-template-areas: "conn" "side" "clip" "files"; }
+        .board, body.connected .board { grid-template-columns: 1fr; grid-template-areas: "conn" "side" "pasar"; }
+        .pasar-cols { grid-template-columns: 1fr; }
       }
     </style>
   </head>
@@ -114,6 +121,10 @@
         </label>
         <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
         <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
+        <label class="chip" title="Cuando YouTube deja saltar un anuncio, LaZoo pulsa «Saltar» por accesibilidad, sin mover el ratón ni traer la ventana delante">
+          <input id="anuncios" type="checkbox" /> Saltar anuncios de YouTube
+        </label>
+        <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
       </header>
       <div id="ask" class="waiting" role="status" aria-live="polite" hidden>
         <span class="dot" aria-hidden="true"></span>
@@ -150,14 +161,18 @@
             </div>
           </section>
         </div>
-        <section id="clip-box" class="box">
-          <h2>Portapapeles Móvil ↔ PC</h2>
+        <section id="pasar" class="box">
+          <h2>Pasar por wifi</h2>
+          <p class="privado"><b>No pasa por internet.</b> Va directo entre el móvil y este PC por tu Wi-Fi, en un puente cifrado (LZ2) con una clave que solo tienen este PC y cada móvil aceptado. Las notas se guardan cifradas en este PC. Quien escuche la Wi-Fi solo ve datos cifrados.</p>
+          <div class="pasar-cols">
+        <section id="clip-box">
+          <h3>Notas · Portapapeles Móvil ↔ PC</h3>
           <textarea id="paste" placeholder="Pega aquí un texto"></textarea>
           <div class="row"><button id="save" class="primary" type="button">Guardar en el móvil</button></div>
           <ul id="clips"></ul>
         </section>
-        <section id="archivos" class="box">
-          <h2>Archivos</h2>
+        <section id="archivos">
+          <h3>Archivos</h3>
           <div class="row">
             <p id="fotos-path" class="path" title="">—</p>
             <button id="change-fotos" type="button">Cambiar carpeta</button>
@@ -167,6 +182,8 @@
           <input id="file" type="file" multiple aria-label="Elegir archivos para el móvil" hidden />
           <p id="up-stat" aria-live="polite"><small></small></p>
           <ul id="files"></ul>
+        </section>
+          </div>
         </section>
       </div>
     </main>
@@ -452,6 +469,8 @@
           $("#recordar").checked = !!data.recordar;
           if (document.activeElement !== $("#sigues")) $("#sigues").checked = !!data.sigues;
           if (data.sigues_info) $("#sigues-cuenta").textContent = siguesTexto(data.sigues_info, new Date());
+          if (document.activeElement !== $("#anuncios")) $("#anuncios").checked = !!data.anuncios;
+          if (data.anuncios_info) $("#anuncios-cuenta").textContent = `Anuncios saltados: ${data.anuncios_info.total || 0} · hoy: ${data.anuncios_info.hoy || 0}`;
           $("#st-net").textContent = (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red";
         } catch (_err) {}
       }
@@ -466,7 +485,9 @@
           t.textContent = `${d.label} · ${STATES[d.state] || d.state}`;
           if (d.state === "pendiente") t.className = "estado-pendiente";
           const s = document.createElement("small");
-          s.textContent = [d.ip, "id " + d.short, d.fp ? "huella " + d.fp : "", d.fecha ? "desde " + d.fecha : "", d.recordado ? "recordado" : ""].filter(Boolean).join(" · ");
+          const ago = Number(d.ago) || 0;  // 0.63: «visto» separa el móvil real de un id viejo
+          const visto = ago < 0 ? "sin ver desde que se abrió LaZoo" : ago < 20 ? "visto ahora" : ago < 3600 ? `visto hace ${Math.max(1, Math.round(ago / 60))} min` : ago < 86400 ? `visto hace ${Math.round(ago / 3600)} h` : `visto hace ${Math.round(ago / 86400)} d`;
+          s.textContent = [d.ip, "id " + d.short, d.fp ? "huella " + d.fp : "", visto, d.fecha ? "desde " + d.fecha : "", d.recordado ? "recordado" : ""].filter(Boolean).join(" · ");
           li.append(t, s);
           if (d.state === "aprobado") {
             const b = document.createElement("button");
@@ -490,6 +511,9 @@
       $("#sigues-cero").addEventListener("click", () => {
         if (!window.confirm("¿Poner a cero el contador de avisos quitados?")) return;
         devCall("/api/sigues", { reset: true }).then(watchConn).catch(() => watchConn());
+      });
+      $("#anuncios").addEventListener("change", (event) => {
+        devCall("/api/anuncios", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
       $("#sigues").addEventListener("change", (event) => {
         devCall("/api/sigues", { on: event.target.checked }).then(watchConn).catch(() => watchConn());

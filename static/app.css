@@ -668,3 +668,9 @@ button[data-cursor] { min-height: 44px; }
 /* 0.57 */
 .pin-msg { color: #e07a3d; margin: 4px 0; }
 .conn-diag { font-size: 13px; opacity: .85; }
+
+/* 0.63: «Pasar por wifi» (puente + notas + portapapeles) */
+.pasar-title { margin: 0 0 6px; font-size: 1.15rem; font-weight: 700; color: var(--copper, #e07a3d); }
+.pasar-privado b { color: #f1e7dc; }
+.clip-row .clip-trash { flex: none; align-self: center; width: 38px; min-width: 38px; min-height: 34px; margin: 0 0 0 4px; padding: 0; border-radius: 99px; background: #3a2a24; font-size: 15px; }
+.clips-clear { margin-top: 8px; width: 100%; background: #3a2a24; color: #e8b3a6; }

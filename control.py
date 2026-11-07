@@ -1796,9 +1796,33 @@ def _activate_window(hwnd: int) -> bool:
 
 def _focus_for_keys(window_id: str) -> bool:
     if SYSTEM == "Windows":
-        return _activate_window(int(window_id))
+        hwnd = int(window_id)
+        was = _is_foreground(hwnd)
+        if not _activate_window(hwnd):
+            return False
+        if not was:
+            _settle_foreground(hwnd)
+        return True
     _focus_unlocked(window_id)
     return True
+
+
+FOCUS_SETTLE = 0.30  # 0.63: tras traer la ventana delante, lo que tarda el navegador en dar el teclado a la página
+
+
+def _settle_foreground(hwnd: int, wait=time.sleep) -> bool:
+    """0.63: «hay que tocar dos veces». Si la ventana estaba detrás, Windows la pone delante
+    al momento pero Chrome/Edge/Spotify tardan un poco en pasar el teclado a la página: la
+    tecla que llegaba justo después se perdía y solo la segunda pulsación funcionaba. Aquí se
+    espera a que siga delante tres comprobaciones seguidas (máx. 0,8 s) y un margen más."""
+    stable = 0
+    for _ in range(20):
+        stable = stable + 1 if _is_foreground(hwnd) else 0
+        if stable >= 3:
+            break
+        wait(0.04)
+    wait(FOCUS_SETTLE)
+    return stable >= 3
 
 
 def _force_foreground(hwnd: int) -> None:
@@ -2274,6 +2298,9 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         keys = actions[action]
         if action == "next":
             detail = "Siguiente vídeo"
+            # 0.63: durante un anuncio, la flecha primero intenta «Saltar» (sin teclas ni foco).
+            if _skip_ad_now():
+                return {"detail": "Anuncio saltado", "title": row["title"], "level": _levels["youtube"], **state}
     if not _focus_for_keys(row["id"]):
         raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
     time.sleep(0.18)
@@ -2390,6 +2417,18 @@ def _yt_state(row: dict[str, str]) -> dict[str, Any]:
 
 
 _WIN_VK = {"escape": 0x1B, "shift": 0x10, "ctrl": 0x11, "alt": 0x12, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28}
+
+
+def _skip_ad_now() -> bool:
+    """0.63: pulsa «Saltar anuncio» si se ve (anuncios.py). Nunca lanza."""
+    if SYSTEM != "Windows":
+        return False
+    try:
+        import anuncios
+
+        return anuncios.ANUNCIOS.saltar_ya()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _yt_keys(keys: list[str]) -> None:
@@ -3090,6 +3129,15 @@ def delete_clipboard(clip_id: str) -> dict[str, Any]:
         return {"ok": True, "items": [dict(item) for item in _history]}
 
 
+def clear_clipboard() -> dict[str, Any]:
+    """0.63: borra todas las notas (también del archivo cifrado del PC)."""
+    with _clip_lock:
+        _load_history()
+        _history.clear()
+        _save_history()
+        return {"ok": True, "items": []}
+
+
 def clipboard_history(text: str | None = None, auto: bool = False) -> dict[str, Any]:
     with _clip_lock:
         _load_history()
@@ -3173,7 +3221,9 @@ def _load_history() -> None:
 def _save_history() -> None:
     try:
         raw = json.dumps(_history, ensure_ascii=False).encode("utf-8")
-        _history_path.write_bytes(_seal(raw))
+        import recordar
+
+        recordar._write_private(_history_path, _seal(raw))  # 0.63: solo legible por este usuario
     except OSError:
         return
 
@@ -3204,7 +3254,47 @@ def _read_clipboard_text() -> str:
     return ""
 
 
-def _windows_clipboard() -> str:
+# 0.63: formatos con los que KeePass, Bitwarden, 1Password, etc. marcan una contraseña copiada
+# para que ningún historial la guarde. LaZoo los respeta: esa copia no entra en las notas.
+_PRIVATE_FORMATS = ("ExcludeClipboardContentFromMonitorProcessing", "Clipboard Viewer Ignore")
+
+
+def _windows_clipboard_private(user32, kernel32) -> bool:
+    """Con el portapapeles ya abierto: ¿pide el que copió que no se guarde en historiales?"""
+    try:
+        user32.RegisterClipboardFormatW.argtypes = [ctypes.c_wchar_p]
+        user32.RegisterClipboardFormatW.restype = ctypes.c_uint
+        user32.IsClipboardFormatAvailable.argtypes = [ctypes.c_uint]
+        user32.IsClipboardFormatAvailable.restype = ctypes.c_bool
+        for name in _PRIVATE_FORMATS:
+            fmt = user32.RegisterClipboardFormatW(name)
+            if fmt and user32.IsClipboardFormatAvailable(fmt):
+                return True
+        fmt = user32.RegisterClipboardFormatW("CanIncludeInClipboardHistory")
+        if fmt and user32.IsClipboardFormatAvailable(fmt):
+            handle = user32.GetClipboardData(fmt)
+            ptr = kernel32.GlobalLock(handle) if handle else None
+            if ptr:
+                try:
+                    return ctypes.c_uint32.from_address(ptr).value == 0
+                finally:
+                    kernel32.GlobalUnlock(handle)
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
+def _read_clipboard_for_history() -> str:
+    """Lo que el vigilante mete en las notas: nada si el programa que copió pidió privacidad."""
+    if SYSTEM == "Windows":
+        try:
+            return _windows_clipboard(skip_private=True)
+        except Exception:  # noqa: BLE001
+            return ""
+    return _read_clipboard_text()
+
+
+def _windows_clipboard(skip_private: bool = False) -> str:
     user32 = ctypes.windll.user32
     kernel32 = ctypes.windll.kernel32
     user32.OpenClipboard.argtypes = [ctypes.c_void_p]
@@ -3222,6 +3312,8 @@ def _windows_clipboard() -> str:
         if not user32.OpenClipboard(None):
             return ""
     try:
+        if skip_private and _windows_clipboard_private(user32, kernel32):
+            return ""
         handle = user32.GetClipboardData(13)
         if not handle:
             return ""
@@ -3372,7 +3464,7 @@ class ClipWatch:
 
     def poll(self, now: float | None = None) -> bool:
         """Una pasada. Devuelve True si añadió algo al historial."""
-        read = self._read or _read_clipboard_text
+        read = self._read or _read_clipboard_for_history
         try:
             text = read() or ""
         except Exception:
@@ -3936,20 +4028,80 @@ def _write_file_rows(rows: list[dict[str, Any]]) -> None:
     tmp.replace(_files_dir / "index.json")
 
 
+NOTES_KEY_FILE = "notas-clave.bin"
+
+
+def _notes_key() -> bytes | None:
+    """0.63: clave local para cifrar notas y archivos del puente fuera de Windows (o si DPAPI
+    falla). 32 bytes al azar en un archivo solo legible por este usuario (600), junto a las notas."""
+    path = _history_path.with_name(NOTES_KEY_FILE)
+    try:
+        key = path.read_bytes()
+        if len(key) == 32:
+            return key
+    except OSError:
+        pass
+    try:
+        import recordar
+
+        key = secrets.token_bytes(32)
+        recordar._write_private(path, key)
+        return key
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _seal(data: bytes) -> bytes:
-    if SYSTEM != "Windows" or not data:
+    """Cifra en disco. Windows: DPAPI (tu cuenta). Linux/Mac (0.63, antes en claro) o si
+    DPAPI falla: LZ2 con la clave local de `_notes_key`."""
+    if not data:
         return data
-    sealed = _dpapi(data, True)
-    if not sealed:
+    if SYSTEM == "Windows":
+        sealed = _dpapi(data, True)
+        if sealed:
+            return b"LZ1" + sealed
+    key = _notes_key()
+    if key is None:
         return data
-    return b"LZ1" + sealed
+    import protocol
+
+    return protocol.seal(data, key)
 
 
 def _open_seal(data: bytes) -> bytes:
     if data.startswith(b"LZ1"):
         opened = _dpapi(data[3:], False)
         return opened or data
-    return data
+    import protocol
+
+    if data.startswith(protocol.MAGIC):
+        key = _notes_key()
+        if key is not None:
+            try:
+                return protocol.open_sealed(data, key)
+            except Exception:  # noqa: BLE001 (otra clave: se devuelve tal cual)
+                return data
+    return data  # notas de antes de 0.63 en Linux/Mac (en claro): se leen y se guardan cifradas
+
+
+def use_private_history() -> Path:
+    """0.63: las notas pasan de la carpeta del programa a la carpeta privada de LaZoo
+    (%APPDATA%\\LaZoo o ~/.config/lazoo). Si había notas en el sitio viejo, se mueven."""
+    import recordar
+
+    new = recordar.data_dir() / "notas.lz"
+    old = Path(__file__).with_name("clipboard-history.json")
+    try:
+        new.parent.mkdir(parents=True, exist_ok=True)
+        if old.is_file() and not new.exists():
+            data = _open_seal(old.read_bytes())  # se abre con la clave/cuenta de siempre
+            set_history_path(new)
+            recordar._write_private(new, _seal(data))
+            old.unlink()
+    except Exception:  # noqa: BLE001 (si no se puede mover, se queda donde estaba)
+        return _history_path
+    set_history_path(new)
+    return new
 
 
 def _dpapi(data: bytes, protect: bool) -> bytes:

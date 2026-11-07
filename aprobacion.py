@@ -67,6 +67,9 @@ class RejectLog:
         return True
 
 
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
 def device_label(ua: str) -> str:
     ua = ua or ""
     if "iPhone" in ua:
@@ -75,6 +78,8 @@ def device_label(ua: str) -> str:
         kind = "iPad"
     elif "Android" in ua:
         kind = "Android"
+        if "; wv)" in ua or "LaZooApp" in ua:
+            return "Android · App LaZoo"  # 0.63: la APK (WebView) se distingue del navegador
     elif "Mac OS X" in ua:
         kind = "Mac"
     elif "Windows" in ua:
@@ -98,6 +103,7 @@ class Approvals:
         self.on_new: list[Callable[[str, dict], None]] = []
         self.on_change: list[Callable[[], None]] = []  # aprobado, expulsado u olvidado
         self.on_decide: list[Callable[[str, bool], None]] = []  # 0.57: registro de conexión
+        self.on_retire: list[Callable[[str], None]] = []  # 0.63: el mismo móvil con un id viejo
 
     def _changed(self) -> None:
         for hook in self.on_change:
@@ -115,7 +121,7 @@ class Approvals:
                 if not re.fullmatch(r"[0-9a-f]{8,40}", who):
                     continue
                 self.devices[who] = {"state": "aprobado", "since": now, "label": str(row.get("label") or "Dispositivo")[:60],
-                                     "ip": "", "seen": now, "fp": str(row.get("fp", ""))[:40],
+                                     "ip": str(row.get("ip") or "")[:46], "seen": 0.0, "fp": str(row.get("fp", ""))[:40],
                                      "fecha": str(row.get("fecha", ""))[:20], "recordado": True}
             return len(self.devices)
 
@@ -127,8 +133,28 @@ class Approvals:
 
     def approved_rows(self) -> list[dict]:
         with self.lock:
-            return [{"id": who, "label": row["label"], "fp": row.get("fp", ""), "fecha": row.get("fecha", "")}
+            return [{"id": who, "label": row["label"], "fp": row.get("fp", ""), "fecha": row.get("fecha", ""), "ip": row.get("ip", "")}
                     for who, row in self.devices.items() if row["state"] == "aprobado"]
+
+    def _twins_unlocked(self, who: str) -> list[str]:
+        """0.63: otros ids aprobados del MISMO móvil: misma IP de la red local y mismo tipo
+        (p. ej. «Android · Chrome»). Pasa cuando el navegador del móvil pierde su id (cambió la
+        IP del PC, se borraron datos, otro QR): antes salían dos «sesiones» del mismo móvil y
+        expulsar una parecía echar a las dos. Desde el propio PC (127.0.0.1) no se junta nada."""
+        row = self.devices.get(who)
+        if not row or not row.get("ip") or row["ip"] in LOOPBACK:
+            return []
+        return [other for other, r in self.devices.items()
+                if other != who and r["state"] == "aprobado" and r.get("ip") == row["ip"] and r.get("label") == row["label"]]
+
+    def _retire(self, gone: list[str]) -> None:
+        for other in gone:
+            print(f"  Mismo dispositivo con un id antiguo ({other[:4]}): se quita de la lista.", flush=True)
+            for hook in self.on_retire:
+                try:
+                    hook(other)
+                except Exception:
+                    pass
 
     def _expire(self, now: float) -> None:
         for who, row in list(self.devices.items()):
@@ -185,12 +211,16 @@ class Approvals:
             row["until"] = now + BLOCK_SECONDS
             if ok and not row.get("fecha"):
                 row["fecha"] = time.strftime("%Y-%m-%d %H:%M")
+            gone = self._twins_unlocked(who) if ok else []
+            for other in gone:
+                del self.devices[other]
         print(f"  {'Aceptado' if ok else 'Rechazado'}: {row['label']} ({row['ip']})", flush=True)
         for hook in self.on_decide:
             try:
                 hook(who, ok)
             except Exception:
                 pass
+        self._retire(gone)
         if ok:
             self._changed()
         return True
@@ -216,7 +246,7 @@ class Approvals:
             return [
                 {"id": who, "short": who[:4], "state": row["state"], "label": row["label"], "ip": row["ip"],
                  "left": max(0, int(WAIT_SECONDS - (now - row["since"]))) if row["state"] == "pendiente" else 0,
-                 "ago": int(now - row["seen"]), "fp": row.get("fp", ""), "fecha": row.get("fecha", ""),
+                 "ago": int(now - row["seen"]) if row["seen"] else -1, "fp": row.get("fp", ""), "fecha": row.get("fecha", ""),
                  "recordado": bool(row.get("recordado"))}
                 for who, row in sorted(self.devices.items(), key=lambda kv: kv[1]["since"])
             ]

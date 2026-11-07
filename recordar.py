@@ -138,7 +138,7 @@ class Store:
         return [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)][:100]
 
     def _save_list(self, on: bool, devices: list[dict]) -> None:
-        clean = [{k: str(r.get(k, ""))[:80] for k in ("id", "label", "fp", "fecha")} for r in devices][:100]
+        clean = [{k: str(r.get(k, ""))[:80] for k in ("id", "label", "fp", "fecha", "ip")} for r in devices][:100]
         _write_private(self.folder / LIST_FILE, json.dumps({"recordar": on, "dispositivos": clean}, ensure_ascii=False, indent=1).encode())
 
     # Clave

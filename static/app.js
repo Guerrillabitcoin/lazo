@@ -18,10 +18,28 @@ function onThisPcPage() {
   return ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 }
 localStorage.removeItem("lazo-token");
-const deviceId = localStorage.getItem("lazo-id") || (() => {
-  const fresh = toHex(crypto.getRandomValues(new Uint8Array(16)));
-  localStorage.setItem("lazo-id", fresh);
-  return fresh;
+const deviceId = (() => {
+  let id = localStorage.getItem("lazo-id") || "";
+  // 0.63: en la APK, un id fijo para este móvil aunque el PC cambie de IP (otro origen,
+  // otro localStorage). Antes salían dos «sesiones» del mismo móvil en el PC.
+  try {
+    const app = window.LaZooApp;
+    if (app && typeof app.deviceId === "function") {
+      const fixed = String(app.deviceId(/^[0-9a-f]{32}$/.test(id) ? id : "") || "");
+      if (/^[0-9a-f]{32}$/.test(fixed)) {
+        if (fixed !== id) {
+          localStorage.removeItem("lazo-key");  // la clave era de otro id: se empareja una vez
+          localStorage.setItem("lazo-id", fixed);
+        }
+        return fixed;
+      }
+    }
+  } catch (_err) { /* APK vieja: id de esta página */ }
+  if (!id) {
+    id = toHex(crypto.getRandomValues(new Uint8Array(16)));
+    localStorage.setItem("lazo-id", id);
+  }
+  return id;
 })();
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
@@ -119,7 +137,6 @@ const views = {
   youtube: document.querySelector("#view-youtube"),
   spotify: document.querySelector("#view-spotify"),
   bridge: document.querySelector("#view-bridge"),
-  notes: document.querySelector("#view-notes"),
   system: document.querySelector("#view-system"),
   lab: document.querySelector("#view-lab"),
   about: document.querySelector("#view-about"),
@@ -127,11 +144,10 @@ const views = {
 
 const TOOLS = [
   { id: "mouse", name: "Ratón" },
-  { id: "bridge", name: "Puente Wi-Fi" },
+  { id: "bridge", name: "Pasar por wifi" },  // 0.63: puente + notas + portapapeles en uno
   { id: "windows", name: "Ventanas" },
   { id: "youtube", name: "YouTube" },
   { id: "spotify", name: "Spotify" },
-  { id: "notes", name: "Notas" },
   { id: "system", name: "Sistema" },
   { id: "lab", name: "Pruebas" },
   { id: "about", name: "Sobre LaZoo" },
@@ -259,7 +275,7 @@ function openCube(id) {
   if (id === "windows") loadWindows();
   if (id === "system") loadSystem();
   if (id === "spotify") refreshStatus();
-  if (id === "notes" || id === "bridge") syncClipboard();
+  if (id === "bridge") syncClipboard();
   if (id === "about") aboutOpen();
   mediaWatch(id === "youtube" || id === "spotify");
   if (id === "youtube" || id === "spotify") {
@@ -628,6 +644,8 @@ function renderClips(items) {
   const list = document.querySelector("#clips");
   if (!list) return;
   list.replaceChildren();
+  const clear = document.querySelector("#clips-clear");
+  if (clear) clear.hidden = !items.length;
   if (!items.length) {
     const empty = document.createElement("li");
     empty.className = "hint";
@@ -651,8 +669,22 @@ function renderClips(items) {
     copy.className = "copy copy-pill";
     copy.textContent = "Copiar";
     copy.addEventListener("click", () => copyToPhone(item.text));
+    const trash = document.createElement("button");
+    trash.type = "button";
+    trash.className = "clip-trash";
+    trash.setAttribute("aria-label", "Borrar esta nota");
+    trash.textContent = "🗑";
+    trash.addEventListener("click", async () => {
+      if (!(await askConfirm("¿Borrar esta nota?", "Se borra del móvil y del PC.", "Borrar"))) return;
+      try {
+        renderClips((await api("/api/clipboard/borrar", { id: item.id })).items || []);
+        say("Nota borrada");
+      } catch (err) {
+        say(err.message);
+      }
+    });
     row.className = "clip-row";
-    row.append(button, copy);
+    row.append(button, copy, trash);
     list.append(row);
   }
 }
@@ -708,7 +740,7 @@ function renderFiles(items) {
 }
 
 async function syncClipboard() {
-  if (document.hidden || (tab !== "notes" && tab !== "bridge")) return;
+  if (document.hidden || tab !== "bridge") return;
   try {
     const res = await lzFetch("/api/clipboard");
     if (res.status === 401) return;
@@ -720,6 +752,16 @@ async function syncClipboard() {
     renderFiles(listed.files || []);
   } catch (_err) {}
 }
+
+document.querySelector("#clips-clear").addEventListener("click", async () => {
+  if (!(await askConfirm("¿Borrar todas las notas?", "Se borran del móvil y del PC. No se puede deshacer.", "Borrar todas"))) return;
+  try {
+    renderClips((await api("/api/clipboard/borrar", { all: true })).items || []);
+    say("Notas borradas");
+  } catch (err) {
+    say(err.message);
+  }
+});
 
 document.querySelector("#clip-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1423,7 +1465,8 @@ renderDock();
 const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
 const fromQr = hash.get("p") || "";
 const keyFromLink = localStorage.getItem("lazo-key") || "";
-const fromTray = hash.get("pastilla") || "";
+// 0.63: «notas» y «puente» viven ahora en «Pasar por wifi».
+const fromTray = ({ notes: "bridge", notas: "bridge", puente: "bridge" })[hash.get("pastilla") || ""] || hash.get("pastilla") || "";
 const onThisPc = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 if (fromQr || fromTray) history.replaceState(null, "", location.pathname);
 if (keyFromLink) {
@@ -3086,7 +3129,17 @@ function aboutDonations(items) {
   });
 }
 
-const DEV_STATES = { aprobado: "conectado", pendiente: "esperando aprobación", rechazado: "rechazado" };
+const DEV_STATES = { aprobado: "aprobado", pendiente: "esperando aprobación", rechazado: "rechazado" };
+
+/* 0.63: «visto hace…» para distinguir el móvil de verdad de un id viejo. */
+function seenText(secs) {
+  if (Number(secs) < 0) return "no desde que se abrió LaZoo";
+  const s = Math.max(0, Number(secs) || 0);
+  if (s < 20) return "ahora";
+  if (s < 3600) return `hace ${Math.max(1, Math.round(s / 60))} min`;
+  if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
+  return `hace ${Math.round(s / 86400)} d`;
+}
 
 async function aboutDevices() {
   const list = document.querySelector("#about-devs");
@@ -3101,13 +3154,16 @@ async function aboutDevices() {
   devices.forEach((d) => {
     const li = document.createElement("li");
     const text = document.createElement("span");
-    text.textContent = `${d.label} · ${d.ip} · ${DEV_STATES[d.state] || d.state}${d.id === data.me ? " (este)" : ""}`;
+    const mine = d.id === data.me;
+    text.textContent = [mine ? "Este móvil" : d.label, d.ip, "id " + (d.short || d.id.slice(0, 4)),
+      DEV_STATES[d.state] || d.state, "visto " + seenText(d.ago)].filter(Boolean).join(" · ");
     li.append(text);
     if (d.state === "aprobado") {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = "Expulsar";
+      b.textContent = mine ? "Salir" : "Expulsar";
       b.addEventListener("click", async () => {
+        if (mine && !(await askConfirm("¿Salir de este PC?", "Este móvil tendrá que volver a escanear el QR o poner el PIN.", "Salir"))) return;
         await api("/api/dispositivos/expulsar", { id: d.id }).catch((err) => say(err.message));
         if (d.id !== data.me) aboutDevices();
         else refreshStatus();
@@ -3507,5 +3563,18 @@ if (ytSigues) {
   PREF_PUSH.push(syncSigues);
   ytSigues.addEventListener("change", () => {
     api("/api/sigues", { on: ytSigues.checked }).then((st) => { ytSigues.checked = !!st.on; }).catch(() => syncSigues());
+  });
+}
+
+// 0.63: saltar anuncios de YouTube (anuncios.py). Mismo patrón que «¿Sigues ahí?».
+const ytAnuncios = document.querySelector("#yt-anuncios");
+if (ytAnuncios) {
+  const syncAnuncios = () => api("/api/anuncios", {}).then((st) => {
+    ytAnuncios.disabled = !st.available || !!st.disabled;
+    if (document.activeElement !== ytAnuncios) ytAnuncios.checked = !!st.on;
+  }).catch(() => {});
+  PREF_PUSH.push(syncAnuncios);
+  ytAnuncios.addEventListener("change", () => {
+    api("/api/anuncios", { on: ytAnuncios.checked }).then((st) => { ytAnuncios.checked = !!st.on; }).catch(() => syncAnuncios());
   });
 }

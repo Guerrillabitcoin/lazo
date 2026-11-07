@@ -30,6 +30,7 @@ import protocol
 import puente
 import recordar
 import sigues
+import anuncios
 import sobre
 
 ROOT = Path(__file__).resolve().parent
@@ -276,6 +277,8 @@ def connection_info() -> dict:
         "recordar": STORE.enabled(),
         "sigues": sigues.SIGUES.status()["on"],
         "sigues_info": {k: sigues.SIGUES.status()[k] for k in ("total", "hoy", "sesion", "ultimo")},
+        "anuncios": anuncios.ANUNCIOS.status()["on"],
+        "anuncios_info": {k: anuncios.ANUNCIOS.status()[k] for k in ("total", "hoy", "sesion", "ultimo")},
         "approve_where": approve_where(),
         "version": VERSION,
         "diag": conn_diag(),
@@ -372,6 +375,14 @@ def kick_device(who: str) -> bool:
     PAIRING.phone_gone(who)
     conn_log(f"{who[:4]} expulsado" if done else f"{who[:4]} expulsar: no estaba")
     return done
+
+
+def retire_device(who: str) -> None:
+    """0.63: id viejo del mismo móvil (ver Approvals._twins_unlocked). Su clave deja de valer
+    y, si alguien la usa, el móvil ve el QR/PIN en vez de reintentar."""
+    KICKED.add(who)
+    PAIRING.phone_gone(who)
+    conn_log(f"{who[:4]} era el mismo móvil con otro id: retirado")
 
 
 def kick_everyone() -> int:
@@ -788,6 +799,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/sigues":
             self._guard(lambda _body: sigues.SIGUES.status())
             return
+        if path == "/api/anuncios":
+            self._guard(lambda _body: anuncios.ANUNCIOS.status())
+            return
         if path == "/api/status":
             self._guard(lambda _body: {**control.status(), "version": VERSION})
             return
@@ -856,8 +870,17 @@ class Handler(BaseHTTPRequestHandler):
             # 0.59: el Panel (local) y el móvil (sellado) pueden encenderlo o apagarlo.
             self._guard(lambda body: sigues.SIGUES.set_on(body.get("on"), bool(body.get("reset")) and not self.remote))
             return
+        if path == "/api/anuncios":
+            # 0.63: saltar anuncios de YouTube. Igual que /api/sigues.
+            self._guard(lambda body: anuncios.ANUNCIOS.set_on(body.get("on"), bool(body.get("reset")) and not self.remote))
+            return
         if path == "/api/olvidar":
             self._local_only(lambda _body: forget_all())
+            return
+        if path == "/api/clipboard/borrar":
+            # 0.63: el móvil (sellado) también puede borrar una nota o todas.
+            self._guard(lambda body: control.clear_clipboard() if body.get("all") is True
+                        else control.delete_clipboard(str(body.get("id", ""))))
             return
         if path == "/api/clipboard":
             self._push_clip()
@@ -1395,6 +1418,8 @@ def start(argv: list[str] | None = None, console: bool = True):
                         help="Acepta también este rango (p. ej. una VPN 100.64.0.0/10). Repetible.")
     parser.add_argument("--sin-sigues", action="store_true",
                         help="No contesta el aviso «¿Sigues ahí?» de YouTube (igual que LAZO_SIN_SIGUES=1)")
+    parser.add_argument("--sin-anuncios", action="store_true",
+                        help="No salta los anuncios de YouTube (igual que LAZO_SIN_ANUNCIOS=1)")
     parser.add_argument("--sin-vigilante", action="store_true",
                         help="No pone el vigilante del ratón del PC (igual que LAZO_SIN_VIGILANTE=1)")
     parser.add_argument("--sin-portapapeles", action="store_true",
@@ -1413,6 +1438,8 @@ def start(argv: list[str] | None = None, console: bool = True):
         control.VIGILANTE.enabled = False
     if args.sin_sigues:
         sigues.SIGUES.disabled = True
+    if args.sin_anuncios:
+        anuncios.ANUNCIOS.disabled = True
     if args.sin_portapapeles:
         control.CLIP_WATCH.enabled = False
     APPROVALS.auto = args.auto_aprobar or os.environ.get("LAZO_AUTOAPPROVE") == "1"
@@ -1431,10 +1458,17 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     PAIRING.pin = protocol.Pairing(args.pin).pin
     remembered = load_remembered()
+    if "unittest" not in sys.modules and "pytest" not in sys.modules:
+        try:
+            control.use_private_history()  # 0.63: notas cifradas en la carpeta privada de LaZoo
+        except Exception:
+            pass
     if _log_decision not in APPROVALS.on_decide:
         APPROVALS.on_decide.append(_log_decision)
     if persist_devices not in APPROVALS.on_change:
         APPROVALS.on_change.append(persist_devices)
+    if retire_device not in APPROVALS.on_retire:
+        APPROVALS.on_retire.append(retire_device)
     PORT = args.port
     try:
         server, PORT = listen(args.host, args.port)
@@ -1479,6 +1513,10 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         sigues.watch()
+    except Exception:
+        pass
+    try:
+        anuncios.watch()
     except Exception:
         pass
     if not args.no_browser:

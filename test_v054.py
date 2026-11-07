@@ -331,7 +331,7 @@ console.log(pairProof(hk, "movil") + " " + openText(b64urlToBytes("{box}"), deri
         self.assertIn("Panel de LaZoo", (ROOT / "bandeja.py").read_text(encoding="utf-8"))
         self.assertIn("Panel de LaZoo", lazo.connect_page().decode())
         self.assertIn("grid-template-areas", MESA)
-        self.assertIn('"side clip files"', MESA)
+        self.assertIn('"side pasar pasar"', MESA)  # 0.63: portapapeles y archivos en «Pasar por wifi»
 
     # 6. Título largo: 2 líneas, sin cortar palabras.
     def test_long_title_two_lines(self):
