@@ -86,6 +86,8 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         holdWifi(true);
+        // 0.63: al volver del bolsillo, la página reconecta ya (WebSocket nuevo, sin QR ni PIN).
+        if (web != null) web.evaluateJavascript("window.lazooDespierta && window.lazooDespierta()", null);
     }
 
     @Override
@@ -207,6 +209,25 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void scan() { runOnUiThread(MainActivity.this::rescan); }
+
+        // 0.63: el mismo id del mando aunque cambie la IP del PC (cada IP es otro origen web
+        // con su propio localStorage y antes salía como otro móvil). No es secreto: va en claro
+        // en cada petición; la clave sí es de cada id y nunca sale de aquí.
+        @JavascriptInterface
+        public String deviceId(String candidate) {
+            String id = prefs().getString("id", "");
+            if (id.matches("[0-9a-f]{32}")) return id;
+            if (candidate != null && candidate.matches("[0-9a-f]{32}")) id = candidate;
+            else {
+                byte[] b = new byte[16];
+                new java.security.SecureRandom().nextBytes(b);
+                StringBuilder sb = new StringBuilder();
+                for (byte x : b) sb.append(String.format("%02x", x & 0xff));
+                id = sb.toString();
+            }
+            prefs().edit().putString("id", id).apply();
+            return id;
+        }
 
         @JavascriptInterface
         public void waitNote(final String title, final String text) {

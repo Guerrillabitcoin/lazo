@@ -186,8 +186,8 @@ class HttpApproval(unittest.TestCase):
         phone = "9a" * 8
 
         def signed(method, path, body=b""):
-            data = pairing.seal(body) if body else b""
-            heads = {protocol.H_ID: phone, "User-Agent": "iPhone Safari/1", **pairing.sign(method, path, len(data))}
+            data = pairing.seal(body, phone) if body else b""  # 0.62: clave de este móvil
+            heads = {protocol.H_ID: phone, "User-Agent": "iPhone Safari/1", **pairing.sign(method, path, len(data), who=phone)}
             if data:
                 heads["Content-Type"] = "application/octet-stream"
             return _req(port, method, path, data, heads)

@@ -123,9 +123,10 @@ class Server(unittest.TestCase):
             lazo.Handler._loopback = real
 
     def assert_no_key(self, phone):
-        key = lazo.PAIRING.key_text()
-        for blob in phone.transcript:
-            self.assertNotIn(key, blob, "la clave larga salió antes de aprobar")
+        # 0.62: ni la maestra ni la clave de ese móvil salen antes de aprobar.
+        for key in (lazo.PAIRING.key_text(), lazo.PAIRING.device_key_text(phone.who)):
+            for blob in phone.transcript:
+                self.assertNotIn(key, blob, "la clave larga salió antes de aprobar")
 
     # 1. Ni QR ni PIN entregan la clave antes de aprobar; tras aprobar, sí.
     def test_qr_no_key_until_approved(self):
@@ -146,14 +147,14 @@ class Server(unittest.TestCase):
         self.assertTrue(lazo.APPROVALS.decide(phone.who, True))
         status, data = phone.wait()
         self.assertEqual(data["state"], "aprobado")
-        self.assertEqual(phone.key_from(data["box"]), lazo.PAIRING.key_text())
-        self.assertNotIn(lazo.PAIRING.key_text(), json.dumps(data), "la clave va sellada, no en claro")
+        self.assertEqual(phone.key_from(data["box"]), lazo.PAIRING.device_key_text(phone.who), "0.62: su clave, no la maestra")
+        self.assertNotIn(lazo.PAIRING.device_key_text(phone.who), json.dumps(data), "la clave va sellada, no en claro")
         self.assertNotEqual(token, lazo.PAIRING.token_text(), "la ficha del QR se renueva tras entregar")
         # 0.56: una consulta repetida justo después recibe lo mismo (antes era 401 y el móvil
         # volvía al PIN); pasado DELIVERED_SECONDS la sesión ya no vale.
         again = phone.wait()
         self.assertEqual(again[0], 200)
-        self.assertEqual(phone.key_from(again[1]["box"]), lazo.PAIRING.key_text())
+        self.assertEqual(phone.key_from(again[1]["box"]), lazo.PAIRING.device_key_text(phone.who))
         self.assertEqual(token == lazo.PAIRING.token_text(), False)
         lazo.PAIRING.sessions[phone.sid]["at"] -= protocol.PAIR_SECONDS
         self.assertEqual(phone.wait()[0], 401, "la sesión del saludo no se reutiliza para siempre")
@@ -172,7 +173,7 @@ class Server(unittest.TestCase):
         other = Phone(self.port)
         other.pair("pin", lazo.PAIRING.pin)
         lazo.APPROVALS.decide(other.who, True)
-        self.assertEqual(other.key_from(other.wait()[1]["box"]), lazo.PAIRING.key_text())
+        self.assertEqual(other.key_from(other.wait()[1]["box"]), lazo.PAIRING.device_key_text(other.who))
 
     def test_old_login_gives_no_key(self):
         status, raw = _req(self.port, "POST", "/api/login", json.dumps({"pin": lazo.PAIRING.pin}).encode(), {"Content-Type": "application/json"})
@@ -207,7 +208,8 @@ class Server(unittest.TestCase):
         key = phone.key_from(phone.wait()[1]["box"])
         saved = recordar.Store(self.tmp).load()
         self.assertIsNotNone(saved)
-        self.assertEqual(protocol.b64u(saved[0]), key)
+        self.assertEqual(protocol.b64u(saved[0]), lazo.PAIRING.key_text(), "se guarda la maestra")
+        self.assertEqual(lazo.PAIRING.device_key_text(phone.who), key)
         row = next(r for r in saved[1] if r["id"] == phone.who)
         self.assertTrue(row["label"] and row["fp"] and row["fecha"])
         self.assertNotIn(key.encode(), (self.tmp / recordar.KEY_FILE).read_bytes(), "la clave no se guarda en claro")
@@ -217,16 +219,16 @@ class Server(unittest.TestCase):
         lazo.PAIRING.rekey()
         lazo.APPROVALS.devices.clear()
         self.assertEqual(lazo.load_remembered(), 1)
-        self.assertEqual(lazo.PAIRING.key_text(), key, "misma clave tras reiniciar: reconexión sin QR/PIN")
+        self.assertEqual(lazo.PAIRING.device_key_text(phone.who), key, "misma clave tras reiniciar: reconexión sin QR/PIN")
         self.assertTrue(lazo.APPROVALS.is_ok(phone.who))
-        heads = {protocol.H_ID: phone.who, **lazo.PAIRING.sign("GET", "/api/aprobacion")}
+        heads = {protocol.H_ID: phone.who, **lazo.PAIRING.sign("GET", "/api/aprobacion", who=phone.who)}
         self.assertEqual(json.loads(_req(self.port, "GET", "/api/aprobacion", headers=heads)[1])["state"], "aprobado")
         # Olvidar todos (solo desde el propio PC)
         self.assertEqual(Phone(self.port).post("/api/olvidar", {})[0], 403)
         status, data = self.local("POST", "/api/olvidar", {})
         self.assertEqual(status, 200)
         self.assertIsNone(recordar.Store(self.tmp).load())
-        self.assertNotEqual(lazo.PAIRING.key_text(), key, "clave nueva")
+        self.assertNotEqual(lazo.PAIRING.device_key_text(phone.who), key, "clave nueva")
         self.assertFalse(lazo.APPROVALS.is_ok(phone.who), "hay que reaprobar")
         heads = {protocol.H_ID: phone.who, **protocol.Pairing().sign("GET", "/api/status")}
         self.assertEqual(_req(self.port, "GET", "/api/status", headers=heads)[0], 401)
@@ -329,7 +331,7 @@ console.log(pairProof(hk, "movil") + " " + openText(b64urlToBytes("{box}"), deri
         self.assertIn("Panel de LaZoo", (ROOT / "bandeja.py").read_text(encoding="utf-8"))
         self.assertIn("Panel de LaZoo", lazo.connect_page().decode())
         self.assertIn("grid-template-areas", MESA)
-        self.assertIn('"side clip files"', MESA)
+        self.assertIn('"side pasar pasar"', MESA)  # 0.63: portapapeles y archivos en «Pasar por wifi»
 
     # 6. Título largo: 2 líneas, sin cortar palabras.
     def test_long_title_two_lines(self):
@@ -420,12 +422,12 @@ console.log(fitWords(el, {json.dumps(title)}));
         self.assertIn("/api/pair/hello", JS)
 
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.61")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.61")
-        self.assertIn("0.61", MESA)
-        self.assertIn("<title>LaZoo 0.61</title>", HTML)
-        self.assertIn('android:versionName="0.61"', APK)
-        self.assertIn('android:versionCode="61"', APK)
+        self.assertEqual(lazo.VERSION, "0.63")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.63")
+        self.assertIn("0.63", MESA)
+        self.assertIn("<title>LaZoo 0.63</title>", HTML)
+        self.assertIn('android:versionName="0.63"', APK)
+        self.assertIn('android:versionCode="63"', APK)
 
 
 if __name__ == "__main__":

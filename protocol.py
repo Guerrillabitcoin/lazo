@@ -25,8 +25,15 @@ Emparejamiento (0.54: la clave larga solo sale tras aprobar)
     puede sacar la clave larga ni probar PINes sin conexión. Límite conocido: alguien que
     se ponga EN MEDIO durante el emparejamiento por PIN podría probar los 10^6 PINes con
     la prueba del móvil; con el QR (256 bits) no. Por eso el QR sigue siendo lo
-    recomendado. De la clave maestra salen dos claves con HMAC-SHA256:
-    `auth = HMAC(k, "lazo/auth/1")` y `seal = HMAC(k, "lazo/seal/1")`.
+    recomendado.
+
+Clave por móvil (0.62)
+    La clave maestra `k` no sale nunca del PC. Cada móvil recibe en `box` SU clave
+    `kd = HMAC(k, "lazo/dev/1|" + id)` y de ella saca `auth = HMAC(kd, "lazo/auth/1")` y
+    `seal = HMAC(kd, "lazo/seal/1")` (el móvil no cambia: trata `kd` como su clave). El PC
+    comprueba cada firma y abre cada sello con la clave del `X-Lazo-Id` que dice el móvil,
+    así que un móvil no puede hacerse pasar por otro cambiando su id, y expulsar a uno no
+    deja a nadie con la clave de los demás. Hasta 0.61 todos compartían `k`.
 
 Firma de peticiones
     Cada petición del móvil lleva `X-Lazo-Id` (id del mando), `X-Lazo-T`
@@ -273,6 +280,28 @@ class Pairing:
         self.key = key
         self.auth_key = derive(key, "lazo/auth/1")
         self.seal_key = derive(key, "lazo/seal/1")
+        self._devices: dict[str, tuple[bytes, bytes]] = {}  # 0.62: id -> (auth, seal) de ese móvil
+
+    # 0.62: clave de cada móvil (ver «Clave por móvil» arriba)
+
+    def device_key(self, who: str) -> bytes:
+        return derive(self.key, "lazo/dev/1|" + str(who))
+
+    def device_key_text(self, who: str) -> str:
+        return b64u(self.device_key(who))
+
+    def _keys(self, who: str | None) -> tuple[bytes, bytes]:
+        """(auth, seal) del móvil `who`; sin `who`, las de la clave maestra (solo el propio PC y pruebas)."""
+        if not who:
+            return self.auth_key, self.seal_key
+        keys = self._devices.get(who)
+        if keys is None:
+            kd = self.device_key(who)
+            keys = (derive(kd, "lazo/auth/1"), derive(kd, "lazo/seal/1"))
+            if len(self._devices) > 256:
+                self._devices.clear()
+            self._devices[who] = keys
+        return keys
 
     def rekey(self) -> None:
         """Clave y ficha nuevas: todo móvil con la clave vieja deja de valer."""
@@ -410,29 +439,34 @@ class Pairing:
                 row["at"] = time.time() - PAIR_SECONDS + DELIVERED_SECONDS
         if first and row["mode"] == "qr":
             self.new_token()  # un QR fotografiado no vale para otro dispositivo
-        return b64u(seal(self.key_text().encode(), derive(row["hk"], "lazo/pair/box/1")))
+        # 0.62: la clave de ESTE móvil, nunca la maestra.
+        return b64u(seal(self.device_key_text(row["who"]).encode(), derive(row["hk"], "lazo/pair/box/1")))
 
     # Firma de peticiones
 
-    def sign(self, method: str, path: str, length: int = 0, now: float | None = None) -> dict[str, str]:
-        """Cabeceras de firma, como las pone un mando. Sirve para pruebas y para el cliente en Python."""
+    def sign(self, method: str, path: str, length: int = 0, now: float | None = None, who: str | None = None) -> dict[str, str]:
+        """Cabeceras de firma, como las pone el móvil `who` (sin `who`, con la clave maestra).
+        Sirve para pruebas y para el cliente en Python."""
         stamp = int((time.time() if now is None else now) * 1000)
         nonce = secrets.token_hex(16)
         return {
             H_T: str(stamp),
             H_N: nonce,
-            H_S: sign_request(self.auth_key, method, path, stamp, nonce, length),
+            H_S: sign_request(self._keys(who)[0], method, path, stamp, nonce, length),
         }
 
-    def verify(self, method: str, path: str, length: int, stamp: str, nonce: str, sig: str) -> str:
-        """Devuelve "ok", "firma", "hora" o "repetida". Una firma buena solo vale una vez."""
+    def verify(self, method: str, path: str, length: int, stamp: str, nonce: str, sig: str, who: str | None = None) -> str:
+        """Devuelve "ok", "firma", "hora" o "repetida". Una firma buena solo vale una vez.
+
+        0.62: con `who`, la firma tiene que ser de la clave de ese móvil. El servidor siempre
+        lo pasa para las peticiones de fuera; sin `who` solo vale la clave maestra."""
         try:
             when = int(stamp)
         except ValueError:
             return "firma"
         if not (8 <= len(nonce) <= 64 and all(c in "0123456789abcdef" for c in nonce)):
             return "firma"
-        expect = sign_request(self.auth_key, method, path, when, nonce, length)
+        expect = sign_request(self._keys(who)[0], method, path, when, nonce, length)
         if not hmac.compare_digest(sig.lower(), expect):
             return "firma"
         now = time.time()
@@ -473,14 +507,14 @@ class Pairing:
 
     # Sello con la clave de este emparejamiento
 
-    def seal(self, data: bytes) -> bytes:
-        return seal(data, self.seal_key)
+    def seal(self, data: bytes, who: str | None = None) -> bytes:
+        return seal(data, self._keys(who)[1])
 
-    def open(self, blob: bytes) -> bytes:
-        return open_sealed(blob, self.seal_key)
+    def open(self, blob: bytes, who: str | None = None) -> bytes:
+        return open_sealed(blob, self._keys(who)[1])
 
-    def open_to(self, source, length: int, dest: Path) -> None:
-        open_sealed_to(source, length, dest, self.seal_key)
+    def open_to(self, source, length: int, dest: Path, who: str | None = None) -> None:
+        open_sealed_to(source, length, dest, self._keys(who)[1])
 
 
 # --- WebSocket del ratón -----------------------------------------------------
@@ -600,7 +634,7 @@ def pointer_loop(
             if opcode in (0x1, 0x2) and require_seal and not (opcode == 0x2 and payload.startswith(MAGIC)):
                 raise ProtocolError("trama sin sellar")
             if opcode == 0x2 and payload.startswith(MAGIC):
-                payload = pairing.open(payload)
+                payload = pairing.open(payload, who if require_seal else None)  # 0.62: clave de ese móvil
             if opcode == 0x2 and len(payload) == 12 and payload[:4] == b"PIN2":
                 # 0.48: eco con la hora del PC al recibir y al contestar, para separar red y proceso.
                 ws_send(sock, 0x2, payload + struct.pack("<dd", got * 1000, time.perf_counter() * 1000))

@@ -88,7 +88,7 @@ class Servidor(Base):
         [h.join() for h in hilos]
         self.assertEqual([r[0] for r in results], [200, 200, 200])
         keys = {phone.key_from(r[1]["box"]) for r in results}
-        self.assertEqual(keys, {lazo.PAIRING.key_text()})
+        self.assertEqual(keys, {lazo.PAIRING.device_key_text(phone.who)})
         return phone
 
     def test_pin_consultas_cruzadas(self):
@@ -238,7 +238,8 @@ class Navegador(Base):
         for v in vistos[dentro[0]:]:
             self.assertFalse(v[0], f"salió de la app tras entrar: {v}")
             self.assertTrue(v[1], f"volvió al PIN tras entrar: {v}")
-        self.assertEqual(clave, lazo.PAIRING.key_text())
+        aprobados = {d["id"] for d in lazo.APPROVALS.listing() if d["state"] == "aprobado"}
+        self.assertIn(clave, {lazo.PAIRING.device_key_text(w) for w in aprobados}, "0.62: la clave de ese móvil")
         self.assertFalse(recarga[0], f"tras recargar no se reconecta solo: {recarga}")
 
     def test_pin_red_lenta(self):
@@ -290,13 +291,13 @@ class Logo(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.61")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.61")
-        self.assertIn("<title>LaZoo 0.61</title>", HTML)
-        self.assertIn("/logo.js?v=0.61", MESA)
-        self.assertIn('android:versionName="0.61"', APK)
-        self.assertIn('android:versionCode="61"', APK)
-        self.assertIn("# LaZoo 0.61", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertEqual(lazo.VERSION, "0.63")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.63")
+        self.assertIn("<title>LaZoo 0.63</title>", HTML)
+        self.assertIn("/logo.js?v=0.63", MESA)
+        self.assertIn('android:versionName="0.63"', APK)
+        self.assertIn('android:versionCode="63"', APK)
+        self.assertIn("# LaZoo 0.63", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 

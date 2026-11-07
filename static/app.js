@@ -18,15 +18,33 @@ function onThisPcPage() {
   return ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 }
 localStorage.removeItem("lazo-token");
-const deviceId = localStorage.getItem("lazo-id") || (() => {
-  const fresh = toHex(crypto.getRandomValues(new Uint8Array(16)));
-  localStorage.setItem("lazo-id", fresh);
-  return fresh;
+const deviceId = (() => {
+  let id = localStorage.getItem("lazo-id") || "";
+  // 0.63: en la APK, un id fijo para este móvil aunque el PC cambie de IP (otro origen,
+  // otro localStorage). Antes salían dos «sesiones» del mismo móvil en el PC.
+  try {
+    const app = window.LaZooApp;
+    if (app && typeof app.deviceId === "function") {
+      const fixed = String(app.deviceId(/^[0-9a-f]{32}$/.test(id) ? id : "") || "");
+      if (/^[0-9a-f]{32}$/.test(fixed)) {
+        if (fixed !== id) {
+          localStorage.removeItem("lazo-key");  // la clave era de otro id: se empareja una vez
+          localStorage.setItem("lazo-id", fixed);
+        }
+        return fixed;
+      }
+    }
+  } catch (_err) { /* APK vieja: id de esta página */ }
+  if (!id) {
+    id = toHex(crypto.getRandomValues(new Uint8Array(16)));
+    localStorage.setItem("lazo-id", id);
+  }
+  return id;
 })();
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.61";
+const PAGE_VERSION = "0.63";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -119,7 +137,6 @@ const views = {
   youtube: document.querySelector("#view-youtube"),
   spotify: document.querySelector("#view-spotify"),
   bridge: document.querySelector("#view-bridge"),
-  notes: document.querySelector("#view-notes"),
   system: document.querySelector("#view-system"),
   lab: document.querySelector("#view-lab"),
   about: document.querySelector("#view-about"),
@@ -127,11 +144,10 @@ const views = {
 
 const TOOLS = [
   { id: "mouse", name: "Ratón" },
-  { id: "bridge", name: "Puente Wi-Fi" },
+  { id: "bridge", name: "Pasar por wifi" },  // 0.63: puente + notas + portapapeles en uno
   { id: "windows", name: "Ventanas" },
   { id: "youtube", name: "YouTube" },
   { id: "spotify", name: "Spotify" },
-  { id: "notes", name: "Notas" },
   { id: "system", name: "Sistema" },
   { id: "lab", name: "Pruebas" },
   { id: "about", name: "Sobre LaZoo" },
@@ -259,7 +275,7 @@ function openCube(id) {
   if (id === "windows") loadWindows();
   if (id === "system") loadSystem();
   if (id === "spotify") refreshStatus();
-  if (id === "notes" || id === "bridge") syncClipboard();
+  if (id === "bridge") syncClipboard();
   if (id === "about") aboutOpen();
   mediaWatch(id === "youtube" || id === "spotify");
   if (id === "youtube" || id === "spotify") {
@@ -628,6 +644,8 @@ function renderClips(items) {
   const list = document.querySelector("#clips");
   if (!list) return;
   list.replaceChildren();
+  const clear = document.querySelector("#clips-clear");
+  if (clear) clear.hidden = !items.length;
   if (!items.length) {
     const empty = document.createElement("li");
     empty.className = "hint";
@@ -651,8 +669,22 @@ function renderClips(items) {
     copy.className = "copy copy-pill";
     copy.textContent = "Copiar";
     copy.addEventListener("click", () => copyToPhone(item.text));
+    const trash = document.createElement("button");
+    trash.type = "button";
+    trash.className = "clip-trash";
+    trash.setAttribute("aria-label", "Borrar esta nota");
+    trash.textContent = "🗑";
+    trash.addEventListener("click", async () => {
+      if (!(await askConfirm("¿Borrar esta nota?", "Se borra del móvil y del PC.", "Borrar"))) return;
+      try {
+        renderClips((await api("/api/clipboard/borrar", { id: item.id })).items || []);
+        say("Nota borrada");
+      } catch (err) {
+        say(err.message);
+      }
+    });
     row.className = "clip-row";
-    row.append(button, copy);
+    row.append(button, copy, trash);
     list.append(row);
   }
 }
@@ -708,7 +740,7 @@ function renderFiles(items) {
 }
 
 async function syncClipboard() {
-  if (document.hidden || (tab !== "notes" && tab !== "bridge")) return;
+  if (document.hidden || tab !== "bridge") return;
   try {
     const res = await lzFetch("/api/clipboard");
     if (res.status === 401) return;
@@ -720,6 +752,16 @@ async function syncClipboard() {
     renderFiles(listed.files || []);
   } catch (_err) {}
 }
+
+document.querySelector("#clips-clear").addEventListener("click", async () => {
+  if (!(await askConfirm("¿Borrar todas las notas?", "Se borran del móvil y del PC. No se puede deshacer.", "Borrar todas"))) return;
+  try {
+    renderClips((await api("/api/clipboard/borrar", { all: true })).items || []);
+    say("Notas borradas");
+  } catch (err) {
+    say(err.message);
+  }
+});
 
 document.querySelector("#clip-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -1423,7 +1465,8 @@ renderDock();
 const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
 const fromQr = hash.get("p") || "";
 const keyFromLink = localStorage.getItem("lazo-key") || "";
-const fromTray = hash.get("pastilla") || "";
+// 0.63: «notas» y «puente» viven ahora en «Pasar por wifi».
+const fromTray = ({ notes: "bridge", notas: "bridge", puente: "bridge" })[hash.get("pastilla") || ""] || hash.get("pastilla") || "";
 const onThisPc = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 if (fromQr || fromTray) history.replaceState(null, "", location.pathname);
 if (keyFromLink) {
@@ -3086,7 +3129,17 @@ function aboutDonations(items) {
   });
 }
 
-const DEV_STATES = { aprobado: "conectado", pendiente: "esperando aprobación", rechazado: "rechazado" };
+const DEV_STATES = { aprobado: "aprobado", pendiente: "esperando aprobación", rechazado: "rechazado" };
+
+/* 0.63: «visto hace…» para distinguir el móvil de verdad de un id viejo. */
+function seenText(secs) {
+  if (Number(secs) < 0) return "no desde que se abrió LaZoo";
+  const s = Math.max(0, Number(secs) || 0);
+  if (s < 20) return "ahora";
+  if (s < 3600) return `hace ${Math.max(1, Math.round(s / 60))} min`;
+  if (s < 86400) return `hace ${Math.round(s / 3600)} h`;
+  return `hace ${Math.round(s / 86400)} d`;
+}
 
 async function aboutDevices() {
   const list = document.querySelector("#about-devs");
@@ -3101,13 +3154,18 @@ async function aboutDevices() {
   devices.forEach((d) => {
     const li = document.createElement("li");
     const text = document.createElement("span");
-    text.textContent = `${d.label} · ${d.ip} · ${DEV_STATES[d.state] || d.state}${d.id === data.me ? " (este)" : ""}`;
+    const mine = d.id === data.me;
+    text.textContent = [mine ? "Este móvil" : d.label, d.ip, "id " + (d.short || d.id.slice(0, 4)),
+      d.duplicado ? "id antiguo de un móvil (si vuelve, entra solo)" : DEV_STATES[d.state] || d.state,
+      "visto " + seenText(d.ago)].filter(Boolean).join(" · ");
+    if (d.duplicado) li.className = "dev-old";
     li.append(text);
     if (d.state === "aprobado") {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = "Expulsar";
+      b.textContent = mine ? "Salir" : d.duplicado ? "Quitar" : "Expulsar";
       b.addEventListener("click", async () => {
+        if (mine && !(await askConfirm("¿Salir de este PC?", "Este móvil tendrá que volver a escanear el QR o poner el PIN.", "Salir"))) return;
         await api("/api/dispositivos/expulsar", { id: d.id }).catch((err) => say(err.message));
         if (d.id !== data.me) aboutDevices();
         else refreshStatus();
@@ -3153,12 +3211,56 @@ document.querySelector("#about-check").addEventListener("click", async (ev) => {
 });
 
 /* Con la pestaña oculta no se consulta al PC (batería). Al volver, se pone al día. */
+let hiddenAt = 0;
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden || app.hidden) return;
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  if (app.hidden) return;
+  if (hiddenAt && Date.now() - hiddenAt > WAKE_AFTER_MS) { wakeUp("visible"); return; }
   refreshStatus();
   syncClipboard();
   if (tab === "youtube" || tab === "spotify") mediaPoll();
 });
+
+/* 0.63: al sacar el móvil del bolsillo (bloqueado minutos, horas o días), reconectar YA.
+   - El WebSocket del ratón puede quedar «medio muerto» (abierto para el navegador, cerrado de
+     verdad): se cierra y se abre uno nuevo, sin esperar al primer toque.
+   - La Wi-Fi tarda 1-3 s en volver: se insiste unas veces seguidas en vez de esperar al
+     sondeo de 4 s, y sin enseñar «LaZoo cerrado» mientras tanto.
+   - En la APK la página a veces ni se entera de que estuvo dormida: un reloj que se queda
+     parado más de WAKE_AFTER_MS también cuenta como despertar (y la APK nueva avisa en onResume).
+   La clave del móvil no caduca: no hace falta QR ni PIN para volver. */
+const WAKE_AFTER_MS = 12000;
+const WAKE_TRIES = [0, 600, 1300, 2300, 4000, 7000];
+let wakeRun = 0;
+let lastTick = Date.now();
+async function wakeUp(_why) {
+  if (app.hidden || document.hidden || !authKey) return;
+  const run = ++wakeRun;
+  try { if (pointerSocket) pointerSocket.close(); } catch (_err) { /* ya estaba cerrado */ }
+  pointerSocket = null;
+  for (const wait of WAKE_TRIES) {
+    if (wait) await new Promise((ok) => window.setTimeout(ok, wait));
+    if (run !== wakeRun || document.hidden || app.hidden) return;
+    try {
+      await api("/api/status", null, "GET");
+      missedPolls = 0;
+      setLink("on");
+      connectPointer();
+      syncClipboard();
+      if (tab === "youtube" || tab === "spotify") mediaPoll();
+      return;
+    } catch (_err) { /* la Wi-Fi aún no ha vuelto: otra vez en un momento */ }
+  }
+  refreshStatus();  // sigue sin PC: el sondeo normal dirá «LaZoo cerrado»
+}
+window.setInterval(() => {
+  const now = Date.now();
+  if (now - lastTick > WAKE_AFTER_MS) wakeUp("siesta");
+  lastTick = now;
+}, 2000);
+window.addEventListener("online", () => wakeUp("red"));
+window.addEventListener("pageshow", (event) => { if (event.persisted) wakeUp("vuelta"); });
+window.lazooDespierta = () => wakeUp("apk");
 
 /* ---- Escanear el QR del PC ----
    Por HTTP en la Wi-Fi (sin certificado) Chrome y Safari NO dejan usar la cámara en
@@ -3336,6 +3438,16 @@ async function qrLive() {
 }
 
 function qrStart() {
+  // En la APK la página del PC va por HTTP y el WebView abre el selector de archivos en vez
+  // de la cámara. El escáner propio de la APK sí tiene cámara en directo: se vuelve a él.
+  const appBridge = window.LaZooApp;
+  try {
+    if (appBridge && typeof appBridge.scan === "function") {
+      qrStopLive();
+      appBridge.scan();
+      return;
+    }
+  } catch (_err) { /* APK vieja: sigue como en el navegador */ }
   // Cámara en directo solo donde el navegador la permite (HTTPS o localhost).
   if (window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
     qrLoadLib().catch(() => {});
@@ -3497,5 +3609,31 @@ if (ytSigues) {
   PREF_PUSH.push(syncSigues);
   ytSigues.addEventListener("change", () => {
     api("/api/sigues", { on: ytSigues.checked }).then((st) => { ytSigues.checked = !!st.on; }).catch(() => syncSigues());
+  });
+}
+
+// 0.63: el PC no se bloquea ni se duerme mientras se usa desde el móvil (despierto.py).
+const sysDespierto = document.querySelector("#sys-despierto");
+if (sysDespierto) {
+  const syncDespierto = () => api("/api/despierto", {}).then((st) => {
+    sysDespierto.disabled = !st.available || !!st.disabled;
+    if (document.activeElement !== sysDespierto) sysDespierto.checked = !!st.on;
+  }).catch(() => {});
+  PREF_PUSH.push(syncDespierto);
+  sysDespierto.addEventListener("change", () => {
+    api("/api/despierto", { on: sysDespierto.checked }).then((st) => { sysDespierto.checked = !!st.on; }).catch(() => syncDespierto());
+  });
+}
+
+// 0.63: saltar anuncios de YouTube (anuncios.py). Mismo patrón que «¿Sigues ahí?».
+const ytAnuncios = document.querySelector("#yt-anuncios");
+if (ytAnuncios) {
+  const syncAnuncios = () => api("/api/anuncios", {}).then((st) => {
+    ytAnuncios.disabled = !st.available || !!st.disabled;
+    if (document.activeElement !== ytAnuncios) ytAnuncios.checked = !!st.on;
+  }).catch(() => {});
+  PREF_PUSH.push(syncAnuncios);
+  ytAnuncios.addEventListener("change", () => {
+    api("/api/anuncios", { on: ytAnuncios.checked }).then((st) => { ytAnuncios.checked = !!st.on; }).catch(() => syncAnuncios());
   });
 }

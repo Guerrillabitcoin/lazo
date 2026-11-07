@@ -1,4 +1,4 @@
-# LaZoo 0.61
+# LaZoo 0.63
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -95,7 +95,11 @@ YouTube se controla con los atajos del reproductor (`k`, `j`, `l`, flechas). Laz
 - **Linux en Wayland:** el ratón y el teclado a veces no entran. Si no se mueve el cursor, entra en una sesión «GNOME en Xorg» o «Ubuntu en Xorg». El volumen con PipeWire y Spotify con `playerctl` sí suelen funcionar en Wayland.
 - **Windows:** el cursor enorme usa el tamaño de puntero del sistema. Si no cambia al momento, cierra sesión una vez.
 
-## Puente Wi-Fi
+## Pasar por wifi (antes «Puente Wi-Fi» y «Notas»)
+
+Desde 0.63 las notas, el portapapeles compartido y los archivos están en una sola pestaña, «Pasar por wifi», y en una sola caja del Panel. Nada pasa por internet: va directo entre el móvil y el PC por tu Wi-Fi, cifrado (LZ2) con una clave que solo tienen el PC y cada móvil aceptado. Las notas se guardan cifradas en el PC (Windows: con tu cuenta; Linux y Mac: con una clave local solo legible por tu usuario) en la carpeta privada de LaZoo, y se pueden borrar una a una o todas desde el móvil. Lo que un gestor de contraseñas marca como privado al copiarlo no entra en las notas.
+
+### Puente Wi-Fi
 
 - **Del móvil al PC:** «Enviar archivos al PC» o «Enviar una carpeta». Cualquier tipo de archivo, varios a la vez y sin el tope de 80 MB (por defecto hasta 8 GB por archivo; se cambia con `--max-gb` o la variable `LAZO_MAX_GB`). Llega a la carpeta `Fotos` junto a LaZoo; «Abrir carpeta» en la ventana del PC la abre.
 - Va en trozos de 4 MB, cada uno cifrado y firmado. Si se corta la Wi-Fi, reintenta solo. Si el PC se reinicia, vuelve a escanear el QR y elige el mismo archivo: sigue donde se quedó. Al final se comprueba el SHA-256 del archivo entero. Antes de empezar mira si cabe en el disco.

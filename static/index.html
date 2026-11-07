@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.61</title>
-    <link rel="stylesheet" href="/app.css?v=0.61" />
+    <title>LaZoo 0.63</title>
+    <link rel="stylesheet" href="/app.css?v=0.63" />
     <link rel="icon" type="image/svg+xml" href="/img/infinito-naranja.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/img/icono-192.png" />
     <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
@@ -20,7 +20,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.61</p>
+          <p class="ver">0.63</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -219,6 +219,7 @@
               <button type="button" data-yt="captions">Subtítulos</button>
             </div>
             <label class="diag-smooth yt-sigues"><input id="yt-sigues" type="checkbox" checked /> Evitar el aviso «¿Sigues ahí?» de YouTube (el PC pulsa «Sí» solo, sin mover el ratón)</label>
+            <label class="diag-smooth yt-sigues"><input id="yt-anuncios" type="checkbox" checked /> Saltar anuncios (el PC pulsa «Saltar» en cuanto YouTube lo deja; la flecha ⏭ también lo intenta)</label>
             <form id="yt-search" class="phrase">
               <input id="yt-q" maxlength="120" placeholder="Buscar" />
               <button type="submit">Buscar</button>
@@ -252,6 +253,22 @@
 
         <div id="view-bridge" class="view" hidden>
           <article class="deck">
+            <p class="pasar-title">Pasar por wifi</p>
+            <p class="notes-info pasar-privado"><b>No pasa por internet.</b> Va directo entre este móvil y el PC por tu Wi-Fi, en un puente cifrado (LZ2) con una clave que solo tienen este móvil y el PC. Quien escuche la Wi-Fi solo ve datos cifrados. Las notas se guardan cifradas en el PC (no en ninguna nube) y puedes borrarlas cuando quieras.</p>
+            <p class="sys-title">Notas y portapapeles</p>
+            <form id="clip-form" class="phrase">
+              <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Nota"></textarea>
+              <div class="clip-actions">
+                <button type="submit">Guardar</button>
+                <button type="button" id="clip-to-pc" class="clip-to-pc">Al PC</button>
+              </div>
+            </form>
+            <p class="hint">«Guardar» la deja en la lista. «Al PC» además la pone en el portapapeles del PC, lista para Ctrl+V. Lo que copies en el PC también aparece aquí. Nada llega solo al móvil: para traerla, pulsa «Copiar».</p>
+            <ul id="clips" class="list"></ul>
+            <button id="clips-clear" type="button" class="clips-clear" hidden>Borrar todas las notas</button>
+          </article>
+          <article class="deck">
+            <p class="sys-title">Archivos</p>
             <div class="photo-actions">
               <label class="file-label file-any">Archivos<input id="send-input" type="file" multiple hidden /></label>
               <label class="file-label">Fotos y vídeos<input id="send-media" type="file" accept="image/*,video/*" multiple hidden /></label>
@@ -270,20 +287,6 @@
             <p id="photo-progress" class="hint" aria-live="polite"></p>
             <p class="sys-title">Del PC al móvil</p>
             <ul id="files" class="list"></ul>
-          </article>
-        </div>
-
-        <div id="view-notes" class="view" hidden>
-          <article class="deck">
-            <form id="clip-form" class="phrase">
-              <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Nota"></textarea>
-              <div class="clip-actions">
-                <button type="submit">Guardar</button>
-                <button type="button" id="clip-to-pc" class="clip-to-pc">Al PC</button>
-              </div>
-            </form>
-            <p class="notes-info">Estas notas no salen a internet: van solo por tu red local, cifradas entre el móvil y el PC. Sirven para pasar una clave o una contraseña de un dispositivo a otro en segundos y recuperarla después. En el PC se guardan las últimas en un archivo local: en Windows, cifrado con tu cuenta; en Linux y Mac, sin cifrar. Aquí también aparece lo que copies en el PC. «Al PC» guarda la nota y la deja en el portapapeles del PC, lista para pegar con Ctrl+V. Nada pasa solo al móvil: para traerla, pulsa «Copiar».</p>
-            <ul id="clips" class="list"></ul>
           </article>
         </div>
 
@@ -306,6 +309,7 @@
             <div id="sys-swap-pick" class="screen-buttons" hidden></div>
             <p id="sys-swap-note" class="screen-note"></p>
             <p class="sys-title">SESIÓN</p>
+            <label class="diag-smooth"><input id="sys-despierto" type="checkbox" checked /> No bloquear ni dormir el PC mientras uso el móvil (hasta 1 h 21 min después del último uso; el cursor no se mueve)</label>
             <button id="sys-lock" type="button" class="lock-red">Bloquear PC</button>
             <p id="sys-na" class="screen-note" hidden></p>
           </article>
@@ -370,7 +374,7 @@
             <div class="about-head">
               <span class="lz-logo about-logo" data-estado="conectado" data-fijo="conectado" title="LaZoo"></span>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.61</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.63</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -429,8 +433,8 @@
         </div>
       </section>
     </main>
-    <script src="/logo.js?v=0.61"></script>
-    <script src="/seal.js?v=0.61"></script>
-    <script src="/app.js?v=0.61"></script>
+    <script src="/logo.js?v=0.63"></script>
+    <script src="/seal.js?v=0.63"></script>
+    <script src="/app.js?v=0.63"></script>
   </body>
 </html>

@@ -126,6 +126,9 @@ def encoded() -> str:
     return base64.b64encode(ps_script().encode("utf-16-le")).decode("ascii")
 
 
+_SAVE_LOCK = threading.Lock()
+
+
 def _ajustes_file() -> Path:
     import recordar
 
@@ -133,9 +136,23 @@ def _ajustes_file() -> Path:
 
 
 class Sigues:
+    # 0.63: lo mismo sirve para saltar anuncios (anuncios.py cambia estos valores).
+    KEY = "sigues"            # interruptor en ajustes.json
+    COUNT = "contador"        # contador en ajustes.json
+    NAME = "lazo-sigues"      # nombre del hilo
+    DEFAULT = DEFAULT_ON
+    MESSAGE = "  YouTube preguntó «¿Sigues ahí?»: contestado «Sí» sin tocar el ratón."
+
+    def interval(self) -> float:
+        return INTERVALO
+
+    def script(self) -> str:
+        return encoded()
+
     def __init__(self, find: Callable[[], str | None] | None = None,
                  probe: Callable[[str], dict] | None = None, file: Path | None = None) -> None:
         self.lock = threading.Lock()
+        self.talk = threading.Lock()  # 0.63: una pregunta al PowerShell cada vez (bucle y flecha)
         self.find = find
         self.probe = probe
         self.file = file
@@ -165,15 +182,15 @@ class Sigues:
         p = self._path()
         try:
             data = json.loads(p.read_text(encoding="utf-8")) if p and p.is_file() else {}
-            return bool(data.get("sigues", DEFAULT_ON))
+            return bool(data.get(self.KEY, self.DEFAULT))
         except Exception:  # noqa: BLE001 (archivo roto: valor por defecto)
-            return DEFAULT_ON
+            return self.DEFAULT
 
     def _load_count(self) -> None:
         p = self._path()
         try:
             data = json.loads(p.read_text(encoding="utf-8")) if p and p.is_file() else {}
-            c = data.get("contador") or {}
+            c = data.get(self.COUNT) or {}
             self.total = max(0, int(c.get("total", 0)))
             self.ultimo = float(c.get("ultimo", 0) or 0)
             self.dia = str(c.get("dia", ""))
@@ -205,6 +222,10 @@ class Sigues:
         p = self._path()
         if not p:
             return
+        with _SAVE_LOCK:  # 0.63: sigues y anuncios comparten ajustes.json
+            self._save_now(p)
+
+    def _save_now(self, p: Path) -> None:
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             data = {}
@@ -213,8 +234,8 @@ class Sigues:
                     data = json.loads(p.read_text(encoding="utf-8"))
                 except ValueError:
                     data = {}
-            data["sigues"] = self.on
-            data["contador"] = {"total": self.total, "hoy": self.hoy, "dia": self.dia, "ultimo": self.ultimo}
+            data[self.KEY] = self.on
+            data[self.COUNT] = {"total": self.total, "hoy": self.hoy, "dia": self.dia, "ultimo": self.ultimo}
             tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
             tmp.write_text(json.dumps(data), encoding="utf-8")
             os.replace(tmp, p)
@@ -228,7 +249,7 @@ class Sigues:
         return {"on": self.on and not self.disabled, "available": self.available(), "disabled": self.disabled,
                 "pulsados": self.pulsados, "ultimo": self.ultimo,
                 "total": self.total, "hoy": self._hoy(), "sesion": self.pulsados, "ultima_ms": self.ultima_ms,
-                "revisiones": self.revisiones, "error": self.error, "intervalo_s": INTERVALO}
+                "revisiones": self.revisiones, "error": self.error, "intervalo_s": self.interval()}
 
     def set_on(self, on: object, reset: bool = False) -> dict[str, Any]:
         if reset:
@@ -257,17 +278,21 @@ class Sigues:
         if res.get("pulsado") and res.get("verificado"):
             self.contar()
             try:
-                print("  YouTube preguntó «¿Sigues ahí?»: contestado «Sí» sin tocar el ratón.", flush=True)
+                print(self.MESSAGE, flush=True)
             except Exception:  # noqa: BLE001 (sin consola o consola cp1252)
                 pass
         return res
 
     def _probe_ps(self, hwnd: str) -> dict:
+        with self.talk:
+            return self._probe_ps_now(hwnd)
+
+    def _probe_ps_now(self, hwnd: str) -> dict:
         with self.lock:
             if not self.proc or self.proc.poll() is not None:
                 self.proc = subprocess.Popen(
                     ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                     "-EncodedCommand", encoded()],
+                     "-EncodedCommand", self.script()],
                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                     text=True, encoding="utf-8", errors="replace", bufsize=1,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -307,7 +332,7 @@ class Sigues:
                 proc.kill()
 
     def _loop(self) -> None:
-        while not self.stop_ev.wait(INTERVALO):
+        while not self.stop_ev.wait(self.interval()):
             if not self.on:
                 continue
             try:
@@ -322,7 +347,7 @@ class Sigues:
         if self.thread and self.thread.is_alive():
             return True
         self.stop_ev.clear()
-        self.thread = threading.Thread(target=self._loop, name="lazo-sigues", daemon=True)
+        self.thread = threading.Thread(target=self._loop, name=self.NAME, daemon=True)
         self.thread.start()
         return True
 

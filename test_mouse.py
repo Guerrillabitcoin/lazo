@@ -362,11 +362,11 @@ def test_remote_security() -> None:
 
         # Un mando remoto.
         lazo.Handler._loopback = lambda self: False
-        sealed = pairing.seal(move)
+        sealed = pairing.seal(move, ident)  # 0.62: cada móvil sella con su clave
         path = "/api/move"
 
         def signed(length: int = len(sealed), nonce_from=None) -> dict[str, str]:
-            return {"Content-Type": "application/octet-stream", protocol.H_ID: ident, **pairing.sign("POST", path, length)}
+            return {"Content-Type": "application/octet-stream", protocol.H_ID: ident, **pairing.sign("POST", path, length, who=ident)}
 
         headers = signed()
         status, _ = _post(port, path, sealed, headers)
@@ -386,20 +386,20 @@ def test_remote_security() -> None:
             raise SystemExit("aceptó una firma falsa")
         if _post(port, path, sealed, {"Content-Type": "application/octet-stream"})[0] != 401:
             raise SystemExit("aceptó una petición sin firma")
-        late = {**signed(), **pairing.sign("POST", path, len(sealed), now=time.time() - 300)}
+        late = {**signed(), **pairing.sign("POST", path, len(sealed), now=time.time() - 300, who=ident)}
         status, body = _post(port, path, sealed, late)
         if status != 401 or b"reloj" not in body:
             raise SystemExit("no avisó del reloj")
 
         # Websocket del mando: firmado por la consulta y con tramas selladas.
-        sig = pairing.sign("GET", "/ws", 0)
+        sig = pairing.sign("GET", "/ws", 0, who=ident)
         query = f"?i={ident}&t={sig[protocol.H_T]}&n={sig[protocol.H_N]}&s={sig[protocol.H_S]}"
         sock, head = _ws_open(port, query=query)
         if b"101" not in head.split(b"\r\n", 1)[0]:
             raise SystemExit(f"websocket firmado rechazado: {head[:80]}")
-        _ws_send(sock, pairing.seal(struct.pack("<ii", 7, -9)))
+        _ws_send(sock, pairing.seal(struct.pack("<ii", 7, -9), ident))
         _ws_send(sock, struct.pack("<ii", 100, 100))  # sin sellar: corta
-        _ws_send(sock, pairing.seal(struct.pack("<ii", 5, 5)))
+        _ws_send(sock, pairing.seal(struct.pack("<ii", 5, 5), ident))
         deadline = time.perf_counter() + 1
         while (7, -9) not in seen and time.perf_counter() < deadline:
             time.sleep(0.01)

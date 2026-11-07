@@ -25,6 +25,9 @@ KEY_FILE = "clave.bin"
 LOCAL_FILE = "clave-local.bin"
 LIST_FILE = "dispositivos.json"
 DEFAULT_ON = True
+# 0.62: marca de la clave maestra guardada desde que cada móvil tiene su propia clave. Una clave
+# guardada sin marca es de 0.54-0.61, cuando los móviles tenían la maestra: no se reutiliza.
+KEY_TAG = b"LZK3"
 
 
 def data_dir() -> Path:
@@ -135,7 +138,7 @@ class Store:
         return [r for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)][:100]
 
     def _save_list(self, on: bool, devices: list[dict]) -> None:
-        clean = [{k: str(r.get(k, ""))[:80] for k in ("id", "label", "fp", "fecha")} for r in devices][:100]
+        clean = [{k: str(r.get(k, ""))[:80] for k in ("id", "label", "fp", "fecha", "ip", "duplicado")} for r in devices][:100]
         _write_private(self.folder / LIST_FILE, json.dumps({"recordar": on, "dispositivos": clean}, ensure_ascii=False, indent=1).encode())
 
     # Clave
@@ -165,19 +168,25 @@ class Store:
         """Guarda clave y lista (solo si «Recordar» está activo)."""
         if not self.enabled():
             return
-        _write_private(self.folder / KEY_FILE, self._protect(key))
+        _write_private(self.folder / KEY_FILE, self._protect(KEY_TAG + key))
         self._save_list(True, devices)
 
-    def load(self) -> tuple[bytes, list[dict]] | None:
+    def load(self) -> tuple[bytes | None, list[dict]] | None:
+        """(clave, aprobados), o None si no hay nada recordado.
+
+        0.62: una clave de 0.54-0.61 (sin `KEY_TAG`) la tenían los móviles: se devuelve
+        `(None, aprobados)` para que el PC haga una clave nueva y conserve la lista."""
         if not self.enabled():
             return None
         try:
             key = self._unprotect((self.folder / KEY_FILE).read_bytes())
         except Exception:  # 0.57: DPAPI/ctypes, archivo dañado... sin clave recordada, nunca un cierre
             return None
-        if len(key) != 32:
+        if len(key) == 32:
+            return None, self.devices()
+        if len(key) != 36 or not key.startswith(KEY_TAG):
             return None
-        return key, self.devices()
+        return key[4:], self.devices()
 
     def set_enabled(self, on: bool, key: bytes | None = None, devices: list[dict] | None = None) -> None:
         if on:
