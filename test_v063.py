@@ -221,6 +221,12 @@ class PcDespierto(unittest.TestCase):
         self.assertTrue(d.tick()["toque"])
         self.assertEqual(self.win.nudges, 1)
 
+    def test_ventana_1h21(self):
+        self.make()
+        self.assertEqual(self.d.VENTANA, 81 * 60)
+        self.assertIn("1 h 21 min", HTML)
+        self.assertIn("1 h 21 min", MESA)
+
     def test_una_hora_despues_suelta(self):
         d = self.make()
         d.touch()

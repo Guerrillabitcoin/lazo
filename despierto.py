@@ -3,7 +3,7 @@
 Con el PC en la tele y el móvil en el sofá, Windows no ve teclado ni ratón «de verdad» y
 acaba apagando la pantalla, bloqueando la sesión (pantalla de contraseña, donde LaZoo ya no
 puede escribir) o suspendiendo el PC. Mientras un móvil aceptado haya usado LaZoo en la
-última `VENTANA` (1 h):
+última `VENTANA` (1 h 21 min):
 
 - se le dice a Windows «estoy en uso» (`SetThreadExecutionState`, lo mismo que hace un
   reproductor de vídeo): ni suspensión, ni pantalla apagada, ni salvapantallas;
@@ -11,7 +11,7 @@ puede escribir) o suspendiendo el PC. Mientras un móvil aceptado haya usado LaZ
   píxeles (`SendInput`): cuenta como actividad pero el cursor no se mueve, así YouTube no
   saca su barra de controles encima del vídeo.
 
-Pasada la hora sin usar el móvil, Windows vuelve a lo suyo. Si la sesión ya está bloqueada
+Pasada 1 h 21 min sin usar el móvil, Windows vuelve a lo suyo. Si la sesión ya está bloqueada
 (por ejemplo con «Bloquear PC»), LaZoo no la mantiene encendida. El «¿Sigues ahí?» de
 YouTube es otra cosa: lo contesta sigues.py.
 
@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-VENTANA = 3600.0     # tras el último uso del móvil
+VENTANA = 4860.0     # 1 h 21 min tras el último uso del móvil
 TOQUE_TRAS = 50.0    # segundos sin entrada antes del toque de cero píxeles
 PASO = 20.0          # cada cuánto se revisa
 DEFAULT_ON = True
