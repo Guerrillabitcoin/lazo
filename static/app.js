@@ -3612,6 +3612,19 @@ if (ytSigues) {
   });
 }
 
+// 0.63: el PC no se bloquea ni se duerme mientras se usa desde el móvil (despierto.py).
+const sysDespierto = document.querySelector("#sys-despierto");
+if (sysDespierto) {
+  const syncDespierto = () => api("/api/despierto", {}).then((st) => {
+    sysDespierto.disabled = !st.available || !!st.disabled;
+    if (document.activeElement !== sysDespierto) sysDespierto.checked = !!st.on;
+  }).catch(() => {});
+  PREF_PUSH.push(syncDespierto);
+  sysDespierto.addEventListener("change", () => {
+    api("/api/despierto", { on: sysDespierto.checked }).then((st) => { sysDespierto.checked = !!st.on; }).catch(() => syncDespierto());
+  });
+}
+
 // 0.63: saltar anuncios de YouTube (anuncios.py). Mismo patrón que «¿Sigues ahí?».
 const ytAnuncios = document.querySelector("#yt-anuncios");
 if (ytAnuncios) {

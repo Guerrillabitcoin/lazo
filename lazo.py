@@ -31,6 +31,7 @@ import puente
 import recordar
 import sigues
 import anuncios
+import despierto
 import sobre
 
 ROOT = Path(__file__).resolve().parent
@@ -279,6 +280,8 @@ def connection_info() -> dict:
         "sigues_info": {k: sigues.SIGUES.status()[k] for k in ("total", "hoy", "sesion", "ultimo")},
         "anuncios": anuncios.ANUNCIOS.status()["on"],
         "anuncios_info": {k: anuncios.ANUNCIOS.status()[k] for k in ("total", "hoy", "sesion", "ultimo")},
+        "despierto": despierto.DESPIERTO.status()["on"],
+        "despierto_activo": despierto.DESPIERTO.status()["activo"],
         "approve_where": approve_where(),
         "version": VERSION,
         "diag": conn_diag(),
@@ -614,6 +617,7 @@ class Handler(BaseHTTPRequestHandler):
                 maybe_open_mesa()
                 return False
         PAIRING.note_phone(who)
+        despierto.DESPIERTO.touch()  # 0.63: el PC no se bloquea ni se duerme mientras se usa
         maybe_open_mesa()
         return True
 
@@ -794,6 +798,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/anuncios":
             self._guard(lambda _body: anuncios.ANUNCIOS.status())
             return
+        if path == "/api/despierto":
+            self._guard(lambda _body: despierto.DESPIERTO.status())
+            return
         if path == "/api/status":
             self._guard(lambda _body: {**control.status(), "version": VERSION})
             return
@@ -865,6 +872,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/anuncios":
             # 0.63: saltar anuncios de YouTube. Igual que /api/sigues.
             self._guard(lambda body: anuncios.ANUNCIOS.set_on(body.get("on"), bool(body.get("reset")) and not self.remote))
+            return
+        if path == "/api/despierto":
+            # 0.63: mantener el PC despierto mientras se usa desde el móvil (despierto.py).
+            self._guard(lambda body: despierto.DESPIERTO.set_on(body.get("on")))
             return
         if path == "/api/olvidar":
             self._local_only(lambda _body: forget_all())
@@ -1410,6 +1421,8 @@ def start(argv: list[str] | None = None, console: bool = True):
                         help="Acepta también este rango (p. ej. una VPN 100.64.0.0/10). Repetible.")
     parser.add_argument("--sin-sigues", action="store_true",
                         help="No contesta el aviso «¿Sigues ahí?» de YouTube (igual que LAZO_SIN_SIGUES=1)")
+    parser.add_argument("--sin-despierto", action="store_true",
+                        help="Deja que Windows bloquee o suspenda el PC aunque se use desde el móvil (igual que LAZO_SIN_DESPIERTO=1)")
     parser.add_argument("--sin-anuncios", action="store_true",
                         help="No salta los anuncios de YouTube (igual que LAZO_SIN_ANUNCIOS=1)")
     parser.add_argument("--sin-vigilante", action="store_true",
@@ -1432,6 +1445,8 @@ def start(argv: list[str] | None = None, console: bool = True):
         sigues.SIGUES.disabled = True
     if args.sin_anuncios:
         anuncios.ANUNCIOS.disabled = True
+    if args.sin_despierto:
+        despierto.DESPIERTO.disabled = True
     if args.sin_portapapeles:
         control.CLIP_WATCH.enabled = False
     APPROVALS.auto = args.auto_aprobar or os.environ.get("LAZO_AUTOAPPROVE") == "1"
@@ -1507,6 +1522,10 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         anuncios.watch()
+    except Exception:
+        pass
+    try:
+        despierto.watch()
     except Exception:
         pass
     if not args.no_browser:

@@ -172,6 +172,100 @@ class IdFijoDeLaApk(unittest.TestCase):
         self.assertIn("id antiguo", MESA)
 
 
+class FakeWin:
+    """Windows de mentira para despierto.py."""
+
+    def __init__(self):
+        self.keeps, self.nudges, self.idle, self.is_locked = [], 0, 0.0, False
+
+    def keep(self, on):
+        self.keeps.append(on)
+
+    def idle_seconds(self):
+        return self.idle
+
+    def locked(self):
+        return self.is_locked
+
+    def nudge(self):
+        self.nudges += 1
+
+
+class PcDespierto(unittest.TestCase):
+    def make(self):
+        import despierto
+
+        self.d = despierto
+        self.tmp = tempfile.TemporaryDirectory()
+        self.now = [1000.0]
+        self.win = FakeWin()
+        return despierto.Despierto(system=self.win, file=Path(self.tmp.name) / "ajustes.json", clock=lambda: self.now[0])
+
+    def tearDown(self):
+        if hasattr(self, "tmp"):
+            self.tmp.cleanup()
+
+    def test_sin_movil_no_hace_nada(self):
+        d = self.make()
+        self.assertFalse(d.tick()["activo"])
+        self.assertEqual(self.win.nudges, 0)
+        self.assertNotIn(True, self.win.keeps)
+
+    def test_con_movil_mantiene_y_toca_sin_mover(self):
+        d = self.make()
+        d.touch()
+        self.assertTrue(d.tick()["activo"])
+        self.assertEqual(self.win.keeps[-1], True)
+        self.assertEqual(self.win.nudges, 0)  # hay actividad reciente: no hace falta tocar
+        self.win.idle = self.d.TOQUE_TRAS + 1
+        self.assertTrue(d.tick()["toque"])
+        self.assertEqual(self.win.nudges, 1)
+
+    def test_una_hora_despues_suelta(self):
+        d = self.make()
+        d.touch()
+        d.tick()
+        self.now[0] += self.d.VENTANA + 1
+        self.assertFalse(d.tick()["activo"])
+        self.assertEqual(self.win.keeps[-1], False)
+
+    def test_bloqueado_no_lo_mantiene(self):
+        d = self.make()
+        d.touch()
+        self.win.is_locked = True
+        self.win.idle = 999
+        res = d.tick()
+        self.assertTrue(res.get("bloqueado"))
+        self.assertFalse(res["activo"])
+        self.assertEqual(self.win.nudges, 0)
+
+    def test_apagado_se_guarda_y_suelta(self):
+        d = self.make()
+        d.touch()
+        d.tick()
+        self.assertFalse(d.set_on(False)["on"])
+        self.assertEqual(self.win.keeps[-1], False)
+        self.assertFalse(json.loads(d.file.read_text())["despierto"])
+        self.assertFalse(self.d.Despierto(system=FakeWin(), file=d.file).on)
+        d.stop()
+
+    def test_no_arranca_en_pruebas(self):
+        import despierto
+
+        self.assertFalse(despierto.watch())
+
+    def test_cursor_quieto_y_rutas(self):
+        src = (ROOT / "despierto.py").read_text(encoding="utf-8")
+        self.assertIn("MOUSEINPUT(0, 0, 0, 0x0001", src)  # movimiento de 0 píxeles
+        self.assertNotIn("SetCursorPos", src)
+        self.assertIn("despierto.DESPIERTO.touch()", LAZO)
+        self.assertIn('"/api/despierto"', LAZO)
+        self.assertIn("--sin-despierto", LAZO)
+        self.assertIn('id="sys-despierto"', HTML)
+        self.assertIn("PREF_PUSH.push(syncDespierto)", JS)
+        self.assertIn('devCall("/api/despierto"', MESA)
+
+
 class SaltarAnuncios(unittest.TestCase):
     def make(self, res=None, hwnd="77"):
         self.tmp = tempfile.TemporaryDirectory()
