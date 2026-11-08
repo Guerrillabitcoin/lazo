@@ -44,7 +44,7 @@ const deviceId = (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.63";
+const PAGE_VERSION = "0.64";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -3635,5 +3635,18 @@ if (ytAnuncios) {
   PREF_PUSH.push(syncAnuncios);
   ytAnuncios.addEventListener("change", () => {
     api("/api/anuncios", { on: ytAnuncios.checked }).then((st) => { ytAnuncios.checked = !!st.on; }).catch(() => syncAnuncios());
+  });
+}
+
+// 0.64: saltar patrocinios dentro del vídeo (patrocinios.py, SponsorBlock). Mismo patrón.
+const ytPatrocinios = document.querySelector("#yt-patrocinios");
+if (ytPatrocinios) {
+  const syncPatrocinios = () => api("/api/patrocinios", {}).then((st) => {
+    ytPatrocinios.disabled = !st.available || !!st.disabled;
+    if (document.activeElement !== ytPatrocinios) ytPatrocinios.checked = !!st.on;
+  }).catch(() => {});
+  PREF_PUSH.push(syncPatrocinios);
+  ytPatrocinios.addEventListener("change", () => {
+    api("/api/patrocinios", { on: ytPatrocinios.checked }).then((st) => { ytPatrocinios.checked = !!st.on; }).catch(() => syncPatrocinios());
   });
 }

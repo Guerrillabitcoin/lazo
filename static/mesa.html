@@ -106,7 +106,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.63</p>
+          <p class="ver">0.64</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -125,6 +125,10 @@
           <input id="anuncios" type="checkbox" /> Saltar anuncios de YouTube
         </label>
         <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
+        <label class="chip" title="Cuando el propio vídeo habla de su patrocinador, LaZoo salta ese tramo solo. Los tramos los marca la comunidad de SponsorBlock: el PC le pregunta con 4 letras del hash del vídeo, nunca le dice cuál ves. Sin mover el ratón, sin teclas y sin traer la ventana delante.">
+          <input id="patrocinios" type="checkbox" /> Saltar patrocinios dentro del vídeo
+        </label>
+        <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
         <label class="chip" title="Mientras un móvil use LaZoo (y hasta 1 h 21 min después), Windows no apaga la pantalla, no bloquea la sesión ni suspende el PC. El cursor no se mueve.">
           <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
         </label>
@@ -394,6 +398,19 @@
 
       const $ = (sel) => document.querySelector(sel);
       const STATES = { aprobado: "Conectado", pendiente: "Esperando aprobación", rechazado: "Rechazado (5 min)" };
+      // 0.64: «Patrocinios saltados: 3 · hoy: 1 · ahorrado: 4 min».
+      function ahorradoTexto(segundos) {
+        const s = Math.max(0, Math.round(Number(segundos) || 0));
+        if (s < 60) return s + " s";
+        const m = Math.round(s / 60);
+        return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0") + " min";
+      }
+      function patrociniosTexto(info) {
+        const total = Number(info.total) || 0;
+        let txt = "Patrocinios saltados: " + total;
+        if (total) txt += " · hoy: " + (Number(info.hoy) || 0) + " · ahorrado: " + ahorradoTexto(info.ahorrado);
+        return txt;
+      }
       function siguesTexto(info, now) {
         const total = Number(info.total) || 0;
         let txt = "Avisos quitados: " + total;
@@ -475,6 +492,8 @@
           if (document.activeElement !== $("#anuncios")) $("#anuncios").checked = !!data.anuncios;
           if (document.activeElement !== $("#despierto")) $("#despierto").checked = !!data.despierto;
           if (data.anuncios_info) $("#anuncios-cuenta").textContent = `Anuncios saltados: ${data.anuncios_info.total || 0} · hoy: ${data.anuncios_info.hoy || 0}`;
+          if (document.activeElement !== $("#patrocinios")) $("#patrocinios").checked = !!data.patrocinios;
+          if (data.patrocinios_info) $("#patrocinios-cuenta").textContent = patrociniosTexto(data.patrocinios_info);
           $("#st-net").textContent = (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red";
         } catch (_err) {}
       }
@@ -523,6 +542,9 @@
       $("#anuncios").addEventListener("change", (event) => {
         devCall("/api/anuncios", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
+      $("#patrocinios").addEventListener("change", (event) => {
+        devCall("/api/patrocinios", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
+      });
       $("#sigues").addEventListener("change", (event) => {
         devCall("/api/sigues", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
@@ -547,6 +569,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.63"></script>
+    <script src="/logo.js?v=0.64"></script>
   </body>
 </html>

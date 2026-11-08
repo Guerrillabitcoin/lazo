@@ -31,13 +31,14 @@ import puente
 import recordar
 import sigues
 import anuncios
+import patrocinios
 import despierto
 import sobre
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.63"
+VERSION = "0.64"
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
@@ -280,6 +281,9 @@ def connection_info() -> dict:
         "sigues_info": {k: sigues.SIGUES.status()[k] for k in ("total", "hoy", "sesion", "ultimo")},
         "anuncios": anuncios.ANUNCIOS.status()["on"],
         "anuncios_info": {k: anuncios.ANUNCIOS.status()[k] for k in ("total", "hoy", "sesion", "ultimo")},
+        "patrocinios": patrocinios.PATROCINIOS.status()["on"],
+        "patrocinios_info": {k: v for k, v in patrocinios.PATROCINIOS.status().items()
+                             if k in ("total", "hoy", "sesion", "ultimo", "ahorrado", "ahorrado_hoy")},
         "despierto": despierto.DESPIERTO.status()["on"],
         "despierto_activo": despierto.DESPIERTO.status()["activo"],
         "approve_where": approve_where(),
@@ -798,6 +802,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/anuncios":
             self._guard(lambda _body: anuncios.ANUNCIOS.status())
             return
+        if path == "/api/patrocinios":
+            self._guard(lambda _body: patrocinios.PATROCINIOS.status())
+            return
         if path == "/api/despierto":
             self._guard(lambda _body: despierto.DESPIERTO.status())
             return
@@ -872,6 +879,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/anuncios":
             # 0.63: saltar anuncios de YouTube. Igual que /api/sigues.
             self._guard(lambda body: anuncios.ANUNCIOS.set_on(body.get("on"), bool(body.get("reset")) and not self.remote))
+            return
+        if path == "/api/patrocinios":
+            # 0.64: saltar los patrocinios dentro del vídeo (SponsorBlock). Igual que /api/anuncios.
+            self._guard(lambda body: patrocinios.PATROCINIOS.set_on(body.get("on"), bool(body.get("reset")) and not self.remote))
             return
         if path == "/api/despierto":
             # 0.63: mantener el PC despierto mientras se usa desde el móvil (despierto.py).
@@ -1425,6 +1436,8 @@ def start(argv: list[str] | None = None, console: bool = True):
                         help="Deja que Windows bloquee o suspenda el PC aunque se use desde el móvil (igual que LAZO_SIN_DESPIERTO=1)")
     parser.add_argument("--sin-anuncios", action="store_true",
                         help="No salta los anuncios de YouTube (igual que LAZO_SIN_ANUNCIOS=1)")
+    parser.add_argument("--sin-patrocinios", action="store_true",
+                        help="No salta los patrocinios dentro de los vídeos de YouTube ni pregunta a SponsorBlock (igual que LAZO_SIN_PATROCINIOS=1)")
     parser.add_argument("--sin-vigilante", action="store_true",
                         help="No pone el vigilante del ratón del PC (igual que LAZO_SIN_VIGILANTE=1)")
     parser.add_argument("--sin-portapapeles", action="store_true",
@@ -1445,6 +1458,8 @@ def start(argv: list[str] | None = None, console: bool = True):
         sigues.SIGUES.disabled = True
     if args.sin_anuncios:
         anuncios.ANUNCIOS.disabled = True
+    if args.sin_patrocinios:
+        patrocinios.PATROCINIOS.disabled = True
     if args.sin_despierto:
         despierto.DESPIERTO.disabled = True
     if args.sin_portapapeles:
@@ -1522,6 +1537,10 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         anuncios.watch()
+    except Exception:
+        pass
+    try:
+        patrocinios.watch()
     except Exception:
         pass
     try:

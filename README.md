@@ -1,4 +1,4 @@
-# LaZoo 0.63
+# LaZoo 0.64
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.64:** LaZoo salta los patrocinios que van dentro del propio vídeo de YouTube, el rato en que el youtuber habla de su patrocinador. Los tramos los marca la comunidad de [SponsorBlock](https://sponsor.ajay.app). Para saber dónde están, el PC pregunta con solo 4 letras del SHA-256 del id del vídeo: SponsorBlock devuelve los tramos de unos cien vídeos y LaZoo se queda con el suyo, así que nadie fuera de tu PC sabe qué vídeo ves. Es la única conexión a internet que añade LaZoo y se apaga con la casilla. El salto se le pide a Windows, como si arrastraras la barra del panel multimedia: no mueve el ratón, no pulsa teclas y no trae la ventana delante. Cada tramo se salta una vez: si vuelves atrás para verlo, se queda. El Panel cuenta «Patrocinios saltados: N · hoy: H · ahorrado: 4 min». Se apaga en el Panel, en la pestaña YouTube del móvil («Saltar patrocinios dentro del vídeo»), con `--sin-patrocinios` o con `LAZO_SIN_PATROCINIOS=1`. Solo Windows, con YouTube como pestaña activa de su ventana.
 
 **Novedad 0.61:** el Panel se rediseña: caja «Conectar» a la izquierda (se oculta al conectar), «Portapapeles Móvil ↔ PC» con papelera en cada nota, y una sola caja «Archivos» (carpeta de recibidos + drop + lista con PC→móvil / móvil→PC).
 
