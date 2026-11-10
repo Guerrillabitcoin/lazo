@@ -116,20 +116,20 @@
         <label class="chip" title="Guarda la clave cifrada en este PC para que los móviles aprobados se reconecten solos tras reiniciar">
           <input id="recordar" type="checkbox" /> Recordar dispositivos
         </label>
-        <label class="chip" title="Si YouTube pregunta «¿Quieres seguir viendo?», LaZoo pulsa «Sí» por accesibilidad, sin mover el ratón ni traer la ventana delante">
+        <label class="chip" title="Pulsa «Sí» en «¿Quieres seguir viendo?» sin mover el ratón ni traer la ventana delante">
           <input id="sigues" type="checkbox" /> Evitar el aviso «¿Sigues ahí?» de YouTube
         </label>
         <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
         <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
-        <label class="chip" title="Cuando YouTube deja saltar un anuncio, LaZoo pulsa «Saltar» por accesibilidad, sin mover el ratón ni traer la ventana delante">
+        <label class="chip" title="Pulsa «Saltar» en cuanto YouTube lo deja, sin mover el ratón ni traer la ventana delante">
           <input id="anuncios" type="checkbox" /> Saltar anuncios de YouTube
         </label>
         <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
-        <label class="chip" title="Cuando el propio vídeo habla de su patrocinador, LaZoo salta ese tramo solo. Los tramos los marca la comunidad de SponsorBlock: el PC le pregunta con 4 letras del hash del vídeo, nunca le dice cuál ves; SponsorBlock sí ve la IP de tu casa. Es lo único de LaZoo que sale a internet sin que lo pidas. Sin mover el ratón, sin teclas y sin traer la ventana delante.">
+        <label class="chip" title="Salta el tramo en que el vídeo habla de su patrocinador, sin mover el ratón ni traer la ventana. Sale a internet: SponsorBlock ve tu IP, no qué vídeo ves.">
           <input id="patrocinios" type="checkbox" /> Saltar patrocinios dentro del vídeo (se conecta a SponsorBlock)
         </label>
         <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
-        <label class="chip" title="Mientras un móvil use LaZoo (y hasta 1 h 21 min después), Windows no apaga la pantalla, no bloquea la sesión ni suspende el PC. El cursor no se mueve.">
+        <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
           <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
         </label>
       </header>
@@ -170,7 +170,7 @@
         </div>
         <section id="pasar" class="box">
           <h2>Pasar por wifi</h2>
-          <p class="privado"><b>No pasa por internet.</b> Va directo entre el móvil y este PC por tu Wi-Fi, en un puente cifrado (LZ2) con una clave que solo tienen este PC y cada móvil aceptado. Las notas se guardan cifradas en este PC. Quien escuche la Wi-Fi solo ve datos cifrados.</p>
+          <p class="privado"><b>No pasa por internet.</b> Va cifrado (LZ2) por tu Wi-Fi, con una clave por móvil. Las notas se guardan cifradas en este PC.</p>
           <div class="pasar-cols">
         <section id="clip-box">
           <h3>Notas · Portapapeles Móvil ↔ PC</h3>

@@ -543,7 +543,7 @@ class NumeroDeLaApp(unittest.TestCase):
     def test_sobre_dice_cuando_sale_algo_a_internet(self):
         caja = HTML[HTML.index('id="about-internet"'):]
         caja = caja[:caja.index("</section>")]
-        for texto in ("sponsor.ajay.app", "IP", "youtube.com", "GitHub", "Saltar anuncios"):
+        for texto in ("SponsorBlock", "IP", "youtube.com", "GitHub", "Saltar anuncios"):
             self.assertIn(texto, caja)
         self.assertIn("sponsor.ajay.app", HTML[HTML.index('id="yt-patrocinios"'):][:600])
         self.assertIn("SponsorBlock", MESA[MESA.index('id="patrocinios"'):][:200])
