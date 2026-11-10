@@ -295,7 +295,7 @@ class Version(unittest.TestCase):
         self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.64")
         self.assertIn("<title>LaZoo 0.64</title>", HTML)
         self.assertIn("/logo.js?v=0.64", MESA)
-        self.assertIn('android:versionName="0.64"', APK)
+        self.assertIn('android:versionName="1"', APK)
         self.assertIn('android:versionCode="64"', APK)
         self.assertIn("# LaZoo 0.64", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))

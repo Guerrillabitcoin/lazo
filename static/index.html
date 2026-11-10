@@ -220,7 +220,8 @@
             </div>
             <label class="diag-smooth yt-sigues"><input id="yt-sigues" type="checkbox" checked /> Evitar el aviso «¿Sigues ahí?» de YouTube (el PC pulsa «Sí» solo, sin mover el ratón)</label>
             <label class="diag-smooth yt-sigues"><input id="yt-anuncios" type="checkbox" checked /> Saltar anuncios (el PC pulsa «Saltar» en cuanto YouTube lo deja; la flecha ⏭ también lo intenta)</label>
-            <label class="diag-smooth yt-sigues"><input id="yt-patrocinios" type="checkbox" checked /> Saltar patrocinios dentro del vídeo (SponsorBlock; el PC no dice qué vídeo ves)</label>
+            <label class="diag-smooth yt-sigues"><input id="yt-patrocinios" type="checkbox" checked /> Saltar patrocinios dentro del vídeo (SponsorBlock)</label>
+            <p class="mini-label yt-aviso">Es lo único de LaZoo que sale a internet sin que lo pidas: el PC pregunta a sponsor.ajay.app con 4 letras del hash del vídeo, nunca cuál es. SponsorBlock ve la IP de tu casa. Más en «Sobre».</p>
             <form id="yt-search" class="phrase">
               <input id="yt-q" maxlength="120" placeholder="Buscar" />
               <button type="submit">Buscar</button>
@@ -397,6 +398,17 @@
                 <li>La clave cambia cada vez que reinicias LaZoo en el PC.</li>
                 <li>Solo acepta conexiones de tu red local.</li>
                 <li>Cada móvil nuevo hay que aceptarlo en el PC la primera vez.</li>
+                <li>App del móvil: <span id="about-app">navegador</span> (la interfaz la pone el PC: un cambio de diseño no pide reinstalar la app).</li>
+              </ul>
+            </section>
+            <section class="about-box" id="about-internet">
+              <h3>Cuándo sale algo a internet</h3>
+              <p>Entre el móvil y el PC nada sale de tu Wi-Fi. El PC solo se conecta a internet en estos casos:</p>
+              <ul class="about-facts">
+                <li><b>Saltar patrocinios</b> (casilla en YouTube, activada de serie): cada vez que cambia el vídeo, el PC pregunta a SponsorBlock (sponsor.ajay.app) con 4 letras del hash del vídeo. No le dice qué vídeo ves, pero SponsorBlock sí ve la dirección IP de tu casa y a qué hora cambias de vídeo.</li>
+                <li><b>Buscar en YouTube</b> desde el móvil: la búsqueda va a youtube.com, como si la hicieras en el PC.</li>
+                <li><b>Buscar actualización</b> (botón de arriba): una consulta a GitHub, solo al pulsarlo.</li>
+                <li>«Saltar anuncios» y «¿Sigues ahí?» no se conectan a nada: leen la pantalla de YouTube en el propio PC.</li>
               </ul>
             </section>
             <section id="about-prints-box" class="about-box" hidden>

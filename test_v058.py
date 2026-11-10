@@ -194,7 +194,7 @@ class Version(unittest.TestCase):
         self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.64")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
         self.assertIn('android:versionCode="64"', apk)
-        self.assertIn('android:versionName="0.64"', apk)
+        self.assertIn('android:versionName="1"', apk)
         self.assertIn("# LaZoo 0.64", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 

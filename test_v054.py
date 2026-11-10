@@ -426,7 +426,7 @@ console.log(fitWords(el, {json.dumps(title)}));
         self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.64")
         self.assertIn("0.64", MESA)
         self.assertIn("<title>LaZoo 0.64</title>", HTML)
-        self.assertIn('android:versionName="0.64"', APK)
+        self.assertIn('android:versionName="1"', APK)
         self.assertIn('android:versionCode="64"', APK)
 
 

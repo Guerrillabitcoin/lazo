@@ -529,13 +529,33 @@ class ApkRetrocompatible(unittest.TestCase):
                 self.assertRegex(antes, r'typeof [\w.]*\.%s === "function"' % m, f"{m} sin comprobar")
 
 
+class NumeroDeLaApp(unittest.TestCase):
+    def test_app_n_y_codigo_63_mas_n(self):
+        import re
+
+        apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
+        n = int(re.search(r'android:versionName="(\d+)"', apk).group(1))
+        self.assertEqual(int(re.search(r'android:versionCode="(\d+)"', apk).group(1)), 63 + n)
+        self.assertIn('"salida/LaZoo-App-$APP.apk"', (ROOT / "ci" / "construir.yml").read_text(encoding="utf-8"))
+        self.assertIn('id="about-app"', HTML)
+        self.assertIn('"App " + appNum', JS)
+
+    def test_sobre_dice_cuando_sale_algo_a_internet(self):
+        caja = HTML[HTML.index('id="about-internet"'):]
+        caja = caja[:caja.index("</section>")]
+        for texto in ("sponsor.ajay.app", "IP", "youtube.com", "GitHub", "Saltar anuncios"):
+            self.assertIn(texto, caja)
+        self.assertIn("sponsor.ajay.app", HTML[HTML.index('id="yt-patrocinios"'):][:600])
+        self.assertIn("SponsorBlock", MESA[MESA.index('id="patrocinios"'):][:200])
+
+
 class Version(unittest.TestCase):
     def test_064(self):
         self.assertEqual(lazo.VERSION, "0.64")
         self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.64")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
         self.assertIn('android:versionCode="64"', apk)
-        self.assertIn('android:versionName="0.64"', apk)
+        self.assertIn('android:versionName="1"', apk)  # App 1: número propio de la APK
         self.assertIn('const PAGE_VERSION = "0.64"', JS)
         self.assertIn("<title>LaZoo 0.64</title>", HTML)
         self.assertIn('<p class="ver">0.64', MESA)

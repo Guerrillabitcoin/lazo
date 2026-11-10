@@ -3047,6 +3047,9 @@ async function aboutOpen() {
   try {
     const data = await api("/api/about", null, "GET");
     document.querySelector("#about-version").textContent = data.version || "";
+    const appNum = apkVersion();  // 0.64: la APK lleva su número («App 1»); las viejas, el de LaZoo
+    const appEl = document.querySelector("#about-app");
+    if (appEl) appEl.textContent = /^\d+$/.test(appNum) ? "App " + appNum : appNum === "no (navegador)" ? "navegador" : "APK " + appNum;
     document.querySelector("#about-license").textContent = data.license || "";
     const list = document.querySelector("#about-links");
     list.replaceChildren();
