@@ -507,6 +507,28 @@ console.log(JSON.stringify([
                                "Patrocinios saltados: 90 · hoy: 0 · ahorrado: 1 h 05 min"])
 
 
+class ApkRetrocompatible(unittest.TestCase):
+    """APK nueva con .exe viejo y al revés: la APK no habla con /api/* y la web nunca da por
+    hecho que existe una función de LaZooApp."""
+
+    def test_la_apk_no_llama_a_la_api_del_pc(self):
+        for f in (ROOT / "android").rglob("*"):
+            if f.suffix in (".java", ".html", ".js", ".xml") and "jsqr" not in f.name:
+                self.assertNotIn("/api/", f.read_text(encoding="utf-8", errors="ignore"), f)
+
+    def test_cada_funcion_de_la_apk_se_comprueba_antes(self):
+        java = "".join(p.read_text(encoding="utf-8") for p in (ROOT / "android" / "src").rglob("*.java"))
+        import re
+
+        metodos = set(re.findall(r"@JavascriptInterface\s+public \w+ (\w+)\(", java))
+        self.assertTrue({"deviceId", "scan", "version"} <= metodos)
+        web = "".join(p.read_text(encoding="utf-8") for p in (ROOT / "static").glob("*.js"))
+        for m in sorted(metodos):
+            for llamada in re.finditer(r"\b(app|appBridge|LaZooApp)\.%s\(" % m, web):
+                antes = web[max(0, llamada.start() - 300):llamada.start()]
+                self.assertRegex(antes, r'typeof [\w.]*\.%s === "function"' % m, f"{m} sin comprobar")
+
+
 class Version(unittest.TestCase):
     def test_064(self):
         self.assertEqual(lazo.VERSION, "0.64")

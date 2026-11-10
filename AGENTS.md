@@ -31,6 +31,8 @@ Sigue siendo local. La misma Wi-Fi, nada sale a internet, no se abre el 8787 en 
 - El puente es local. Quien escuche la Wi-Fi ve el sello `LZ2`, no el texto.
 - Interfaz en español, fondo oscuro, naranja `#e07a3d`, trackpad oscuro con huella naranja.
 - Cada entrega instalable sube de versión: carpeta `LaZoo-X.Y`, `VERSION.txt`, GitHub Release, y el mismo número en el logo.
+- La APK siempre es retrocompatible con el `.exe` (decisión del dueño, 10 nov): una APK nueva funciona con un `.exe` anterior y una APK vieja con un `.exe` nuevo. La APK solo abre la página del PC; no llama a `/api/*` por su cuenta. La web usa cada función de `LaZooApp` solo tras `typeof … === "function"` y tiene que ir igual sin ella (navegador o APK vieja). Lo comprueba `test_v064.ApkRetrocompatible`.
+- En cada entrega o traspaso, publicar el enlace de descarga del `.exe` y de la APK (Release o artefactos de «Construir LaZoo») y decir si la APK cambió desde la anterior.
 
 No rompas el ratón, el cursor, las ventanas, YouTube, Spotify, el volumen, las notas, el puente, el logo ni la pantalla del QR. Las pruebas (atajos, captura, brillo, batería, dormir, abrir una web, me gusta y cola de Spotify) se quedan en la pestaña Pruebas.
 

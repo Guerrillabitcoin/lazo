@@ -308,7 +308,7 @@ function phoneNotify(on, title, text) {
   try {
     if (appBridge && typeof appBridge.waitNote === "function") {
       if (on) appBridge.waitNote(title, text);
-      else appBridge.clearNote();
+      else if (typeof appBridge.clearNote === "function") appBridge.clearNote();
       return "apk";
     }
   } catch (_err) { /* APK vieja sin avisos */ }
