@@ -252,8 +252,10 @@ class Vigilante(unittest.TestCase):
             self.teclas.append((hwnd, n10, n5))
             return True
 
-        return P.Patrocinios(find=lambda: dict(self.row) if self.row else None, probe=self.ps, file=Path(self.tmp.name) / "ajustes.json",
-                             fetch=fetch or buscar, keys=keys, clock=lambda: self.t[0])
+        p = P.Patrocinios(find=lambda: dict(self.row) if self.row else None, probe=self.ps, file=Path(self.tmp.name) / "ajustes.json",
+                          fetch=fetch or buscar, keys=keys, clock=lambda: self.t[0])
+        p.on = True  # 0.65: viene apagado de serie; estas pruebas son con la casilla encendida
+        return p
 
     def tearDown(self):
         if hasattr(self, "tmp"):
@@ -550,17 +552,10 @@ class NumeroDeLaApp(unittest.TestCase):
 
 
 class Version(unittest.TestCase):
-    def test_064(self):
-        self.assertEqual(lazo.VERSION, "0.64")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.64")
-        apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        self.assertIn('android:versionCode="64"', apk)
-        self.assertIn('android:versionName="1"', apk)  # App 1: número propio de la APK
-        self.assertIn('const PAGE_VERSION = "0.64"', JS)
-        self.assertIn("<title>LaZoo 0.64</title>", HTML)
-        self.assertIn('<p class="ver">0.64', MESA)
+    """La versión actual la comprueba la prueba de la última versión (test_v065.py)."""
+
+    def test_064_sigue_documentada(self):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("# LaZoo 0.64", readme)
         self.assertIn("**Novedad 0.64:**", readme)
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("0.64", agents)

@@ -24,7 +24,9 @@ Qué hace (solo Windows), en el hilo `lazo-patrocinios`:
 Cada tramo se salta una vez por vídeo: si vuelves atrás para verlo, se queda. Al volver al
 principio del vídeo se pueden saltar otra vez. Si el tramo no cuadra con la duración que da
 Windows (otra versión del vídeo, o está sonando un anuncio de YouTube), no se salta.
-Se apaga en el Panel o en el móvil, con `--sin-patrocinios` o con `LAZO_SIN_PATROCINIOS=1`.
+Desde 0.65 viene APAGADO de serie: se enciende en el Panel o en el móvil (se recuerda) o, solo para
+esa sesión, con `--con-patrocinios` / `LAZO_CON_PATROCINIOS=1`. `--sin-patrocinios` /
+`LAZO_SIN_PATROCINIOS=1` lo apagan del todo y mandan sobre todo lo demás.
 """
 
 from __future__ import annotations
@@ -46,7 +48,7 @@ PREFIJO = 4              # letras del SHA-256 del id que salen del PC (las que r
 CATEGORIAS = ("sponsor",)
 AGENTE = "LaZoo"         # User-Agent: sin versión del sistema ni nada personal
 TIEMPO_RED = 5.0
-DEFAULT_ON = True
+DEFAULT_ON = False  # 0.65: apagado de serie (decisión del dueño); al encenderlo se recuerda en ajustes.json
 
 TOLERANCIA = 2.0         # s de diferencia admitida entre la duración del tramo marcado y la real
 MIN_TRAMO = 1.0          # tramos más cortos no se saltan
@@ -643,4 +645,6 @@ def watch() -> bool:
     if os.environ.get("LAZO_SIN_PATROCINIOS") == "1":
         PATROCINIOS.disabled = True
         return False
+    if os.environ.get("LAZO_CON_PATROCINIOS") == "1":
+        PATROCINIOS.on = True  # 0.65: solo esta sesión; no se guarda en ajustes.json
     return PATROCINIOS.start()

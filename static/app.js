@@ -44,7 +44,7 @@ const deviceId = (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.64";
+const PAGE_VERSION = "0.65";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -2723,9 +2723,103 @@ window.addEventListener("resize", () => {
 function applyMedia(prefix, data) {
   if (!data) return;
   if (data.title) setMediaTitle(prefix, data.title);
-  if (typeof data.level === "number") setLevel(prefix, data.level);
+  if (typeof data.level === "number" && !(prefix === "yt" && ytVolDrag)) setLevel(prefix, data.level, prefix === "yt" ? data.vol_real : undefined);
+  if (prefix === "yt" && typeof data.muted === "boolean") document.querySelector("#yt-mute").classList.toggle("muted", data.muted);
+  if (prefix === "yt" && typeof data.rate === "number" && !ytSpeedDrag && Date.now() > ytSpeedHold) showSpeed(data.rate);
   if (typeof data.playing === "boolean" && Date.now() > mediaState[prefix].hold) setPlay(prefix, data.playing);
 }
+
+/* 0.65: barra de progreso del vídeo del PC. La posición, la duración y la velocidad vienen de
+   los controles multimedia de Windows; entre sondeo y sondeo avanza sola. Al arrastrar se ve
+   a qué minuto vas y solo se salta al soltar. */
+const ytPos = { pos: 0, len: 0, at: 0, playing: false, rate: 1, drag: false, hold: 0 };
+let ytVolDrag = false;
+let ytSpeedDrag = false;
+let ytSpeedHold = 0;
+let ytTick = 0;
+
+function fmtTime(seconds) {
+  const total = Math.max(0, Math.floor(Number(seconds) || 0));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+
+function ytPosNow() {
+  if (!ytPos.playing) return ytPos.pos;
+  const now = ytPos.pos + ((Date.now() - ytPos.at) / 1000) * (ytPos.rate || 1);
+  return ytPos.len ? Math.min(ytPos.len, now) : now;
+}
+
+function drawYtPos() {
+  const bar = document.querySelector("#yt-pos");
+  const nowEl = document.querySelector("#yt-pos-now");
+  const lenEl = document.querySelector("#yt-pos-len");
+  if (!ytPos.len) {
+    bar.disabled = true;
+    bar.max = "0";
+    bar.value = "0";
+    nowEl.textContent = "–:––";
+    lenEl.textContent = "–:––";
+    return;
+  }
+  bar.disabled = false;
+  bar.max = String(Math.round(ytPos.len));
+  lenEl.textContent = fmtTime(ytPos.len);
+  if (!ytPos.drag) {
+    const now = ytPosNow();
+    bar.value = String(Math.round(now));
+    nowEl.textContent = fmtTime(now);
+  }
+}
+
+function setYtPos(data) {
+  if (!data || ytPos.drag || Date.now() < ytPos.hold) return;
+  if (data.real && typeof data.pos === "number" && Number(data.len) > 0) {
+    ytPos.pos = data.pos;
+    ytPos.len = Number(data.len);
+    ytPos.at = Date.now();
+    ytPos.playing = data.playing === true;
+    ytPos.rate = typeof data.rate === "number" && data.rate > 0 ? data.rate : 1;
+  } else if (data.missing || data.real === false) {
+    ytPos.len = 0;
+  }
+  drawYtPos();
+}
+
+function ytTickWatch(on) {
+  window.clearInterval(ytTick);
+  ytTick = on ? window.setInterval(drawYtPos, 500) : 0;
+}
+
+document.querySelector("#yt-pos").addEventListener("input", (event) => {
+  ytPos.drag = true;
+  const to = Number(event.target.value);
+  const preview = document.querySelector("#yt-pos-preview");
+  preview.textContent = `Ir a ${fmtTime(to)} de ${fmtTime(ytPos.len)}`;
+  preview.hidden = false;
+  document.querySelector("#yt-pos-now").textContent = fmtTime(to);
+});
+
+document.querySelector("#yt-pos").addEventListener("change", async (event) => {
+  const to = Number(event.target.value);
+  const preview = document.querySelector("#yt-pos-preview");
+  ytPos.drag = false;
+  ytPos.pos = to;
+  ytPos.at = Date.now();
+  ytPos.hold = Date.now() + 3000; /* que el siguiente sondeo no la devuelva atrás */
+  drawYtPos();
+  try {
+    const data = await api("/api/youtube", { action: "seek", to });
+    say(`YouTube en ${fmtTime(data.pos ?? to)}`);
+  } catch (err) {
+    ytPos.hold = 0;
+    say(err.message);
+  } finally {
+    window.setTimeout(() => { preview.hidden = true; }, 900);
+  }
+});
 
 /* Sondeo ligero mientras YouTube o Spotify están a la vista: título y play/pausa solos. */
 let mediaTimer = 0;
@@ -2741,6 +2835,7 @@ async function mediaPoll() {
       if (data.missing) setMediaTitle(prefix, "Abre YouTube en el PC");
       applyMedia(prefix, data);
       if (prefix === "yt" && typeof data.full === "boolean") setYtFull(data.full);
+      if (prefix === "yt") setYtPos(data);
     }
   } catch (_err) {
     /* sin ruido: el siguiente sondeo lo intenta otra vez */
@@ -2751,6 +2846,7 @@ async function mediaPoll() {
 function mediaWatch(on) {
   window.clearInterval(mediaTimer);
   mediaTimer = 0;
+  ytTickWatch(on && tab === "youtube");
   if (on) {
     mediaPoll();
     mediaTimer = window.setInterval(mediaPoll, 2500);
@@ -2792,6 +2888,8 @@ function mediaButtons(attr, prefix, path, label) {
             home: "YouTube inicio",
             theater: "YouTube cine",
             captions: "YouTube subtítulos",
+            subs_up: "Subtítulos más grandes",
+            subs_down: "Subtítulos más pequeños",
           };
           say(names[action] || label);
           if (action === "prev" || action === "next") window.setTimeout(mediaPoll, 1500);
@@ -2826,19 +2924,63 @@ document.querySelector("#yt-full").addEventListener("click", async () => {
     b.disabled = false;
   }
 });
+/* 0.65: «Seguir viendo en el móvil». El PC pausa el vídeo y da su dirección en el segundo
+   donde iba. La APK (App 2) lo abre fuera, en Brave si está instalado; en el navegador del
+   móvil se abre en una pestaña nueva (se pide al tocar, para que no la bloquee). */
+document.querySelector("#yt-movil").addEventListener("click", async () => {
+  const b = document.querySelector("#yt-movil");
+  const link = document.querySelector("#yt-movil-link");
+  const appBridge = window.LaZooApp;
+  const native = Boolean(appBridge && typeof appBridge.abrirFuera === "function");
+  if (appBridge && !native) {
+    say("Para seguir en el móvil hace falta la app nueva de LaZoo (App 2)");
+    return;
+  }
+  let tabRef = null;
+  if (!native) {
+    try { tabRef = window.open("", "_blank"); } catch (_err) { tabRef = null; }
+  }
+  b.disabled = true;
+  link.hidden = true;
+  try {
+    const data = await api("/api/youtube", { action: "handoff" });
+    if (data.paused) setPlay("yt", false);
+    const where = data.t ? ` en ${fmtTime(data.t)}` : "";
+    if (native && typeof appBridge.abrirFuera === "function") {
+      const how = appBridge.abrirFuera(data.url, "com.brave.browser");
+      say(how === "paquete" ? `Sigue en Brave${where}` : how ? `Sigue en el navegador${where}` : "No encontré un navegador en el móvil");
+    } else if (tabRef) {
+      tabRef.location.href = data.url;
+      say(`Sigue en el móvil${where}`);
+    } else {
+      link.href = data.url;
+      link.hidden = false;
+      say("Toca «Abrir el vídeo en este móvil»");
+    }
+  } catch (err) {
+    if (tabRef) tabRef.close();
+    say(err.message);
+  } finally {
+    b.disabled = false;
+  }
+});
+
 mediaButtons("sp", "sp", "/api/spotify", "Spotify");
 setPlay("yt", false);
 setPlay("sp", false);
 
-function setLevel(prefix, level) {
+function setLevel(prefix, level, real) {
   document.querySelector(`#${prefix}-vol`).value = String(level);
-  document.querySelector(`#${prefix}-level`).textContent = String(level);
+  /* 0.65: «≈» si es lo que recuerda LaZoo y no el volumen leído del vídeo */
+  document.querySelector(`#${prefix}-level`).textContent = real === false ? `≈${level}` : String(level);
 }
 
+document.querySelector("#yt-vol").addEventListener("input", () => { ytVolDrag = true; });
 document.querySelector("#yt-vol").addEventListener("change", async (event) => {
+  ytVolDrag = false;
   try {
     const data = await api("/api/youtube", { action: "volume", level: Number(event.target.value) });
-    if (typeof data.level === "number") setLevel("yt", data.level);
+    if (typeof data.level === "number") setLevel("yt", data.level, data.vol_real);
     say(`Volumen YouTube ${data.level ?? event.target.value}`);
   } catch (err) {
     say(err.message);
@@ -2848,18 +2990,26 @@ document.querySelector("#yt-vol").addEventListener("change", async (event) => {
 const YT_SPEEDS = [1, 1.25, 1.5, 2];
 const YT_SPEED_LABELS = ["1.0", "1.25", "1.50", "2"];
 
+/* 0.65: muestra la velocidad REAL del vídeo (la que publica Windows), aunque no sea uno de los
+   cuatro puntos de la barra (0.75, 1.75…): la barra va al más cercano y el número dice la de verdad. */
 function showSpeed(rate) {
-  const index = YT_SPEEDS.findIndex((item) => Math.abs(item - Number(rate)) < 0.001);
-  const picked = index < 0 ? 0 : index;
-  document.querySelector("#yt-speed").value = String(picked);
-  document.querySelector("#yt-speed-label").textContent = YT_SPEED_LABELS[picked];
+  const r = Number(rate);
+  if (!(r > 0)) return;
+  const index = YT_SPEEDS.findIndex((item) => Math.abs(item - r) < 0.001);
+  let near = 0;
+  YT_SPEEDS.forEach((item, i) => { if (Math.abs(item - r) < Math.abs(YT_SPEEDS[near] - r)) near = i; });
+  document.querySelector("#yt-speed").value = String(index < 0 ? near : index);
+  document.querySelector("#yt-speed-label").textContent = index < 0 ? String(Math.round(r * 100) / 100) : YT_SPEED_LABELS[index];
 }
 
 document.querySelector("#yt-speed").addEventListener("input", (event) => {
+  ytSpeedDrag = true;
   document.querySelector("#yt-speed-label").textContent = YT_SPEED_LABELS[Number(event.target.value)] || "1.0";
 });
 
 document.querySelector("#yt-speed").addEventListener("change", async (event) => {
+  ytSpeedDrag = false;
+  ytSpeedHold = Date.now() + 3000;
   const rate = YT_SPEEDS[Number(event.target.value)];
   try {
     const data = await api("/api/youtube", { action: "speed", rate });

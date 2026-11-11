@@ -2249,6 +2249,10 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         return _youtube_speed(extra.get("rate", _levels["youtube_speed"]))
     if action == "fullscreen":
         return _youtube_fullscreen()
+    if action == "seek":
+        return _youtube_seek(extra.get("to"))
+    if action == "handoff":
+        return _youtube_handoff()
     actions = {
         "play": ["k"],
         "mute": ["m"],
@@ -2263,6 +2267,8 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         "history_back": ["alt", "left"],
         "captions": ["c"],
         "theater": ["t"],
+        "subs_up": ["add"],       # 0.65: subtítulos más grandes (+)
+        "subs_down": ["subtract"],  # y más pequeños (-)
     }
     if action != "status" and action not in actions:
         raise ControlError("acción de YouTube no válida")
@@ -2277,7 +2283,13 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
         real = _win_is_fullscreen(row["id"])
         if real is not None:
             _yt["full"] = real
-        return {"detail": "", "title": row["title"], "level": _levels["youtube"], "full": _yt["full"], **state}
+        out = {"detail": "", "title": row["title"], "level": _levels["youtube"], "full": _yt["full"], **state}
+        vol = _yt_real_volume(row)
+        if vol:
+            out.update(level=vol["level"], muted=vol["muted"], vol_real=True)
+        else:
+            out["vol_real"] = False
+        return out
     detail = "YouTube"
     if action == "prev":
         # Como un reproductor: si ya lleva más de 5 s, vuelve al 0:00; si no, al anterior.
@@ -2412,11 +2424,38 @@ def _yt_state(row: dict[str, str]) -> dict[str, Any]:
         info = {}
     if info.get("playing") is not None:
         _yt["playing"] = info["playing"]
-        return {"playing": info["playing"], "pos": info["pos"], "len": info["len"], "real": True}
-    return {"playing": _yt["playing"], "pos": None, "len": 0, "real": False}
+        return {"playing": info["playing"], "pos": info["pos"], "len": info["len"], "real": True,
+                "rate": info.get("rate") or _known_speed(row)}
+    return {"playing": _yt["playing"], "pos": None, "len": 0, "real": False, "rate": _known_speed(row)}
 
 
-_WIN_VK = {"escape": 0x1B, "shift": 0x10, "ctrl": 0x11, "alt": 0x12, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28}
+def _known_speed(row: dict[str, str]) -> float | None:
+    """0.65: la velocidad que puso LaZoo en esta ventana, si Windows no publica la real."""
+    if str(_YT_MEM.get("id")) == str(row.get("id")) and _YT_MEM.get("speed"):
+        return _YT_MEM.get("speed")
+    return None
+
+
+def _yt_real_volume(row: dict[str, str], fresh: bool = False) -> dict[str, Any] | None:
+    """0.65: volumen y silencio REALES del reproductor de YouTube (mando.py, solo Windows).
+    Si se leen, LaZoo los toma como punto de partida para las flechas de volumen."""
+    if SYSTEM != "Windows":
+        return None
+    try:
+        import mando
+
+        m = mando.MANDO
+        vol = m.volumen(str(row["id"]), fresco=True) if fresh else m.volumen_sin_esperar(str(row["id"]))
+    except Exception:  # noqa: BLE001 (sin lectura: el mando sigue con lo recordado)
+        return None
+    if vol:
+        _levels["youtube"] = vol["level"]
+    return vol
+
+
+_WIN_VK = {"escape": 0x1B, "shift": 0x10, "ctrl": 0x11, "alt": 0x12, "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
+           # 0.65: + y - del teclado numérico: dan «+» y «-» con cualquier distribución (española, inglesa…)
+           "add": 0x6B, "subtract": 0x6D}
 
 
 def _skip_ad_now() -> bool:
@@ -2446,7 +2485,7 @@ def _yt_keys(keys: list[str]) -> None:
             return
     if SYSTEM == "Darwin" and keys == ["alt", "left"]:
         keys = ["cmd", "["]
-    _chord(keys)
+    _chord([{"add": "+", "subtract": "-"}.get(k, k) for k in keys])
 
 
 def _youtube_speed(raw: object) -> dict[str, Any]:
@@ -2537,12 +2576,14 @@ def _win_speed_key(faster: bool) -> bool:
 
 def _youtube_volume(level: int) -> dict[str, Any]:
     level = max(0, min(100, int(level)))
-    steps = int(round((level - _levels["youtube"]) / 5))
-    steps = max(-12, min(12, steps))
     with _lock:
         row = _find_youtube_unlocked()
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
+    real = _yt_real_volume(row, fresh=True)  # 0.65: desde el volumen de verdad, si se puede leer
+    steps = int(round((level - _levels["youtube"]) / 5))
+    steps = max(-20, min(20, steps))
+    with _lock:
         if steps:
             if not _focus_for_keys(row["id"]):
                 raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
@@ -2552,9 +2593,102 @@ def _youtube_volume(level: int) -> dict[str, Any]:
             for _ in range(abs(steps)):
                 _chord(["up" if steps > 0 else "down"])
         _levels["youtube"] = max(0, min(100, _levels["youtube"] + steps * 5))
-    else:
+        if real:
+            time.sleep(0.25)
+            real = _yt_real_volume(row, fresh=True) or real
+    elif not real:
         _levels["youtube"] = level
-    return {"detail": "YouTube", "title": row["title"], "level": _levels["youtube"]}
+    out = {"detail": "YouTube", "title": row["title"], "level": _levels["youtube"], "vol_real": bool(real)}
+    if real:
+        out["muted"] = real.get("muted")
+    return out
+
+
+def _mmss(seconds: float) -> str:
+    total = max(0, int(seconds))
+    h, rest = divmod(total, 3600)
+    m, sec = divmod(rest, 60)
+    return f"{h}:{m:02d}:{sec:02d}" if h else f"{m}:{sec:02d}"
+
+
+def _youtube_seek(raw: object) -> dict[str, Any]:
+    """0.65: ir a un segundo exacto (la barra de progreso del móvil). Primero se lo pide a
+    Windows (mando.py, sin teclas ni foco); si el navegador no lo deja, con las teclas de
+    YouTube: la cifra 0-9 y flechas de 5 s (o «l»/«j» si no se sabe la duración)."""
+    import mando
+
+    try:
+        to = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ControlError("Falta el minuto al que ir") from None
+    if not math.isfinite(to) or to < 0:
+        raise ControlError("Falta el minuto al que ir")
+    to = min(to, 86400.0)  # revisión 0.65: tope de 24 h aunque Windows no dé la duración
+    with _lock:
+        row = _find_youtube_unlocked()
+        if row is None:
+            raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
+    state = _yt_state(row)
+    length = float(state.get("len") or 0)
+    if length > 0:
+        to = min(to, max(0.0, length - 1))
+    via = ""
+    if SYSTEM == "Windows":
+        try:
+            if mando.MANDO.ir(row["title"], to)["ok"]:
+                via = "windows"
+        except Exception:  # noqa: BLE001 (sin controles multimedia: teclas)
+            via = ""
+    if not via:
+        keys = mando.teclas(mando.plan_teclas(state.get("pos") if state.get("real") else None, length, to))
+        if not keys:
+            raise ControlError("No sé cuánto dura el vídeo: usa −10 s y +10 s.")
+        if not _focus_for_keys(row["id"]):
+            raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
+        time.sleep(0.18)
+        with _lock:
+            for k in keys:
+                _yt_keys(k)
+                time.sleep(0.03)
+        via = "teclas"
+    return {"detail": f"Ir a {_mmss(to)}", "title": row["title"], "level": _levels["youtube"],
+            "pos": round(to, 1), "len": length, "via": via}
+
+
+def _youtube_handoff() -> dict[str, Any]:
+    """0.65: «Seguir en el móvil». Para YouTube en el PC y devuelve la dirección del vídeo en
+    el segundo donde iba; el móvil la abre en su navegador (Brave si la APK lo encuentra).
+    El id sale de la barra de direcciones (mando.py) o, si no se ve (pantalla completa), del
+    que ya conoce patrocinios.py. Nada sale a internet desde el PC."""
+    import mando
+    import patrocinios
+
+    with _lock:
+        row = _find_youtube_unlocked()
+        if row is None:
+            raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
+    if SYSTEM != "Windows":
+        raise ControlError("«Seguir en el móvil» de momento solo va con Windows.")
+    vid = patrocinios.video_id(mando.MANDO.direccion(str(row["id"])))
+    if not vid:
+        p = patrocinios.PATROCINIOS
+        if str(p.v.get("hwnd")) == str(row["id"]) and p.v.get("titulo") == row["title"]:
+            vid = p.v.get("vid") or p.v.get("vid_url")
+    if not vid:
+        raise ControlError("No pude saber qué vídeo es. Sal de pantalla completa y prueba otra vez.")
+    state = _yt_state(row)
+    pos = state.get("pos") if state.get("real") else None
+    try:
+        url = mando.enlace(vid, pos)  # revisión 0.65: el enlace antes de pausar; id no válido = error claro
+    except ValueError:
+        raise ControlError("No pude saber qué vídeo es. Sal de pantalla completa y prueba otra vez.") from None
+    paused = False
+    if state.get("playing"):
+        youtube("play")
+        paused = True
+    return {"detail": "Sigue en el móvil", "title": row["title"], "level": _levels["youtube"],
+            "url": url, "video": vid, "t": None if pos is None else int(pos), "paused": paused,
+            "playing": False if paused else state.get("playing")}
 
 
 def _youtube_home() -> dict[str, Any]:

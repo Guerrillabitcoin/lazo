@@ -675,3 +675,11 @@ button[data-cursor] { min-height: 44px; }
 .clip-row .clip-trash { flex: none; align-self: center; width: 38px; min-width: 38px; min-height: 34px; margin: 0 0 0 4px; padding: 0; border-radius: 99px; background: #3a2a24; font-size: 15px; }
 .clips-clear { margin-top: 8px; width: 100%; background: #3a2a24; color: #e8b3a6; }
 .dev-old { opacity: 0.6; }
+
+/* 0.65: barra de progreso del vídeo, vista previa al arrastrar y «Seguir en el móvil» */
+.yt-barra { display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; margin-top: 10px; }
+.yt-barra span { font-variant-numeric: tabular-nums; font-size: 13px; color: #ccc; min-width: 4ch; }
+.yt-barra span:last-child { text-align: right; }
+.yt-barra input[type="range"] { height: 34px; }
+.yt-preview { text-align: center; font-size: 22px; font-weight: 700; color: #e07a3d; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
+.yt-movil-link { display: block; text-align: center; margin-top: 8px; color: #e07a3d; font-weight: 600; }

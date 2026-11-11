@@ -38,7 +38,7 @@ import sobre
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.64"
+VERSION = "0.65"
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
@@ -1438,6 +1438,8 @@ def start(argv: list[str] | None = None, console: bool = True):
                         help="No salta los anuncios de YouTube (igual que LAZO_SIN_ANUNCIOS=1)")
     parser.add_argument("--sin-patrocinios", action="store_true",
                         help="No salta los patrocinios dentro de los vídeos de YouTube ni pregunta a SponsorBlock (igual que LAZO_SIN_PATROCINIOS=1)")
+    parser.add_argument("--con-patrocinios", action="store_true",
+                        help="Enciende para esta sesión el salto de patrocinios, que viene apagado de serie (igual que LAZO_CON_PATROCINIOS=1)")
     parser.add_argument("--sin-vigilante", action="store_true",
                         help="No pone el vigilante del ratón del PC (igual que LAZO_SIN_VIGILANTE=1)")
     parser.add_argument("--sin-portapapeles", action="store_true",
@@ -1460,6 +1462,8 @@ def start(argv: list[str] | None = None, console: bool = True):
         anuncios.ANUNCIOS.disabled = True
     if args.sin_patrocinios:
         patrocinios.PATROCINIOS.disabled = True
+    elif args.con_patrocinios:
+        patrocinios.PATROCINIOS.on = True  # 0.65: solo esta sesión (viene apagado de serie)
     if args.sin_despierto:
         despierto.DESPIERTO.disabled = True
     if args.sin_portapapeles:

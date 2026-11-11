@@ -181,6 +181,17 @@ public class MainActivity extends Activity {
         }
     }
 
+    static boolean youtubeUrl(String url) {
+        try {
+            Uri u = Uri.parse(url);
+            String h = u.getHost();
+            return "https".equals(u.getScheme()) && h != null
+                    && (h.equals("www.youtube.com") || h.equals("m.youtube.com") || h.equals("youtube.com") || h.equals("youtu.be"));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     void openHost(String url) {
         if (!allowedUrl(url)) return;
         int cut = url.indexOf('#');  // 0.56: sin la ficha del QR (#p=...), que caduca al usarla
@@ -196,6 +207,23 @@ public class MainActivity extends Activity {
             if (!allowedUrl(url)) return false;
             runOnUiThread(() -> openHost(url));
             return true;
+        }
+
+        // App 2 (LaZoo 0.65): «Seguir viendo en el móvil». Abre FUERA de la app, en el navegador
+        // del móvil, solo direcciones https de YouTube. Primero el paquete pedido (Brave); si no
+        // está, el navegador por defecto. Devuelve "paquete", "navegador" o "" si no se pudo.
+        @JavascriptInterface
+        public String abrirFuera(String url, String paquete) {
+            if (!youtubeUrl(url)) return "";
+            Intent i = new Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    .addCategory(Intent.CATEGORY_BROWSABLE)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (paquete != null && paquete.matches("[A-Za-z0-9_.]{3,80}")) {
+                try { startActivity(new Intent(i).setPackage(paquete)); return "paquete"; }
+                catch (Exception e) { /* no está instalado: el navegador por defecto */ }
+            }
+            try { startActivity(i); return "navegador"; }
+            catch (Exception e) { return ""; }
         }
 
         @JavascriptInterface
