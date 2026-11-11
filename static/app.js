@@ -44,7 +44,7 @@ const deviceId = (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.63";
+const PAGE_VERSION = "0.64";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -308,7 +308,7 @@ function phoneNotify(on, title, text) {
   try {
     if (appBridge && typeof appBridge.waitNote === "function") {
       if (on) appBridge.waitNote(title, text);
-      else appBridge.clearNote();
+      else if (typeof appBridge.clearNote === "function") appBridge.clearNote();
       return "apk";
     }
   } catch (_err) { /* APK vieja sin avisos */ }
@@ -3047,6 +3047,9 @@ async function aboutOpen() {
   try {
     const data = await api("/api/about", null, "GET");
     document.querySelector("#about-version").textContent = data.version || "";
+    const appNum = apkVersion();  // 0.64: la APK lleva su número («App 1»); las viejas, el de LaZoo
+    const appEl = document.querySelector("#about-app");
+    if (appEl) appEl.textContent = /^\d+$/.test(appNum) ? "App " + appNum : appNum === "no (navegador)" ? "navegador" : "APK " + appNum;
     document.querySelector("#about-license").textContent = data.license || "";
     const list = document.querySelector("#about-links");
     list.replaceChildren();
@@ -3635,5 +3638,18 @@ if (ytAnuncios) {
   PREF_PUSH.push(syncAnuncios);
   ytAnuncios.addEventListener("change", () => {
     api("/api/anuncios", { on: ytAnuncios.checked }).then((st) => { ytAnuncios.checked = !!st.on; }).catch(() => syncAnuncios());
+  });
+}
+
+// 0.64: saltar patrocinios dentro del vídeo (patrocinios.py, SponsorBlock). Mismo patrón.
+const ytPatrocinios = document.querySelector("#yt-patrocinios");
+if (ytPatrocinios) {
+  const syncPatrocinios = () => api("/api/patrocinios", {}).then((st) => {
+    ytPatrocinios.disabled = !st.available || !!st.disabled;
+    if (document.activeElement !== ytPatrocinios) ytPatrocinios.checked = !!st.on;
+  }).catch(() => {});
+  PREF_PUSH.push(syncPatrocinios);
+  ytPatrocinios.addEventListener("change", () => {
+    api("/api/patrocinios", { on: ytPatrocinios.checked }).then((st) => { ytPatrocinios.checked = !!st.on; }).catch(() => syncPatrocinios());
   });
 }

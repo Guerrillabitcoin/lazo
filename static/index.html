@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.63</title>
-    <link rel="stylesheet" href="/app.css?v=0.63" />
+    <title>LaZoo 0.64</title>
+    <link rel="stylesheet" href="/app.css?v=0.64" />
     <link rel="icon" type="image/svg+xml" href="/img/infinito-naranja.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/img/icono-192.png" />
     <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
@@ -20,7 +20,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.63</p>
+          <p class="ver">0.64</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -40,7 +40,7 @@
           <label class="file-label qr-photo">Elegir foto del QR<input id="qr-photo" type="file" accept="image/*" hidden /></label>
           <p id="qr-msg" class="hint" aria-live="polite"></p>
           <button type="button" class="conn-diag">Copiar diagnóstico de conexión</button>
-          <p class="hint">También puedes abrir la app de cámara del móvil y apuntar al QR de la pantalla del PC: abrirá LaZoo y pedirá permiso al PC. La clave solo llega cuando lo aceptas allí.</p>
+          <p class="hint">También vale la cámara del móvil apuntando al QR: abre LaZoo y pide permiso al PC.</p>
         </div>
       </section>
       <section id="wait" class="panel wait" hidden aria-live="polite">
@@ -128,7 +128,7 @@
                   <small>Máximo de mensajes por segundo. Más = más detalle, pero con Wi-Fi mala puede formar cola.</small></label>
                 <button id="fino-reset" type="button">Restablecer valores</button>
               </section>
-              <label class="diag-smooth"><input id="diag-vigilante" type="checkbox" checked /> Vigilante del ratón del PC (vuelve al cursor normal si usas el ratón de verdad; apágalo para probar si causa los saltos)</label>
+              <label class="diag-smooth"><input id="diag-vigilante" type="checkbox" checked /> Vigilante del ratón del PC (devuelve el cursor normal si usas el ratón de verdad)</label>
               <p class="screen-note">«Copiar stats» copia el resumen de los últimos segundos, aunque ya hayas parado de mover.</p>
               <details class="diag-help"><summary>¿Qué mide cada número?</summary>
               <p><b>Movimientos por segundo</b>: los que manda el móvil. Lo normal es ~60 al mover el dedo.</p>
@@ -218,8 +218,10 @@
               <button type="button" data-yt="theater">Cine</button>
               <button type="button" data-yt="captions">Subtítulos</button>
             </div>
-            <label class="diag-smooth yt-sigues"><input id="yt-sigues" type="checkbox" checked /> Evitar el aviso «¿Sigues ahí?» de YouTube (el PC pulsa «Sí» solo, sin mover el ratón)</label>
-            <label class="diag-smooth yt-sigues"><input id="yt-anuncios" type="checkbox" checked /> Saltar anuncios (el PC pulsa «Saltar» en cuanto YouTube lo deja; la flecha ⏭ también lo intenta)</label>
+            <label class="diag-smooth yt-sigues"><input id="yt-sigues" type="checkbox" checked /> Evitar el aviso «¿Sigues ahí?»</label>
+            <label class="diag-smooth yt-sigues"><input id="yt-anuncios" type="checkbox" checked /> Saltar anuncios (también con ⏭)</label>
+            <label class="diag-smooth yt-sigues"><input id="yt-patrocinios" type="checkbox" checked /> Saltar patrocinios del vídeo (SponsorBlock)</label>
+            <p class="mini-label yt-aviso">Sale a internet: sponsor.ajay.app ve tu IP, no qué vídeo ves. Más en «Sobre».</p>
             <form id="yt-search" class="phrase">
               <input id="yt-q" maxlength="120" placeholder="Buscar" />
               <button type="submit">Buscar</button>
@@ -254,7 +256,7 @@
         <div id="view-bridge" class="view" hidden>
           <article class="deck">
             <p class="pasar-title">Pasar por wifi</p>
-            <p class="notes-info pasar-privado"><b>No pasa por internet.</b> Va directo entre este móvil y el PC por tu Wi-Fi, en un puente cifrado (LZ2) con una clave que solo tienen este móvil y el PC. Quien escuche la Wi-Fi solo ve datos cifrados. Las notas se guardan cifradas en el PC (no en ninguna nube) y puedes borrarlas cuando quieras.</p>
+            <p class="notes-info pasar-privado"><b>No pasa por internet.</b> Va cifrado (LZ2) por tu Wi-Fi con la clave de este móvil. Las notas se guardan cifradas en el PC y puedes borrarlas.</p>
             <p class="sys-title">Notas y portapapeles</p>
             <form id="clip-form" class="phrase">
               <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Nota"></textarea>
@@ -263,7 +265,7 @@
                 <button type="button" id="clip-to-pc" class="clip-to-pc">Al PC</button>
               </div>
             </form>
-            <p class="hint">«Guardar» la deja en la lista. «Al PC» además la pone en el portapapeles del PC, lista para Ctrl+V. Lo que copies en el PC también aparece aquí. Nada llega solo al móvil: para traerla, pulsa «Copiar».</p>
+            <p class="hint">«Al PC» la pone además en el portapapeles del PC (Ctrl+V). Lo que copias en el PC aparece aquí; al móvil solo pasa si pulsas «Copiar».</p>
             <ul id="clips" class="list"></ul>
             <button id="clips-clear" type="button" class="clips-clear" hidden>Borrar todas las notas</button>
           </article>
@@ -274,7 +276,7 @@
               <label class="file-label">Fotos y vídeos<input id="send-media" type="file" accept="image/*,video/*" multiple hidden /></label>
               <label id="send-dir-label" class="file-label">Carpeta<input id="send-dir" type="file" webkitdirectory multiple hidden /></label>
             </div>
-            <p class="hint">«Archivos» abre el selector de archivos del móvil (PDF, ZIP, APK, documentos… de cualquier tamaño). Si se abre en «Recientes», toca ☰ arriba a la izquierda y elige «Descargas», «Documentos» o la memoria del móvil. «Carpeta» manda una carpeta entera; algunos navegadores de móvil no lo permiten y entonces solo deja elegir archivos sueltos.</p>
+            <p class="hint">Si el selector abre en «Recientes», toca ☰ y elige «Descargas» o la memoria del móvil. «Carpeta» no funciona en todos los navegadores.</p>
             <p id="send-dir-warn" class="hint warn-err" hidden></p>
             <div id="xfer" class="xfer" hidden>
               <div class="xfer-track" role="progressbar" aria-label="Progreso total" aria-valuemin="0" aria-valuemax="100"><div id="xfer-bar"></div></div>
@@ -309,7 +311,7 @@
             <div id="sys-swap-pick" class="screen-buttons" hidden></div>
             <p id="sys-swap-note" class="screen-note"></p>
             <p class="sys-title">SESIÓN</p>
-            <label class="diag-smooth"><input id="sys-despierto" type="checkbox" checked /> No bloquear ni dormir el PC mientras uso el móvil (hasta 1 h 21 min después del último uso; el cursor no se mueve)</label>
+            <label class="diag-smooth"><input id="sys-despierto" type="checkbox" checked /> No bloquear ni dormir el PC mientras uso el móvil (hasta 1 h 21 min sin usarlo)</label>
             <button id="sys-lock" type="button" class="lock-red">Bloquear PC</button>
             <p id="sys-na" class="screen-note" hidden></p>
           </article>
@@ -374,7 +376,7 @@
             <div class="about-head">
               <span class="lz-logo about-logo" data-estado="conectado" data-fijo="conectado" title="LaZoo"></span>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.63</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.64</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -384,18 +386,26 @@
             <p id="about-update" class="hint about-update"></p>
             <section class="about-box">
               <h3>Qué es</h3>
-              <p>LaZoo convierte el móvil en mando del PC: ratón, ventanas, YouTube, Spotify, notas y puente de archivos. Funciona solo en tu red local, sin cuentas, sin nube y sin rastreadores.</p>
+              <p>El móvil como mando del PC: ratón, teclado, ventanas, YouTube, Spotify y pasar notas y archivos por la Wi-Fi. Sin cuentas, sin nube y sin rastreadores.</p>
             </section>
             <section class="about-box">
-              <h3>Datos técnicos</h3>
+              <h3>Seguridad</h3>
               <ul class="about-facts">
-                <li>Va por HTTP en tu Wi-Fi, sin certificado. Por eso el navegador dice «no seguro».</li>
-                <li>La protección es un cifrado y una firma propios (LZ2) con una clave que solo viaja en el QR.</li>
-                <li>Ese cifrado no lo ha auditado nadie externo.</li>
-                <li>Sin cámara, entras con un PIN de 6 dígitos. Tras varios fallos se bloquea un rato.</li>
-                <li>La clave cambia cada vez que reinicias LaZoo en el PC.</li>
-                <li>Solo acepta conexiones de tu red local.</li>
-                <li>Cada móvil nuevo hay que aceptarlo en el PC la primera vez.</li>
+                <li>Va por HTTP dentro de tu Wi-Fi (por eso el navegador dice «no seguro»), pero todo viaja cifrado y firmado (LZ2) con una clave distinta para cada móvil.</li>
+                <li>Cada móvil nuevo se acepta en el PC. El QR o el PIN solo sirven para pedirlo; tras varios PIN fallidos se bloquea un rato.</li>
+                <li>El PC recuerda los móviles aceptados para que se reconecten solos (se apaga en el Panel).</li>
+                <li>El cifrado es propio y nadie externo lo ha auditado.</li>
+                <li>App del móvil: <span id="about-app">navegador</span>. La interfaz la pone el PC: las novedades llegan sin reinstalar.</li>
+              </ul>
+            </section>
+            <section class="about-box" id="about-internet">
+              <h3>Cuándo sale algo a internet</h3>
+              <p>Entre el móvil y el PC nada sale de tu Wi-Fi. El PC solo sale a internet para:</p>
+              <ul class="about-facts">
+                <li><b>Saltar patrocinios</b> (activado de serie): pregunta a SponsorBlock con 4 letras del hash del vídeo, no cuál es. Sí ve la IP de tu casa y cuándo cambias de vídeo.</li>
+                <li><b>Buscar en YouTube</b> desde el móvil: va a youtube.com.</li>
+                <li><b>Buscar actualización</b>: consulta GitHub, solo al pulsarlo.</li>
+                <li>«Saltar anuncios» y «¿Sigues ahí?» no salen: leen YouTube en el propio PC.</li>
               </ul>
             </section>
             <section id="about-prints-box" class="about-box" hidden>
@@ -433,8 +443,8 @@
         </div>
       </section>
     </main>
-    <script src="/logo.js?v=0.63"></script>
-    <script src="/seal.js?v=0.63"></script>
-    <script src="/app.js?v=0.63"></script>
+    <script src="/logo.js?v=0.64"></script>
+    <script src="/seal.js?v=0.64"></script>
+    <script src="/app.js?v=0.64"></script>
   </body>
 </html>

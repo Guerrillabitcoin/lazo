@@ -17,7 +17,7 @@ Un solo protocolo. Tres programas, no tres apps distintas.
 
 El PC controlado puede ser Windows, Linux o Mac. El móvil puede ser Android, GrapheneOS o iOS. Cualquier mando habla con cualquier anfitrión.
 
-Sigue siendo local. La misma Wi-Fi, nada sale a internet, no se abre el 8787 en el router. Nombre público **LaZoo**. En el logo, **LaZo**: la segunda o se abre en verde al conectar y se cierra en rojo al cortarse, en el móvil y en el PC.
+Sigue siendo local. La misma Wi-Fi, no se abre el 8787 en el router y nada sale a internet salvo lo que lista «Sobre → Cuándo sale algo a internet» (`#about-internet`): hoy SponsorBlock (casilla de patrocinios), la búsqueda de YouTube y «Buscar actualización». Cualquier conexión nueva se añade ahí y en la casilla que la activa. Nombre público **LaZoo**. En el logo, **LaZo**: la segunda o se abre en verde al conectar y se cierra en rojo al cortarse, en el móvil y en el PC.
 
 ## Decisiones cerradas
 
@@ -31,6 +31,9 @@ Sigue siendo local. La misma Wi-Fi, nada sale a internet, no se abre el 8787 en 
 - El puente es local. Quien escuche la Wi-Fi ve el sello `LZ2`, no el texto.
 - Interfaz en español, fondo oscuro, naranja `#e07a3d`, trackpad oscuro con huella naranja.
 - Cada entrega instalable sube de versión: carpeta `LaZoo-X.Y`, `VERSION.txt`, GitHub Release, y el mismo número en el logo.
+- La APK lleva su propio número (decisión del dueño, 10 nov): `versionName` = «App N» (N entero, App 1 desde 0.64) y `versionCode` = 63 + N, que nunca baja. Solo sube si cambia algo de `android/`; funciones y rediseños van en el `.exe` (la interfaz la sirve el PC). Release: `LaZoo-App-N.apk`. «Sobre» enseña «App N» (`#about-app`).
+- La APK siempre es retrocompatible con el `.exe` (decisión del dueño, 10 nov): una APK nueva funciona con un `.exe` anterior y una APK vieja con un `.exe` nuevo. La APK solo abre la página del PC; no llama a `/api/*` por su cuenta. La web usa cada función de `LaZooApp` solo tras `typeof … === "function"` y tiene que ir igual sin ella (navegador o APK vieja). Lo comprueba `test_v064.ApkRetrocompatible`.
+- En cada entrega o traspaso, publicar el enlace de descarga del `.exe` y de la APK (Release o artefactos de «Construir LaZoo») y decir si la APK cambió desde la anterior.
 
 No rompas el ratón, el cursor, las ventanas, YouTube, Spotify, el volumen, las notas, el puente, el logo ni la pantalla del QR. Las pruebas (atajos, captura, brillo, batería, dormir, abrir una web, me gusta y cola de Spotify) se quedan en la pestaña Pruebas.
 
@@ -55,6 +58,15 @@ Después, y solo después: fluidez del ratón, barra de subida del puente, ignor
 
 ## Estado (0.61)
 
+- 0.64 (rama `claude/lazo-patrocinios`, de Claude, desde `beta` 0.63; pendiente de revisión del bot LaZoo y de la prueba del dueño en Windows): **saltar patrocinios dentro del vídeo** (SponsorBlock), pedido por el dueño el 8 nov. Es la primera consulta de LaZoo a un servidor de fuera (`sponsor.ajay.app`): solo sale el prefijo de 4 letras del SHA-256 del id (`prefijo`, `url_consulta` con `category=sponsor&actionType=skip`, User-Agent `LaZoo`, sin cookies). 404 = sin tramos. Caché en memoria: `CACHE_OK` 30 min, `CACHE_NADA` 10 min, `CACHE_ERROR` 90 s.
+  - `patrocinios.py` (`PATROCINIOS`, subclase de `sigues.Sigues`, hilo `lazo-patrocinios`, solo Windows). PowerShell oculto (`-EncodedCommand`, órdenes JSON por stdin):
+    - `mira {hwnd, url, foco}`: lee por UI Automation la dirección de la barra del navegador. Solo mira los `Edit` fuera de `Document`/`Chrome_RenderWidgetHostHWND`/`TabItem`, con caché por hwnd, y solo al cambiar el título o cada 5 s si aún no hay id. Devuelve también las sesiones multimedia de Windows: `pos` extrapolada con `LastUpdatedTime` × velocidad, `len`, `vel` y `saltar` = `IsPlaybackPositionEnabled`. Con `foco`, dice si el foco está en un campo de texto.
+    - `salta {app, titulo, desde, hasta}`: comprueba que sigue sonando y dentro del tramo, llama a `TryChangePlaybackPositionAsync` (sin teclas, cursor, foco ni JS) y verifica la posición (8 × 200 ms).
+  - Sesión: la de título contenido en el de la ventana de YouTube (nunca Spotify). En el minirreproductor, la de un título ya visto con su id (`titulos`).
+  - Tramos: `tramos` (solo los del `videoID`). `validos` exige la duración real: si `videoDuration` difiere más de `TOLERANCIA` (2 s), no se salta (otra versión, o suena un anuncio). `unir` junta los separados por menos de 1 s. `decidir` salta si `inicio − ANTES ≤ pos < fin − MARGEN_FIN`; si no, espera justo hasta `inicio − ADELANTO`, como mucho `PASO` (1,5 s). Una vez por tramo y vídeo (`hechos`); volver al principio los rearma.
+  - Si Windows aceptó el salto pero tarda en notarse, queda `pendiente` y nunca se pulsan teclas encima (`aceptados`). Si el navegador no deja (`saltar` falso), solo con YouTube YA delante y sin foco en un campo: `l`/`→` (`pasos`, sin pasarse del final). Si no, nada visible.
+  - Contador `patrocinios_contador` con `ahorrado`/`ahorrado_hoy` (s) en `ajustes.json`; `Sigues._contador()` es nuevo, para esto. `GET/POST /api/patrocinios`, `/api/conexion.patrocinios(_info)`, `--sin-patrocinios` / `LAZO_SIN_PATROCINIOS=1`. Móvil `#yt-patrocinios`, Panel `#patrocinios` + `#patrocinios-cuenta`.
+  - Límites: YouTube en una pestaña de fondo (como el resto de YouTube en LaZoo) y navegadores que no dan la posición a Windows. Sin probar aún en Windows real. Prueba: `test_v064.py`.
 - 0.63 (rama `claude/lazo-063`, de Claude, encima de 0.62; integrada para `beta` por Grok Bot con VERSION 0.63, versionCode 63; APK y .exe pendientes de compilar). Prueba de un familiar con el PC en la tele:
   - **QR en la APK**: la página del PC va por HTTP, `getUserMedia` no existe y el `input capture` caía en `onShowFileChooser` (galería). `qrStart` llama a `LaZooApp.scan()` si existe (escáner propio con cámara). Solo web, vale con la APK de siempre. Prueba: `test_qr_camara.py`.
   - **Un móvil, una sesión (sin expulsar a nadie)**: `Approvals._twins_unlocked` — al aceptar un id, otro aprobado con la misma IP de la red, el mismo `label` y `TWIN_IDLE` (600 s) sin hablar (o sin hablar desde el arranque) se MARCA `duplicado` («id antiguo»): sigue aprobado y con su clave; si vuelve (`check`) entra al momento y se desmarca. Nunca se expulsa por esto: un móvil de verdad puede pasar días en el bolsillo (con DHCP otro móvil puede heredar su IP). Nunca desde 127.0.0.1. `device_label` distingue la APK (`; wv)`) → «Android · App LaZoo». `dispositivos.json` guarda `ip` y `duplicado` («1»/«»); un recordado sin ver da `ago = -1`. APK: `LaZooApp.deviceId(candidato)` (SharedPreferences `id`) = id fijo aunque cambie la IP del PC; app.js lo adopta y borra `lazo-key` si cambia (empareja una vez). Listas del móvil y del Panel con «Este móvil», id corto, «visto hace…» y los antiguos en gris con «Quitar»; «Salir» pide confirmación.

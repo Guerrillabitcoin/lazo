@@ -106,7 +106,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.63</p>
+          <p class="ver">0.64</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -116,16 +116,20 @@
         <label class="chip" title="Guarda la clave cifrada en este PC para que los móviles aprobados se reconecten solos tras reiniciar">
           <input id="recordar" type="checkbox" /> Recordar dispositivos
         </label>
-        <label class="chip" title="Si YouTube pregunta «¿Quieres seguir viendo?», LaZoo pulsa «Sí» por accesibilidad, sin mover el ratón ni traer la ventana delante">
+        <label class="chip" title="Pulsa «Sí» en «¿Quieres seguir viendo?» sin mover el ratón ni traer la ventana delante">
           <input id="sigues" type="checkbox" /> Evitar el aviso «¿Sigues ahí?» de YouTube
         </label>
         <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
         <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
-        <label class="chip" title="Cuando YouTube deja saltar un anuncio, LaZoo pulsa «Saltar» por accesibilidad, sin mover el ratón ni traer la ventana delante">
+        <label class="chip" title="Pulsa «Saltar» en cuanto YouTube lo deja, sin mover el ratón ni traer la ventana delante">
           <input id="anuncios" type="checkbox" /> Saltar anuncios de YouTube
         </label>
         <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
-        <label class="chip" title="Mientras un móvil use LaZoo (y hasta 1 h 21 min después), Windows no apaga la pantalla, no bloquea la sesión ni suspende el PC. El cursor no se mueve.">
+        <label class="chip" title="Salta el tramo en que el vídeo habla de su patrocinador, sin mover el ratón ni traer la ventana. Sale a internet: SponsorBlock ve tu IP, no qué vídeo ves.">
+          <input id="patrocinios" type="checkbox" /> Saltar patrocinios dentro del vídeo (se conecta a SponsorBlock)
+        </label>
+        <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
+        <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
           <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
         </label>
       </header>
@@ -166,7 +170,7 @@
         </div>
         <section id="pasar" class="box">
           <h2>Pasar por wifi</h2>
-          <p class="privado"><b>No pasa por internet.</b> Va directo entre el móvil y este PC por tu Wi-Fi, en un puente cifrado (LZ2) con una clave que solo tienen este PC y cada móvil aceptado. Las notas se guardan cifradas en este PC. Quien escuche la Wi-Fi solo ve datos cifrados.</p>
+          <p class="privado"><b>No pasa por internet.</b> Va cifrado (LZ2) por tu Wi-Fi, con una clave por móvil. Las notas se guardan cifradas en este PC.</p>
           <div class="pasar-cols">
         <section id="clip-box">
           <h3>Notas · Portapapeles Móvil ↔ PC</h3>
@@ -394,6 +398,19 @@
 
       const $ = (sel) => document.querySelector(sel);
       const STATES = { aprobado: "Conectado", pendiente: "Esperando aprobación", rechazado: "Rechazado (5 min)" };
+      // 0.64: «Patrocinios saltados: 3 · hoy: 1 · ahorrado: 4 min».
+      function ahorradoTexto(segundos) {
+        const s = Math.max(0, Math.round(Number(segundos) || 0));
+        if (s < 60) return s + " s";
+        const m = Math.round(s / 60);
+        return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0") + " min";
+      }
+      function patrociniosTexto(info) {
+        const total = Number(info.total) || 0;
+        let txt = "Patrocinios saltados: " + total;
+        if (total) txt += " · hoy: " + (Number(info.hoy) || 0) + " · ahorrado: " + ahorradoTexto(info.ahorrado);
+        return txt;
+      }
       function siguesTexto(info, now) {
         const total = Number(info.total) || 0;
         let txt = "Avisos quitados: " + total;
@@ -475,6 +492,8 @@
           if (document.activeElement !== $("#anuncios")) $("#anuncios").checked = !!data.anuncios;
           if (document.activeElement !== $("#despierto")) $("#despierto").checked = !!data.despierto;
           if (data.anuncios_info) $("#anuncios-cuenta").textContent = `Anuncios saltados: ${data.anuncios_info.total || 0} · hoy: ${data.anuncios_info.hoy || 0}`;
+          if (document.activeElement !== $("#patrocinios")) $("#patrocinios").checked = !!data.patrocinios;
+          if (data.patrocinios_info) $("#patrocinios-cuenta").textContent = patrociniosTexto(data.patrocinios_info);
           $("#st-net").textContent = (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red";
         } catch (_err) {}
       }
@@ -523,6 +542,9 @@
       $("#anuncios").addEventListener("change", (event) => {
         devCall("/api/anuncios", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
+      $("#patrocinios").addEventListener("change", (event) => {
+        devCall("/api/patrocinios", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
+      });
       $("#sigues").addEventListener("change", (event) => {
         devCall("/api/sigues", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
@@ -547,6 +569,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.63"></script>
+    <script src="/logo.js?v=0.64"></script>
   </body>
 </html>

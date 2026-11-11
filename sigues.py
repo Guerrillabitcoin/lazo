@@ -225,6 +225,10 @@ class Sigues:
         with _SAVE_LOCK:  # 0.63: sigues y anuncios comparten ajustes.json
             self._save_now(p)
 
+    def _contador(self) -> dict[str, Any]:
+        # 0.64: patrocinios.py añade aquí los segundos ahorrados.
+        return {"total": self.total, "hoy": self.hoy, "dia": self.dia, "ultimo": self.ultimo}
+
     def _save_now(self, p: Path) -> None:
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
@@ -235,7 +239,7 @@ class Sigues:
                 except ValueError:
                     data = {}
             data[self.KEY] = self.on
-            data[self.COUNT] = {"total": self.total, "hoy": self.hoy, "dia": self.dia, "ultimo": self.ultimo}
+            data[self.COUNT] = self._contador()
             tmp = p.with_name(f"{p.name}.{os.getpid()}.tmp")
             tmp.write_text(json.dumps(data), encoding="utf-8")
             os.replace(tmp, p)

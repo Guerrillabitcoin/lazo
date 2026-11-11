@@ -134,7 +134,8 @@ jobs:
           echo "VER=$VER" >> "$GITHUB_ENV"
           mkdir -p salida
           (cd artefactos/LaZoo-windows && zip -qr -X "../../salida/LaZoo-$VER-windows.zip" .)
-          cp artefactos/LaZoo-android/LaZoo.apk "salida/LaZoo-$VER.apk"
+          APP="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' android/AndroidManifest.xml)"
+          cp artefactos/LaZoo-android/LaZoo.apk "salida/LaZoo-App-$APP.apk"
           echo "FIRMA_APK=$(cat artefactos/LaZoo-android/firma-apk.txt)" >> "$GITHUB_ENV"
           git archive --format=zip --prefix="LaZoo-$VER/" -o "salida/LaZoo-$VER.zip" "$TAG"
           cd salida && sha256sum LaZoo-* > SHA256SUMS && cat SHA256SUMS
