@@ -98,6 +98,12 @@ class Arbol:
         except Exception:  # noqa: BLE001
             return None
 
+    def fijar(self, n: Any, valor: float) -> bool:
+        try:
+            return bool(self.A.Value.set_current_value(n, float(valor)))
+        except Exception:  # noqa: BLE001
+            return False
+
     def pulsar(self, n: Any) -> bool:
         try:
             return bool(self.A.Action.do_action(n, 0))
@@ -192,6 +198,25 @@ def buscar_saltar(t: Any, raiz: Any) -> Any:
         if t.rol(n) in ("push button", "button") and t.visible(n):
             if anuncios._LIMPIA.sub("", _low(t.nombre(n))) in nombres:
                 return n
+    return None
+
+
+def boton_atajo(t: Any, raiz: Any, atajo: str) -> Any:
+    """El botón del reproductor cuyo nombre lleva su atajo: «Subtítulos (c)», «Modo cine (t)»,
+    «Pantalla completa (f)», «Silenciar (m)»… Así no hace falta pulsar la tecla (0.68)."""
+    marca = f"({atajo.lower()})"
+    for n in recorrer(t, raiz):
+        if t.rol(n) in ("push button", "button", "toggle button") and marca in _low(t.nombre(n)):
+            return n
+    return None
+
+
+def deslizador_volumen(t: Any, raiz: Any) -> Any:
+    import mando
+
+    for n in recorrer(t, raiz):
+        if t.rol(n) == "slider" and any(v in _low(t.nombre(n)) for v in mando.VOLUMEN):
+            return n
     return None
 
 
@@ -346,6 +371,31 @@ class Linux:
     def orden(self, line: str) -> dict[str, Any]:
         with self.lock:
             return self._orden(line)
+
+    def boton(self, atajo: str) -> bool:
+        """0.68: pulsa un botón del reproductor por su atajo (c, t, f, m, i)."""
+        with self.lock:
+            raiz = self._raiz()
+            if raiz is None:
+                return False
+            n = boton_atajo(self.t, self._repro(raiz) or raiz, atajo)
+            return bool(n is not None and self.t.pulsar(n))
+
+    def fijar_volumen(self, nivel: int) -> dict[str, Any] | None:
+        """0.68: pone el volumen del reproductor exacto (0-100) y devuelve el que queda."""
+        with self.lock:
+            raiz = self._raiz()
+            if raiz is None:
+                return None
+            zona = self._repro(raiz) or raiz
+            d = deslizador_volumen(self.t, zona)
+            if d is None:
+                return None
+            v = self.t.valor(d)
+            maximo = v[1] if v and v[1] else 100.0
+            if not self.t.fijar(d, max(0, min(100, int(nivel))) * maximo / 100):
+                return None
+            return volumen(self.t, zona)
 
     def _salta(self, cmd: dict) -> dict[str, Any]:
         titulo = _low(cmd.get("titulo"))

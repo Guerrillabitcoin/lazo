@@ -75,6 +75,15 @@ def _input():
     global _mouse, _keyboard
     if _mouse is not None and _keyboard is not None:
         return _mouse, _keyboard
+    if SYSTEM == "Linux":
+        try:
+            import ydo  # 0.68: Wayland con ydotool (clic, rueda, teclas, texto)
+
+            if ydo.usable():
+                _mouse, _keyboard = ydo.Raton(), ydo.Teclado()
+                return _mouse, _keyboard
+        except Exception:  # noqa: BLE001 (sin ydotool: pynput como siempre)
+            pass
     try:
         from pynput.keyboard import Controller as KeyController
         from pynput.mouse import Controller as MouseController
@@ -88,7 +97,9 @@ def _input():
 
 
 def _button(name: str):
-    _input()
+    mouse, _keyboard = _input()
+    if type(mouse).__module__ == "ydo":  # 0.68: ydotool entiende el nombre
+        return name if name in ("left", "right", "middle") else "left"
     from pynput.mouse import Button
 
     if name == "right":
@@ -130,12 +141,14 @@ def set_move_hook(fn) -> None:
     _move_hook = fn
 
 
-def backend_for(system: str, display: str | None, wayland: str | None) -> str:
+def backend_for(system: str, display: str | None, wayland: str | None, ydotool_ready: bool = False) -> str:
     if system == "Windows":
         return "sendinput"
     if system == "Darwin":
         return "cgevent"
     if system == "Linux":
+        if wayland and ydotool_ready:  # 0.68: en Wayland, XWayland no mueve el ratón de verdad
+            return "ydotool"
         if display:
             return "xtest"
         if wayland:
@@ -868,7 +881,7 @@ def set_smoothing(on) -> dict:
 def _dispatch_move(dx: int, dy: int) -> None:
     import os
 
-    kind = backend_for(SYSTEM, os.environ.get("DISPLAY"), os.environ.get("WAYLAND_DISPLAY"))
+    kind = backend_for(SYSTEM, os.environ.get("DISPLAY"), os.environ.get("WAYLAND_DISPLAY"), _ydotool_ready())
     if kind == "sendinput" and _win_move(dx, dy):
         return
     if kind == "cgevent" and _mac_move(dx, dy):
@@ -1158,6 +1171,29 @@ def _display_ok() -> bool:
     import os
 
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _wayland() -> bool:
+    import os
+
+    return os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland" or bool(os.environ.get("WAYLAND_DISPLAY"))
+
+
+def mando_silencio(vol: dict) -> bool | None:
+    import mando
+
+    return mando.es_silencio(str(vol.get("boton") or ""))
+
+
+def _ydotool_ready() -> bool:
+    if SYSTEM != "Linux":
+        return False
+    try:
+        import ydo
+
+        return ydo.usable()
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _ydotool(args: list[str]) -> None:
@@ -2330,11 +2366,18 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
             # 0.63: durante un anuncio, la flecha primero intenta «Saltar» (sin teclas ni foco).
             if _skip_ad_now():
                 return {"detail": "Anuncio saltado", "title": row["title"], "level": _levels["youtube"], **state}
-    if not _focus_for_keys(row["id"]):
-        raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
-    time.sleep(0.18)
-    with _lock:
-        _yt_keys(keys)
+    hecho = False
+    if SYSTEM == "Linux":
+        quien = {"Al inicio del vídeo": "restart", "Vídeo anterior": "history_back"}.get(detail, action) if action == "prev" else action
+        hecho = _youtube_linux(action, quien, row)
+        if not hecho and _wayland() and action in ("subs_up", "subs_down"):
+            raise ControlError("En Linux con Wayland el tamaño de los subtítulos aún no va: cámbialo en los ajustes de YouTube.")
+    if not hecho:
+        if not _focus_for_keys(row["id"]):
+            raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
+        time.sleep(0.18)
+        with _lock:
+            _yt_keys(keys)
     if action == "play":
         if state.get("playing") is not None:
             state["playing"] = not state["playing"]
@@ -2410,6 +2453,11 @@ def _youtube_fullscreen() -> dict[str, Any]:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
     real = _win_is_fullscreen(row["id"])
     is_full = _yt["full"] if real is None else real
+    lin = _linux_yt() if SYSTEM == "Linux" else None
+    if lin is not None and lin.boton("f"):  # 0.68: el botón del reproductor, sin teclas
+        _yt["full"] = not is_full
+        return {"detail": "Pantalla completa" if _yt["full"] else "Salir de pantalla completa",
+                "title": row["title"], "level": _levels["youtube"], "full": _yt["full"]}
     if not _focus_for_keys(row["id"]):
         raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
     time.sleep(0.18)
@@ -2521,6 +2569,8 @@ def _youtube_speed(raw: object) -> dict[str, Any]:
     if current is None and str(_YT_MEM.get("id")) == str(row["id"]):
         current = _YT_MEM.get("speed")
     taps, reset = youtube_speed_plan(current, rate)
+    if taps and SYSTEM == "Linux" and _wayland():
+        raise ControlError("En Linux con Wayland la velocidad aún no va desde el móvil: cámbiala en los ajustes de YouTube.")
     if taps:
         if not _focus_for_keys(row["id"]):
             raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
@@ -2597,6 +2647,13 @@ def _youtube_volume(level: int) -> dict[str, Any]:
         row = _find_youtube_unlocked()
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
+    lin = _linux_yt() if SYSTEM == "Linux" else None
+    if lin is not None:  # 0.68: en Linux, el deslizador del reproductor exacto
+        vol = lin.fijar_volumen(level)
+        if vol and vol.get("hay"):
+            _levels["youtube"] = vol["nivel"]
+            return {"detail": "YouTube", "title": row["title"], "level": vol["nivel"], "vol_real": True,
+                    "muted": mando_silencio(vol)}
     real = _yt_real_volume(row, fresh=True)  # 0.65: desde el volumen de verdad, si se puede leer
     steps = int(round((level - _levels["youtube"]) / 5))
     steps = max(-20, min(20, steps))
@@ -2818,11 +2875,64 @@ def _find_youtube_unlocked() -> dict[str, str] | None:
     elif SYSTEM == "Darwin":
         rows = _mac_windows()
     else:
-        rows = _linux_windows()
+        try:
+            rows = _linux_windows()
+        except ControlError:
+            rows = []  # 0.68: sin wmctrl (Wayland) se busca por accesibilidad
     row = pick_youtube(rows)
+    if row is None and SYSTEM == "Linux":
+        lin = _linux_yt()
+        row = lin.find_row() if lin else None
     if row is not None:
         remember_youtube(row)
     return row
+
+
+def _linux_yt() -> Any:
+    """0.68: el YouTube por accesibilidad de Linux (linux_yt.LINUX), si está."""
+    try:
+        import linux_yt
+
+        return linux_yt.LINUX
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _mpris(title: str, *args: str) -> bool:
+    """0.68: una orden de playerctl al reproductor de este YouTube (sin teclas ni foco)."""
+    import medios
+
+    if not _which("playerctl"):
+        return False
+    player = str((medios.browser_session(title) or {}).get("app") or "")
+    if not player or not re.fullmatch(r"[A-Za-z0-9_.\-]{1,120}", player):
+        return False
+    return getattr(_run(["playerctl", "-p", player, *args]), "returncode", 1) == 0
+
+
+# 0.68: en Linux, qué acción va por los controles multimedia y cuál pulsando el botón del reproductor.
+LINUX_MPRIS = {"play": ["play-pause"], "back": ["position", "10-"], "forward": ["position", "10+"],
+               "next": ["next"], "restart": ["position", "0"], "history_back": ["previous"]}
+LINUX_BOTON = {"mute": "m", "captions": "c", "theater": "t", "full": "f"}
+
+
+def _youtube_linux(action: str, keys_action: str, row: dict[str, str]) -> bool:
+    """0.68: YouTube en Linux sin teclas: controles multimedia (MPRIS) y botones del reproductor
+    por accesibilidad. True si se hizo; False = probar con teclas como antes (X11)."""
+    if keys_action in LINUX_MPRIS and _mpris(row["title"], *LINUX_MPRIS[keys_action]):
+        return True
+    lin = _linux_yt()
+    if lin is None:
+        return False
+    if action in LINUX_BOTON:
+        return lin.boton(LINUX_BOTON[action])
+    if action in ("volup", "voldown"):
+        actual = (_yt_real_volume(row, fresh=True) or {}).get("level", _levels["youtube"])
+        vol = lin.fijar_volumen(actual + (5 if action == "volup" else -5))
+        if vol and vol.get("hay"):
+            _levels["youtube"] = vol["nivel"]
+            return True
+    return False
 
 
 def _focus_unlocked(window_id: str) -> None:

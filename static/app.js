@@ -44,7 +44,7 @@ const deviceId = (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.67";
+const PAGE_VERSION = "0.68";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -153,6 +153,20 @@ const TOOLS = [
   { id: "about", name: "Sobre LaZoo" },
 ];
 const PINNED = ["mouse"];
+/* 0.68: pastillas que no tienen sentido con el PC al que estás conectado (en Linux, Ventanas:
+   Wayland no deja traer delante ventanas de otros programas). Se quitan del dock sin borrar
+   el orden guardado: con un PC Windows vuelven en su sitio. */
+const hiddenTools = new Set();
+
+function applyPlatform(platform) {
+  const want = platform === "Linux" ? ["windows"] : [];
+  const same = want.length === hiddenTools.size && want.every((id) => hiddenTools.has(id));
+  if (same) return;
+  hiddenTools.clear();
+  want.forEach((id) => hiddenTools.add(id));
+  if (hiddenTools.has(tab)) openCube("mouse");
+  renderDock();
+}
 
 let tab = "mouse";
 let winId = "";
@@ -586,6 +600,7 @@ async function refreshStatus() {
   if (document.hidden) return;
   try {
     const data = await api("/api/status", null, "GET");
+    applyPlatform(data.platform);
     document.querySelectorAll("[data-cursor]").forEach((button) => {
       button.classList.toggle("on", button.dataset.cursor === data.cursor);
     });
@@ -1346,6 +1361,7 @@ function arrangeEnd() {
   if (!moved) return;
   const fixed = dock.querySelector(".dock-fixed");
   order = [...fixed.querySelectorAll("button"), ...scroller.querySelectorAll("button")].map((item) => item.dataset.cube);
+  order = [...order, ...[...hiddenTools].filter((id) => !order.includes(id))];  // 0.68: las ocultas no se pierden
   try {
     localStorage.setItem("lazo-order", JSON.stringify(order));
   } catch (_err) {
@@ -1430,7 +1446,7 @@ function renderDock() {
   const scroller = document.createElement("div");
   fixed.className = "dock-fixed";
   scroller.className = "dock-scroll";
-  order.forEach((id) => {
+  order.filter((id) => !hiddenTools.has(id)).forEach((id) => {
     const tool = TOOLS.find((item) => item.id === id);
     const button = document.createElement("button");
     button.type = "button";
@@ -1513,6 +1529,7 @@ if (fromQr && !(onThisPc && fromTray)) {
       return;
     }
     showApp();
+    applyPlatform(data.platform);
     say("Listo");
   }).catch(() => {
     // 0.57: sin red no se borra la clave (puede ser el PC apagado); se reintenta solo.

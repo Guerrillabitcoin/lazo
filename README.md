@@ -1,4 +1,4 @@
-# LaZoo 0.67
+# LaZoo 0.68
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux, desde 0.67, también hay bandeja (mira «Novedad 0.67»); en macOS llegará más adelante.
+
+**Novedad 0.68 (Linux con Wayland):** LaZoo funciona en el Ubuntu de hoy (GNOME en Wayland) sin cambiar de sesión. **Ratón y teclado** con `ydotool`: `instalar-linux.sh` lo deja preparado (una regla solo para `/dev/uinput` con un grupo propio, `uinput`, y el servicio de usuario `lazoo-ydotoold`); hay que cerrar sesión una vez. El texto con ñ, acentos o símbolos se pega (y el portapapeles de antes vuelve). **YouTube sin teclas:** play/pausa, ±10 s, siguiente, anterior y la barra van por los controles multimedia (`playerctl`); silencio, subtítulos, modo cine, pantalla completa y el volumen exacto, pulsando los botones del propio reproductor por accesibilidad. Encuentra la ventana de YouTube también con Firefox de Ubuntu. En Wayland aún no van la velocidad ni el tamaño de los subtítulos desde el móvil (avisa). **La pestaña Ventanas no sale con un PC Linux.** Lista de pruebas: [`docs/PRUEBAS-LINUX.md`](docs/PRUEBAS-LINUX.md).
 
 **Novedad 0.67 (Linux):** LaZoo funciona en Linux casi como en Windows. Descomprime `LaZoo-0.67-linux.tar.gz`, ejecuta `sh instalar-linux.sh` (dice qué paquetes del sistema faltan y solo usa `sudo` si le dices que sí) y abre **LaZoo** desde el menú de aplicaciones.
 - **Icono en la bandeja** con el mismo menú que en Windows, cuadro para aceptar móviles nuevos (60 s) e «Iniciar con el sistema». KDE, Cinnamon, Xfce y Ubuntu lo enseñan tal cual; en GNOME puro hace falta la extensión «AppIndicator and KStatusNotifierItem Support». Sin escritorio, `iniciar.sh` sigue en la consola (`--consola` lo fuerza).
