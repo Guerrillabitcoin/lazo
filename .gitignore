@@ -37,3 +37,6 @@ LaZoo-claves/
 
 # Ajustes locales de Claude Code (de cada PC, no se suben)
 .claude/settings.local.json
+
+# 0.63: clave local de notas (control.py la crea junto a clipboard-history.json). Nunca en el repo.
+notas-clave.bin
