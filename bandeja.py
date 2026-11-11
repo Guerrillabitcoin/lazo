@@ -4,8 +4,7 @@ El servidor corre en un hilo de este mismo proceso (lazo.start), así que la ban
 y cambia dispositivos y aprobaciones directamente en APPROVALS, que ya va con lock.
 Nada nuevo queda expuesto a la red: el menú abre páginas por 127.0.0.1.
 
-En Linux y macOS se puede importar, pero `main()` solo avisa: su bandeja es una fase
-posterior. Ahí sigue valiendo iniciar.sh.
+En Linux, `main()` pasa a bandeja_linux.py (0.67). En macOS solo avisa: ahí sigue iniciar.sh.
 """
 
 from __future__ import annotations
@@ -516,6 +515,10 @@ class Tray:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if not AVAILABLE and sys.platform.startswith("linux"):
+        import bandeja_linux  # 0.67: la bandeja de Linux
+
+        return bandeja_linux.main(argv)
     if not AVAILABLE:
         print("La bandeja de LaZoo solo existe en Windows por ahora. En Linux y macOS usa iniciar.sh.")
         return 1

@@ -59,7 +59,7 @@ class TrayModel(unittest.TestCase):
 
     def test_degrades_off_windows(self):
         if sys.platform != "win32":
-            self.assertEqual(bandeja.main([]), 1)
+            self.assertIn(bandeja.main([]), (1, 2))  # 0.67: en Linux sin escritorio, 2 = sigue en la consola
 
     def test_mesa_anchors(self):
         html = (ROOT / "static" / "mesa.html").read_text(encoding="utf-8")

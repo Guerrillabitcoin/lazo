@@ -173,6 +173,10 @@ def _yt_row() -> dict[str, str] | None:
     try:
         import control
 
+        if control.SYSTEM == "Linux":  # 0.67: el título que ve AT-SPI (linux_yt.py)
+            import linux_yt
+
+            return linux_yt.LINUX.find_row() if linux_yt.LINUX else None
         if control.SYSTEM != "Windows":
             return None
         with control._lock:

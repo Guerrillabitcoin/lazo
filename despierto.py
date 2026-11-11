@@ -15,7 +15,7 @@ Pasada 1 h 21 min sin usar el móvil, Windows vuelve a lo suyo. Si la sesión ya
 (por ejemplo con «Bloquear PC»), LaZoo no la mantiene encendida. El «¿Sigues ahí?» de
 YouTube es otra cosa: lo contesta sigues.py.
 
-Solo Windows. Se apaga en el Panel o en el móvil, con `--sin-despierto` o con
+Windows y, desde 0.67, Linux (clase `Linux`: inhibidor de GNOME o de systemd). Se apaga en el Panel o en el móvil, con `--sin-despierto` o con
 `LAZO_SIN_DESPIERTO=1`. El ajuste se guarda en `ajustes.json` (`despierto`).
 """
 
@@ -92,6 +92,82 @@ class Windows:
         self.u32.SendInput(1, ctypes.byref(event), ctypes.sizeof(INPUT))
 
 
+class Linux:
+    """0.67: lo mismo en Linux. Mientras el móvil se usa, un proceso pequeño «inhibe» el
+    reposo, como hace un reproductor de vídeo:
+
+    - GNOME (Ubuntu, Fedora…): `gnome-session-inhibit --inhibit idle:suspend` (ni pantalla
+      apagada, ni bloqueo por inactividad, ni suspensión);
+    - el resto (KDE, Cinnamon, Xfce…): `systemd-inhibit --what=idle:sleep`;
+    - con X11 además `xdg-screensaver reset` en cada revisión (salvapantallas antiguos).
+
+    No hace falta el toque de ratón de Windows: el inhibidor basta y el cursor no se toca.
+    Al soltar se cierra el proceso y el escritorio vuelve a lo suyo."""
+
+    def __init__(self, which: Callable[[str], str | None] | None = None, popen: Callable[..., Any] | None = None,
+                 run: Callable[..., Any] | None = None, env: dict[str, str] | None = None) -> None:
+        import shutil
+        import subprocess
+
+        self.which = which or shutil.which
+        self.popen = popen or subprocess.Popen
+        self.run = run or subprocess.run
+        self.env = os.environ if env is None else env
+        self.proc: Any = None
+
+    def command(self) -> list[str] | None:
+        desk = (self.env.get("XDG_CURRENT_DESKTOP", "") + ":" + self.env.get("DESKTOP_SESSION", "")).lower()
+        espera = ["sleep", "infinity"]
+        if "gnome" in desk and self.which("gnome-session-inhibit"):
+            return ["gnome-session-inhibit", "--inhibit", "idle:suspend", "--reason", "LaZoo: se usa desde el móvil", *espera]
+        if self.which("systemd-inhibit"):
+            return ["systemd-inhibit", "--what=idle:sleep", "--who=LaZoo", "--why=Se usa desde el móvil",
+                    "--mode=block", *espera]
+        if self.which("gnome-session-inhibit"):
+            return ["gnome-session-inhibit", "--inhibit", "idle:suspend", "--reason", "LaZoo: se usa desde el móvil", *espera]
+        return None
+
+    def keep(self, on: bool) -> None:
+        import subprocess
+
+        vivo = self.proc is not None and self.proc.poll() is None
+        if on and not vivo:
+            cmd = self.command()
+            if cmd is None:
+                raise OSError("sin inhibidor")
+            self.proc = self.popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        elif not on and vivo:
+            self.proc.terminate()
+            try:
+                self.proc.wait(2)
+            except Exception:  # noqa: BLE001
+                self.proc.kill()
+            self.proc = None
+        if on and self.env.get("XDG_SESSION_TYPE", "").lower() == "x11" and self.which("xdg-screensaver"):
+            try:
+                self.run(["xdg-screensaver", "reset"], timeout=3, capture_output=True)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def idle_seconds(self) -> float:
+        return 0.0  # nunca hace falta el toque
+
+    def locked(self) -> bool:
+        """Con la sesión ya bloqueada no se mantiene encendida (como en Windows)."""
+        sid = self.env.get("XDG_SESSION_ID", "")
+        if not sid or not self.which("loginctl"):
+            return False
+        try:
+            out = self.run(["loginctl", "show-session", sid, "-p", "LockedHint", "--value"],
+                           timeout=3, capture_output=True, text=True)
+            return str(out.stdout).strip() == "yes"
+        except Exception:  # noqa: BLE001
+            return False
+
+    def nudge(self) -> None:
+        pass
+
+
 def _ajustes_file() -> Path:
     import recordar
 
@@ -150,7 +226,7 @@ class Despierto:
                 pass
 
     def available(self) -> bool:
-        return sys.platform == "win32" or self.system is not None
+        return sys.platform == "win32" or sys.platform.startswith("linux") or self.system is not None
 
     def status(self) -> dict[str, Any]:
         left = max(0, int(self.last_phone + VENTANA - self.clock())) if self.last_phone else 0
@@ -199,9 +275,9 @@ class Despierto:
         return did
 
     def _sys(self) -> Any:
-        if self.system is None and sys.platform == "win32":
+        if self.system is None and (sys.platform == "win32" or sys.platform.startswith("linux")):
             try:
-                self.system = Windows()
+                self.system = Windows() if sys.platform == "win32" else Linux()
             except Exception as exc:  # noqa: BLE001
                 self.error = type(exc).__name__
                 self.disabled = True
