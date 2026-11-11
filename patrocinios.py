@@ -543,6 +543,7 @@ class Patrocinios(sigues.Sigues):
 
     def _saltar(self, d: dict[str, Any], sesion: dict, teclas_ok: bool, pos: float) -> None:
         k = d["clave"]
+        self.v.setdefault("tramo", {})[k] = (pos, d["hasta"])  # 0.66: para el historial
         p = self.pendiente
         if p and p["clave"] == k and self.clock() - p["t"] < VERIFICAR * 2:
             return  # Windows ya lo aceptó: se espera a que se note, nunca dos saltos
@@ -598,6 +599,14 @@ class Patrocinios(sigues.Sigues):
         self.v.setdefault("hechos", set()).add(k)
         self.metodo, self.error = metodo, ""
         self.contar(segundos=max(0.0, segundos))
+        try:  # 0.66: al historial del Panel
+            import historial
+
+            desde, hasta = self.v.get("tramo", {}).get(k, (None, None))
+            historial.patrocinio_saltado(str(self.v.get("titulo") or ""), str(self.v.get("vid") or ""),
+                                         desde, hasta, max(0.0, segundos), metodo)
+        except Exception:  # noqa: BLE001 (el historial nunca rompe el salto)
+            pass
         try:
             print(self.MESSAGE, flush=True)
         except Exception:  # noqa: BLE001 (sin consola o consola cp1252)

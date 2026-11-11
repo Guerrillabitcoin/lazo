@@ -99,6 +99,23 @@
         .board, body.connected .board { grid-template-columns: 1fr; grid-template-areas: "conn" "side" "pasar"; }
         .pasar-cols { grid-template-columns: 1fr; }
       }
+      /* 0.66: Configuración (los ajustes que estaban arriba) e historial de saltos */
+      .cfg .chip { display: flex; width: 100%; box-sizing: border-box; margin: 0 0 6px; border-radius: 12px; }
+      .cfg button.chip { width: auto; cursor: pointer; }
+      .cfg-sub { margin: 12px 0 6px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--naranja); }
+      .cfg-sub:first-of-type { margin-top: 0; }
+      .hist { margin-top: 18px; }
+      .hist-total { color: var(--texto); font-size: 15px; }
+      .hist-lista { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; max-height: 420px; overflow: auto; }
+      .hist-lista li { display: grid; grid-template-columns: 70px 92px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--hondo); font-size: 13px; }
+      .hist-lista .tipo { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #3a332b; color: var(--suave); text-align: center; }
+      .hist-lista .tipo.patrocinio { background: rgba(224,122,61,0.18); color: var(--naranja); }
+      .hist-lista .vid { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .hist-lista .vid a { color: var(--texto); }
+      .hist-lista .seg { color: var(--suave); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .hist-lista button { min-height: 30px; padding: 0 10px; }
+      .hist-vacio { margin-top: 10px; }
+      @media (max-width: 700px) { .hist-lista li { grid-template-columns: 1fr auto; } }
     </style>
   </head>
   <body>
@@ -106,32 +123,13 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.65</p>
+          <p class="ver">0.66</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
           <p id="link-label">Sin conexión</p>
         </div>
         <div class="grow"></div>
-        <label class="chip" title="Guarda la clave cifrada en este PC para que los móviles aprobados se reconecten solos tras reiniciar">
-          <input id="recordar" type="checkbox" /> Recordar dispositivos
-        </label>
-        <label class="chip" title="Pulsa «Sí» en «¿Quieres seguir viendo?» sin mover el ratón ni traer la ventana delante">
-          <input id="sigues" type="checkbox" /> Evitar el aviso «¿Sigues ahí?» de YouTube
-        </label>
-        <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
-        <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
-        <label class="chip" title="Pulsa «Saltar» en cuanto YouTube lo deja, sin mover el ratón ni traer la ventana delante">
-          <input id="anuncios" type="checkbox" /> Saltar anuncios de YouTube
-        </label>
-        <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
-        <label class="chip" title="Salta el tramo en que el vídeo habla de su patrocinador, sin mover el ratón ni traer la ventana. Sale a internet: SponsorBlock ve tu IP, no qué vídeo ves.">
-          <input id="patrocinios" type="checkbox" /> Saltar patrocinios dentro del vídeo (se conecta a SponsorBlock)
-        </label>
-        <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
-        <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
-          <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
-        </label>
       </header>
       <div id="ask" class="waiting" role="status" aria-live="polite" hidden>
         <span class="dot" aria-hidden="true"></span>
@@ -167,6 +165,31 @@
               <button id="forget-all" class="danger" type="button">Olvidar todos</button>
             </div>
           </section>
+          <section id="config" class="box cfg">
+            <h2>Configuración</h2>
+            <p class="cfg-sub">Dispositivos</p>
+            <label class="chip" title="Guarda la clave cifrada en este PC para que los móviles aprobados se reconecten solos tras reiniciar">
+            <input id="recordar" type="checkbox" /> Recordar dispositivos
+            </label>
+            <p class="cfg-sub">YouTube</p>
+            <label class="chip" title="Pulsa «Sí» en «¿Quieres seguir viendo?» sin mover el ratón ni traer la ventana delante">
+            <input id="sigues" type="checkbox" /> Evitar el aviso «¿Sigues ahí?» de YouTube
+            </label>
+            <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
+            <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
+            <label class="chip" title="Pulsa «Saltar» en cuanto YouTube lo deja, sin mover el ratón ni traer la ventana delante">
+            <input id="anuncios" type="checkbox" /> Saltar anuncios de YouTube
+            </label>
+            <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
+            <label class="chip" title="Salta el tramo en que el vídeo habla de su patrocinador, sin mover el ratón ni traer la ventana. Sale a internet: SponsorBlock ve tu IP, no qué vídeo ves.">
+            <input id="patrocinios" type="checkbox" /> Saltar patrocinios dentro del vídeo (se conecta a SponsorBlock)
+            </label>
+            <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
+            <p class="cfg-sub">Este PC</p>
+            <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
+            <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
+            </label>
+          </section>
         </div>
         <section id="pasar" class="box">
           <h2>Pasar por wifi</h2>
@@ -193,6 +216,16 @@
           </div>
         </section>
       </div>
+      <section id="historial" class="box hist">
+          <h2>Anuncios y patrocinios saltados</h2>
+          <p id="hist-total" class="hist-total">Ahorrado desde siempre: —</p>
+          <div class="row">
+            <button id="hist-borrar" type="button" title="Borra la lista. Lo ahorrado desde siempre se queda.">Borrar historial</button>
+            <button id="hist-cero" class="danger" type="button" title="Pone a cero el tiempo ahorrado desde siempre">Poner a cero lo ahorrado</button>
+          </div>
+          <ul id="hist-lista" class="hist-lista"></ul>
+          <p id="hist-vacio" class="hist-vacio">Aún no se ha saltado nada.</p>
+        </section>
     </main>
     <script>
       const nativeFetch = window.fetch.bind(window);
@@ -559,16 +592,95 @@
       load();
       watchLink();
       setInterval(() => { if (!document.hidden) load(); }, 2000);
+
+      /* 0.66: historial de anuncios y patrocinios saltados. La lista se borra entera o de una
+         en una; lo ahorrado desde siempre se queda hasta que se pone a cero con su botón. */
+      function mmss(s) {
+        const t = Math.max(0, Math.floor(Number(s) || 0));
+        const h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = String(t % 60).padStart(2, "0");
+        return h ? `${h}:${String(m).padStart(2, "0")}:${x}` : `${m}:${x}`;
+      }
+      function minutos(seg) {
+        const m = (Number(seg) || 0) / 60;
+        return m >= 60 ? `${Math.floor(m / 60)} h ${Math.round(m % 60)} min` : m >= 1 ? `${Math.round(m)} min` : `${Math.round(Number(seg) || 0)} s`;
+      }
+      function histTotal(data) {
+        const a = (data.acumulado || {}).anuncio || {}, p = (data.acumulado || {}).patrocinio || {};
+        const sinTiempo = (Number(a.n) || 0) - (Number(a.con_tiempo) || 0);
+        let txt = `Ahorrado desde siempre: ${minutos((Number(a.seg) || 0) + (Number(p.seg) || 0))}`;
+        txt += ` · anuncios: ${a.n || 0} (≈${minutos(a.seg)}${sinTiempo > 0 ? `; ${sinTiempo} sin duración` : ""})`;
+        txt += ` · patrocinios: ${p.n || 0} (${minutos(p.seg)})`;
+        if (data.desde) txt += ` · desde ${new Date(data.desde * 1000).toLocaleDateString()}`;
+        return txt;
+      }
+      function histFila(e) {
+        const li = document.createElement("li");
+        const hora = document.createElement("span");
+        const d = new Date((Number(e.t) || 0) * 1000);
+        const hoy = d.toDateString() === new Date().toDateString();
+        hora.textContent = (hoy ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " ")
+          + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+        const tipo = document.createElement("span");
+        tipo.className = `tipo ${e.tipo}`;
+        tipo.textContent = e.tipo === "patrocinio" ? "Patrocinio" : "Anuncio";
+        const vid = document.createElement("span");
+        vid.className = "vid";
+        const nombre = e.titulo || (e.video ? `Vídeo ${e.video}` : "Vídeo de YouTube");
+        if (e.video) {
+          const a = document.createElement("a");
+          a.href = `https://www.youtube.com/watch?v=${encodeURIComponent(e.video)}` + (e.desde ? `&t=${Math.floor(e.desde)}s` : "");
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+          a.textContent = nombre;
+          vid.append(a);
+        } else vid.textContent = nombre;
+        if (e.desde != null && e.hasta != null) vid.append(` · ${mmss(e.desde)} → ${mmss(e.hasta)}`);
+        vid.title = nombre;
+        const seg = document.createElement("span");
+        seg.className = "seg";
+        seg.textContent = e.seg == null ? "¿?" : (e.tipo === "anuncio" ? "≈" : "") + mmss(e.seg);
+        seg.title = e.seg == null ? "Windows no dijo cuánto duraba" : "Tiempo ahorrado";
+        const del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "🗑";
+        del.setAttribute("aria-label", "Borrar esta entrada");
+        del.addEventListener("click", () => histBorrar({ id: e.id }));
+        li.append(hora, tipo, vid, seg, del);
+        return li;
+      }
+      function histPinta(data) {
+        $("#hist-total").textContent = histTotal(data);
+        const lista = $("#hist-lista");
+        lista.replaceChildren(...(data.entradas || []).map(histFila));
+        $("#hist-vacio").hidden = (data.entradas || []).length > 0;
+      }
+      async function histCarga() {
+        try { histPinta(await fetch("/api/historial").then((r) => r.json())); } catch (_e) { /* el Panel sigue */ }
+      }
+      async function histBorrar(body) {
+        const res = await fetch("/api/historial/borrar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (res.ok) histPinta(await res.json());
+      }
+      $("#hist-borrar").addEventListener("click", () => {
+        if (confirm("¿Borrar la lista de saltos? Lo ahorrado desde siempre se queda.")) histBorrar({ all: true });
+      });
+      $("#hist-cero").addEventListener("click", () => {
+        if (confirm("¿Poner a cero el tiempo ahorrado desde siempre? No se puede deshacer.")) histBorrar({ acumulado: true });
+      });
+      histCarga();
+      setInterval(() => { if (!document.hidden) histCarga(); }, 5000);
       setInterval(() => { if (!document.hidden) watchLink(); }, 2000);
       setInterval(() => { if (!document.hidden) watchClipboard(); }, 2000);
 
       (() => {
         let want = new URLSearchParams(location.hash.slice(1)).get("pastilla");
         if (want === "puente") want = "archivos";
+        if (want === "configuracion" || want === "ajustes") want = "config";  // 0.66
+        if (want === "saltados") want = "historial";
         const box = want && document.getElementById(want);
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.65"></script>
+    <script src="/logo.js?v=0.66"></script>
   </body>
 </html>
