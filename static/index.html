@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.64</title>
-    <link rel="stylesheet" href="/app.css?v=0.64" />
+    <title>LaZoo 0.65</title>
+    <link rel="stylesheet" href="/app.css?v=0.65" />
     <link rel="icon" type="image/svg+xml" href="/img/infinito-naranja.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/img/icono-192.png" />
     <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
@@ -20,7 +20,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.64</p>
+          <p class="ver">0.65</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -193,7 +193,15 @@
               <button id="yt-play" type="button" data-yt="play" class="primary tp" aria-label="Reproducir"><svg viewBox="0 0 24 24" width="28" height="28" aria-hidden="true"><path d="M7 4.5v15L20 12z" fill="currentColor"/></svg></button>
               <button type="button" data-yt="next" class="tp" aria-label="Siguiente"><svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="16.4" y="5" width="2.6" height="14" rx="1" fill="currentColor"/><path d="M5 5.5v13L15 12z" fill="currentColor"/></svg></button>
             </div>
+            <p id="yt-pos-preview" class="yt-preview" aria-live="polite" hidden></p>
+            <div class="yt-barra">
+              <span id="yt-pos-now">–:––</span>
+              <input id="yt-pos" type="range" min="0" max="0" step="1" value="0" aria-label="Ir a un minuto del vídeo" disabled />
+              <span id="yt-pos-len">–:––</span>
+            </div>
             <button id="yt-full" type="button" class="yt-full" aria-pressed="false" aria-label="Pantalla completa en el PC"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path class="fs-in" d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/><path class="fs-out" d="M9 4v5H4M20 9h-5V4M15 20v-5h5M4 15h5v5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="yt-full-label">Pantalla completa</span></button>
+            <button id="yt-movil" type="button" class="yt-full" aria-label="Seguir viendo este vídeo en el móvil"><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10.5 18.2h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Seguir viendo en el móvil</span></button>
+            <a id="yt-movil-link" class="yt-movil-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Abrir el vídeo en este móvil</a>
             <p class="mini-label">Saltar en el vídeo</p>
             <div class="split">
               <button type="button" data-yt="back">−10 s</button>
@@ -202,7 +210,7 @@
             <p class="mini-label">Volumen de YouTube (no el del PC)</p>
             <div class="vol-line">
               <input id="yt-vol" type="range" min="0" max="100" value="50" aria-label="Volumen de YouTube" />
-              <span id="yt-level">50</span>
+              <span id="yt-level" title="Volumen del vídeo en el PC">50</span>
               <button id="yt-mute" type="button" data-yt="mute" class="icon" aria-label="Silencio">
                 <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor"/><path class="wave" d="M16 9a5 5 0 0 1 0 6M18.5 7a8 8 0 0 1 0 10" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
               </button>
@@ -217,6 +225,11 @@
               <button type="button" data-yt="home">Inicio</button>
               <button type="button" data-yt="theater">Cine</button>
               <button type="button" data-yt="captions">Subtítulos</button>
+            </div>
+            <p class="mini-label">Tamaño de los subtítulos</p>
+            <div class="split">
+              <button type="button" data-yt="subs_down" aria-label="Subtítulos más pequeños">A −</button>
+              <button type="button" data-yt="subs_up" aria-label="Subtítulos más grandes">A +</button>
             </div>
             <label class="diag-smooth yt-sigues"><input id="yt-sigues" type="checkbox" checked /> Evitar el aviso «¿Sigues ahí?»</label>
             <label class="diag-smooth yt-sigues"><input id="yt-anuncios" type="checkbox" checked /> Saltar anuncios (también con ⏭)</label>
@@ -376,7 +389,7 @@
             <div class="about-head">
               <span class="lz-logo about-logo" data-estado="conectado" data-fijo="conectado" title="LaZoo"></span>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.64</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.65</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -443,8 +456,8 @@
         </div>
       </section>
     </main>
-    <script src="/logo.js?v=0.64"></script>
-    <script src="/seal.js?v=0.64"></script>
-    <script src="/app.js?v=0.64"></script>
+    <script src="/logo.js?v=0.65"></script>
+    <script src="/seal.js?v=0.65"></script>
+    <script src="/app.js?v=0.65"></script>
   </body>
 </html>

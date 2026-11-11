@@ -112,14 +112,14 @@ class Fuente(unittest.TestCase):
     def test_cliente(self):
         self.assertIn("forgetKey();", JS)
         self.assertIn("connDiagText", JS)
-        self.assertIn('const PAGE_VERSION = "0.64"', JS)
+        self.assertIn('const PAGE_VERSION = "0.65"', JS)
 
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.64")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.64")
+        self.assertEqual(lazo.VERSION, "0.65")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.65")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        self.assertIn('android:versionCode="64"', apk)
-        self.assertIn("# LaZoo 0.64", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn('android:versionCode="65"', apk)
+        self.assertIn("# LaZoo 0.65", (ROOT / "README.md").read_text(encoding="utf-8"))
 
 
 def _ip():

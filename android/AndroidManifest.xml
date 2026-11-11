@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="net.lazoo.app"
-    android:versionCode="64"
-    android:versionName="1">
+    android:versionCode="65"
+    android:versionName="2">
     <!-- La APK lleva su propio número («App N»), aparte del de LaZoo (el .exe).
          Solo sube si cambia algo de android/; versionCode = 63 + N y nunca baja. -->
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />
@@ -12,6 +12,14 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+    <!-- App 2: «Seguir viendo en el móvil» abre el vídeo en Brave (o en el navegador). -->
+    <queries>
+        <package android:name="com.brave.browser" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
     <application
         android:label="LaZoo"
         android:icon="@mipmap/ic_launcher"
