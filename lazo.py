@@ -907,7 +907,7 @@ class Handler(BaseHTTPRequestHandler):
                     return h.borrar_acumulado()
                 if body.get("all") is True:
                     return h.borrar()
-                if body.get("id") is None:  # sin id nunca se borra todo por error
+                if body.get("id") is None or isinstance(body.get("id"), bool):  # sin id (o true/false) nunca se borra por error
                     raise control.ControlError("Falta qué entrada borrar")
                 try:
                     return h.borrar(body.get("id"))
