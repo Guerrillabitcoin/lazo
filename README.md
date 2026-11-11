@@ -1,4 +1,4 @@
-# LaZoo 0.65
+# LaZoo 0.66
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+
+**Novedad 0.66:** el Panel de LaZoo ordena sus ajustes en una caja **Configuración** (antes iban sueltos en la barra de arriba): Dispositivos, YouTube y Este PC. Debajo, **Anuncios y patrocinios saltados**: cada salto de verdad con la hora, el vídeo (con enlace al minuto, si se sabe cuál), el tramo m:ss → m:ss y el tiempo ahorrado. La lista se borra entera o de una en una; el **tiempo ahorrado desde siempre** se queda y solo se pone a cero con su propio botón. En los anuncios el tiempo es una estimación («≈»): lo que le quedaba según los controles multimedia de Windows; si Windows no lo dice, sale «¿?». Todo se guarda en la carpeta de datos de LaZoo, nada sale a internet y solo se ve desde este PC (`/mesa#pastilla=config` o `#pastilla=historial`).
 
 **Novedad 0.65:** el mando de YouTube del móvil sabe cómo está el vídeo de verdad y hace más cosas, sin tocar la página de YouTube y sin salir a internet. **Barra de progreso:** enseña el minuto y la duración, avanza sola y, al arrastrar, dice «Ir a 12:34 de 45:00»; el salto se hace al soltar (se le pide a Windows y, si el navegador no lo deja, con las teclas de YouTube). **Velocidad y volumen reales:** la velocidad la publica Windows y el volumen se lee del propio reproductor (también si está en silencio); si no se puede leer, el número lleva «≈». **Tamaño de los subtítulos:** botones A − y A +. **Seguir viendo en el móvil:** el PC pausa el vídeo y el móvil lo abre en el mismo minuto (2 s antes), en Brave si está instalado; hace falta la App 2. Solo Windows.
 

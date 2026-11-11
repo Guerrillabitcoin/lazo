@@ -151,6 +151,15 @@ class Anuncios(sigues.Sigues):
     def script(self) -> str:
         return encoded()
 
+    def contar(self, now: float | None = None) -> None:
+        super().contar(now)
+        try:  # 0.66: al historial del Panel, con los segundos estimados si Windows los da
+            import historial
+
+            historial.anuncio_saltado()
+        except Exception:  # noqa: BLE001 (el historial nunca rompe el salto)
+            pass
+
     def saltar_ya(self) -> bool:
         """Desde la flecha «siguiente»: si hay un «Saltar» a la vista, lo pulsa ahora.
         Funciona aunque el salto automático esté apagado (lo ha pedido la persona)."""

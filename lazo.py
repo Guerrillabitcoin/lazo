@@ -38,7 +38,7 @@ import sobre
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.65"
+VERSION = "0.66"
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
@@ -749,6 +749,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, connection_info(), seal=False)
             return
+        if path == "/api/historial":
+            # 0.66: historial de anuncios y patrocinios saltados (solo el Panel de este PC).
+            if not (_local_pc(self.client_address[0]) and self._host_ok()):
+                self._send(404, {"error": "no está"})
+                return
+            import historial
+
+            self._send(200, historial.HISTORIAL.status(), seal=False)
+            return
         if path == "/api/time":
             self._send(200, {"t": int(time.time() * 1000), "version": VERSION, "proto": PROTO}, seal=False)
             return
@@ -887,6 +896,25 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/despierto":
             # 0.63: mantener el PC despierto mientras se usa desde el móvil (despierto.py).
             self._guard(lambda body: despierto.DESPIERTO.set_on(body.get("on")))
+            return
+        if path == "/api/historial/borrar":
+            # 0.66: {id} una entrada, {all} la lista, {acumulado} lo ahorrado de siempre. Solo el Panel.
+            import historial
+
+            def borrar(body: dict) -> dict:
+                h = historial.HISTORIAL
+                if body.get("acumulado") is True:
+                    return h.borrar_acumulado()
+                if body.get("all") is True:
+                    return h.borrar()
+                if body.get("id") is None:  # sin id nunca se borra todo por error
+                    raise control.ControlError("Falta qué entrada borrar")
+                try:
+                    return h.borrar(body.get("id"))
+                except ValueError:
+                    raise control.ControlError("Falta qué entrada borrar") from None
+
+            self._local_only(borrar)
             return
         if path == "/api/olvidar":
             self._local_only(lambda _body: forget_all())
