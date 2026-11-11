@@ -25,6 +25,12 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Número de versión (VERSION.txt)
+        shell: bash
+        run: |
+          VER="$(tr -d '\r\n' < VERSION.txt)"
+          [[ "$VER" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::VERSION.txt no tiene un número válido: '$VER'"; exit 1; }
+          echo "VER=$VER" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -57,7 +63,7 @@ jobs:
       #     output-artifact-directory: dist/LaZoo-firmado
       - uses: actions/upload-artifact@v4
         with:
-          name: LaZoo-windows
+          name: LaZoo-${{ env.VER }}-windows
           path: dist/LaZoo
           retention-days: 30
 
@@ -72,6 +78,14 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Número de versión (VERSION.txt y App N del AndroidManifest)
+        run: |
+          VER="$(tr -d '\r\n' < VERSION.txt)"
+          APP="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' android/AndroidManifest.xml)"
+          [[ "$VER" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "::error::VERSION.txt no tiene un número válido: '$VER'"; exit 1; }
+          [[ "$APP" =~ ^[0-9]+$ ]] || { echo "::error::android:versionName no es un número de App: '$APP'"; exit 1; }
+          echo "VER=$VER" >> "$GITHUB_ENV"
+          echo "APP=$APP" >> "$GITHUB_ENV"
       - name: Android SDK (platform 34, build-tools 34.0.0)
         run: |
           SDK="${ANDROID_SDK_ROOT:-$ANDROID_HOME}"
@@ -95,7 +109,7 @@ jobs:
           [ -n "$LAZOO_FIRMA_ALIAS" ] || unset LAZOO_FIRMA_ALIAS
           [ -n "$LAZOO_FIRMA_KEY_PASS" ] || unset LAZOO_FIRMA_KEY_PASS
           chmod +x android/construir_apk.sh
-          android/construir_apk.sh "$PWD/LaZoo.apk"
+          android/construir_apk.sh "$PWD/LaZoo-App-$APP.apk"
           if [ "$HAY_KEYSTORE" = "true" ]; then echo "lanzamiento" > firma-apk.txt
           else echo "pruebas (sin firma de lanzamiento)" > firma-apk.txt; echo "::warning::APK sin firma de lanzamiento (falta ANDROID_KEYSTORE_B64)"; fi
       - name: Borrar keystore del runner
@@ -103,9 +117,9 @@ jobs:
         run: rm -f "$RUNNER_TEMP/lazoo-lanzamiento.jks" "$RUNNER_TEMP/lazoo-pruebas.jks"
       - uses: actions/upload-artifact@v4
         with:
-          name: LaZoo-android
+          name: LaZoo-${{ env.VER }}-android-App-${{ env.APP }}
           path: |
-            LaZoo.apk
+            LaZoo-App-${{ env.APP }}.apk
             firma-apk.txt
           retention-days: 30
 
@@ -131,12 +145,18 @@ jobs:
       - name: Empaquetar
         run: |
           VER="$(tr -d '\r\n' < VERSION.txt)"
+          APP="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' android/AndroidManifest.xml)"
+          # La etiqueta tiene que ser la misma versión que VERSION.txt (v0.64.0 <-> 0.64).
+          case "$TAG" in "v$VER" | "v$VER".*) ;; *) echo "::error::La etiqueta $TAG no coincide con VERSION.txt ($VER)"; exit 1 ;; esac
           echo "VER=$VER" >> "$GITHUB_ENV"
           mkdir -p salida
-          (cd artefactos/LaZoo-windows && zip -qr -X "../../salida/LaZoo-$VER-windows.zip" .)
-          APP="$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' android/AndroidManifest.xml)"
-          cp artefactos/LaZoo-android/LaZoo.apk "salida/LaZoo-App-$APP.apk"
-          echo "FIRMA_APK=$(cat artefactos/LaZoo-android/firma-apk.txt)" >> "$GITHUB_ENV"
+          WIN="artefactos/LaZoo-$VER-windows"
+          AND="artefactos/LaZoo-$VER-android-App-$APP"
+          [ -f "$WIN/LaZoo.exe" ] || { echo "::error::Falta $WIN/LaZoo.exe"; exit 1; }
+          [ -f "$AND/LaZoo-App-$APP.apk" ] || { echo "::error::Falta $AND/LaZoo-App-$APP.apk"; exit 1; }
+          (cd "$WIN" && zip -qr -X "../../salida/LaZoo-$VER-windows.zip" .)
+          cp "$AND/LaZoo-App-$APP.apk" "salida/LaZoo-App-$APP.apk"
+          echo "FIRMA_APK=$(cat "$AND/firma-apk.txt")" >> "$GITHUB_ENV"
           git archive --format=zip --prefix="LaZoo-$VER/" -o "salida/LaZoo-$VER.zip" "$TAG"
           cd salida && sha256sum LaZoo-* > SHA256SUMS && cat SHA256SUMS
       - name: Firma PGP (solo si existe el secreto)

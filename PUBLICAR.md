@@ -9,8 +9,8 @@ GitHub puede construir `LaZoo.exe` y `LaZoo.apk` por ti, en sus ordenadores, sin
 3. Pulsa **Run workflow**, elige la rama (por ejemplo `beta`) y vuelve a pulsar **Run workflow**.
 4. Espera unos minutos a que salgan las dos marcas verdes.
 5. Abre la ejecución y, abajo, en **Artifacts**, descarga:
-   - `LaZoo-windows`: la carpeta con `LaZoo.exe`. Copia la carpeta entera, el .exe solo no arranca.
-   - `LaZoo-android-pruebas`: `LaZoo.apk`.
+   - `LaZoo-0.XX-windows` (con el número de versión): la carpeta con `LaZoo.exe`. Copia la carpeta entera, el .exe solo no arranca.
+   - `LaZoo-0.XX-android-App-N` (versión del PC y número de la App): `LaZoo-App-N.apk`.
 
 Los archivos se guardan 30 días.
 
