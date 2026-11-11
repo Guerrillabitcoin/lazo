@@ -1,4 +1,4 @@
-# LaZoo 0.66
+# LaZoo 0.67
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -22,7 +22,15 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
-**Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux y macOS la bandeja llegará en la fase 3.
+**Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux, desde 0.67, también hay bandeja (mira «Novedad 0.67»); en macOS llegará más adelante.
+
+**Novedad 0.67 (Linux):** LaZoo funciona en Linux casi como en Windows. Descomprime `LaZoo-0.67-linux.tar.gz`, ejecuta `sh instalar-linux.sh` (dice qué paquetes del sistema faltan y solo usa `sudo` si le dices que sí) y abre **LaZoo** desde el menú de aplicaciones.
+- **Icono en la bandeja** con el mismo menú que en Windows, cuadro para aceptar móviles nuevos (60 s) e «Iniciar con el sistema». KDE, Cinnamon, Xfce y Ubuntu lo enseñan tal cual; en GNOME puro hace falta la extensión «AppIndicator and KStatusNotifierItem Support». Sin escritorio, `iniciar.sh` sigue en la consola (`--consola` lo fuerza).
+- **No bloquear el PC** mientras usas el móvil (inhibidor de GNOME o de systemd; el cursor no se toca).
+- **Barra de progreso con salto exacto** y pausa de «Seguir viendo en el móvil» con los controles multimedia de Linux (`playerctl`), sin teclas.
+- **«¿Sigues ahí?», saltar anuncios y patrocinios, volumen real, «Seguir viendo en el móvil» y el historial** con la accesibilidad de Linux (AT-SPI). Chrome y Brave necesitan la accesibilidad activada: `gsettings set org.gnome.desktop.interface toolkit-accessibility true` y reabrir el navegador. `python3 linux_yt.py --diagnostico` dice si LaZoo ve YouTube.
+- **Cursor grande** en GNOME, KDE, Cinnamon, MATE y Xfce.
+- Límites: en Wayland el ratón va con `ydotool` (o elige la sesión Xorg al entrar); la pastilla YouTube encuentra la ventana con `wmctrl`, que en Wayland solo ve los navegadores que van por XWayland (Chrome y Brave, de serie). La APK es la misma para Windows y Linux.
 
 **Novedad 0.66:** el Panel de LaZoo ordena sus ajustes en una caja **Configuración** (antes iban sueltos en la barra de arriba): Dispositivos, YouTube y Este PC. Debajo, **Anuncios y patrocinios saltados**: cada salto de verdad con la hora, el vídeo (con enlace al minuto, si se sabe cuál), el tramo m:ss → m:ss y el tiempo ahorrado. La lista se borra entera o de una en una; el **tiempo ahorrado desde siempre** se queda y solo se pone a cero con su propio botón. En los anuncios el tiempo es una estimación («≈»): lo que le quedaba según los controles multimedia de Windows; si Windows no lo dice, sale «¿?». Todo se guarda en la carpeta de datos de LaZoo, nada sale a internet y solo se ve desde este PC (`/mesa#pastilla=config` o `#pastilla=historial`).
 
@@ -95,7 +103,8 @@ Cuando Windows pregunte por el firewall, permite las redes privadas. No abras el
 | Spotify | La aplicación de Spotify, no hace falta que esté delante |
 | Ventanas en Linux | `sudo apt install wmctrl xdotool` (xdotool para pestañas) |
 | Spotify en Linux | `sudo apt install playerctl` |
-| Cursor grande en Linux | Escritorio GNOME (`gsettings`) |
+| Cursor grande en Linux | GNOME, KDE, Cinnamon, MATE o Xfce |
+| Todo lo de Linux de una vez | `sh instalar-linux.sh` |
 
 YouTube se controla con los atajos del reproductor (`k`, `j`, `l`, flechas). Lazo pone esa ventana delante y pulsa la tecla.
 

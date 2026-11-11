@@ -1274,15 +1274,32 @@ def _apply_cursor_size(size: Any) -> str:
         if result.returncode != 0:
             raise ControlError("macOS no dejó cambiar el tamaño del cursor")
         return "Tamaño pedido a macOS. Hace falta permiso de Accesibilidad; a veces pide cerrar sesión."
-    if _which("gsettings"):
-        result = _run(
-            ["gsettings", "set", "org.gnome.desktop.interface", "cursor-size", str(int(size))]
-        )
-        if result.returncode == 0:
-            return "Cursor del escritorio GNOME"
+    for cmd, label in linux_cursor_commands(int(size), os.environ.get("XDG_CURRENT_DESKTOP", ""), _which):
+        if _run(cmd).returncode == 0:
+            return label
     raise ControlError(
-        "No pude agrandar el cursor del sistema. En GNOME instala el escritorio con gsettings."
+        "No pude agrandar el cursor de este escritorio (GNOME, KDE, Cinnamon, MATE o Xfce)."
     )
+
+
+def linux_cursor_commands(size: int, desktop: str, which: Any) -> list[tuple[list[str], str]]:
+    """0.67: cómo se cambia el tamaño del cursor en cada escritorio de Linux, el del escritorio
+    actual primero. En KDE y Xfce algunas ventanas no lo cambian hasta reabrirlas."""
+    d = desktop.lower()
+    out: list[tuple[list[str], str]] = []
+    kwrite = which("kwriteconfig6") and "kwriteconfig6" or which("kwriteconfig5") and "kwriteconfig5"
+    if "kde" in d and kwrite:
+        out.append(([kwrite, "--file", "kcminputrc", "--group", "Mouse", "--key", "cursorSize", str(size)],
+                    "Cursor de KDE (algunas ventanas lo cambian al reabrirlas)"))
+    if "cinnamon" in d and which("gsettings"):
+        out.append((["gsettings", "set", "org.cinnamon.desktop.interface", "cursor-size", str(size)], "Cursor de Cinnamon"))
+    if "mate" in d and which("gsettings"):
+        out.append((["gsettings", "set", "org.mate.peripherals-mouse", "cursor-size", str(size)], "Cursor de MATE"))
+    if "xfce" in d and which("xfconf-query"):
+        out.append((["xfconf-query", "-c", "xsettings", "-p", "/Gtk/CursorThemeSize", "-s", str(size)], "Cursor de Xfce"))
+    if which("gsettings"):
+        out.append((["gsettings", "set", "org.gnome.desktop.interface", "cursor-size", str(size)], "Cursor del escritorio GNOME"))
+    return out
 
 
 _SKIP_TITLES = {
@@ -2439,12 +2456,12 @@ def _known_speed(row: dict[str, str]) -> float | None:
 def _yt_real_volume(row: dict[str, str], fresh: bool = False) -> dict[str, Any] | None:
     """0.65: volumen y silencio REALES del reproductor de YouTube (mando.py, solo Windows).
     Si se leen, LaZoo los toma como punto de partida para las flechas de volumen."""
-    if SYSTEM != "Windows":
-        return None
     try:
         import mando
 
         m = mando.MANDO
+        if SYSTEM != "Windows" and not m.available():  # 0.67: o Linux con AT-SPI (linux_yt.py)
+            return None
         vol = m.volumen(str(row["id"]), fresco=True) if fresh else m.volumen_sin_esperar(str(row["id"]))
     except Exception:  # noqa: BLE001 (sin lectura: el mando sigue con lo recordado)
         return None
@@ -2639,6 +2656,8 @@ def _youtube_seek(raw: object) -> dict[str, Any]:
                 via = "windows"
         except Exception:  # noqa: BLE001 (sin controles multimedia: teclas)
             via = ""
+    elif SYSTEM == "Linux" and _mpris_seek(row["title"], to):
+        via = "mpris"
     if not via:
         keys = mando.teclas(mando.plan_teclas(state.get("pos") if state.get("real") else None, length, to))
         if not keys:
@@ -2655,6 +2674,45 @@ def _youtube_seek(raw: object) -> dict[str, Any]:
             "pos": round(to, 1), "len": length, "via": via}
 
 
+def _mpris_seek(title: str, to: float, run: Any = None, wait: Any = None) -> bool:
+    """0.67: en Linux, ir a un segundo exacto con los controles multimedia estándar (MPRIS,
+    `playerctl -p <navegador> position N`), sin teclas ni foco. Se comprueba que llegó (±3 s)."""
+    import medios
+
+    run = run or _run
+    wait = wait or time.sleep
+    if not _which("playerctl"):
+        return False
+    sess = medios.browser_session(title)
+    player = str((sess or {}).get("app") or "")
+    if not player or not re.fullmatch(r"[A-Za-z0-9_.\-]{1,120}", player):
+        return False
+    res = run(["playerctl", "-p", player, "position", f"{max(0.0, float(to)):.2f}"])
+    if getattr(res, "returncode", 1) != 0:
+        return False
+    for _ in range(6):
+        wait(0.2)
+        out = run(["playerctl", "-p", player, "position"])
+        try:
+            if abs(float(str(out.stdout).strip()) - to) < 3:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _mpris_pause(title: str, run: Any = None) -> bool:
+    """0.67: en Linux, pausar con MPRIS (sin teclas ni foco)."""
+    import medios
+
+    if not _which("playerctl"):
+        return False
+    player = str((medios.browser_session(title) or {}).get("app") or "")
+    if not player or not re.fullmatch(r"[A-Za-z0-9_.\-]{1,120}", player):
+        return False
+    return getattr((run or _run)(["playerctl", "-p", player, "pause"]), "returncode", 1) == 0
+
+
 def _youtube_handoff() -> dict[str, Any]:
     """0.65: «Seguir en el móvil». Para YouTube en el PC y devuelve la dirección del vídeo en
     el segundo donde iba; el móvil la abre en su navegador (Brave si la APK lo encuentra).
@@ -2667,8 +2725,8 @@ def _youtube_handoff() -> dict[str, Any]:
         row = _find_youtube_unlocked()
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
-    if SYSTEM != "Windows":
-        raise ControlError("«Seguir en el móvil» de momento solo va con Windows.")
+    if SYSTEM != "Windows" and not mando.MANDO.available():
+        raise ControlError("«Seguir en el móvil» necesita Windows o, en Linux, la accesibilidad (python3 linux_yt.py --diagnostico).")
     vid = patrocinios.video_id(mando.MANDO.direccion(str(row["id"])))
     if not vid:
         p = patrocinios.PATROCINIOS
@@ -2684,7 +2742,8 @@ def _youtube_handoff() -> dict[str, Any]:
         raise ControlError("No pude saber qué vídeo es. Sal de pantalla completa y prueba otra vez.") from None
     paused = False
     if state.get("playing"):
-        youtube("play")
+        if not (SYSTEM == "Linux" and _mpris_pause(row["title"])):
+            youtube("play")
         paused = True
     return {"detail": "Sigue en el móvil", "title": row["title"], "level": _levels["youtube"],
             "url": url, "video": vid, "t": None if pos is None else int(pos), "paused": paused,

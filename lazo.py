@@ -38,7 +38,7 @@ import sobre
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.66"
+VERSION = "0.67"
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
@@ -1561,6 +1561,13 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         control.watch_clipboard()
+    except Exception:
+        pass
+    try:
+        import linux_yt  # 0.67: en Linux, lo de YouTube por accesibilidad (AT-SPI), si está
+
+        if linux_yt.instalar():
+            print("  Linux: YouTube por accesibilidad activado (python3 linux_yt.py --diagnostico).", flush=True)
     except Exception:
         pass
     try:
