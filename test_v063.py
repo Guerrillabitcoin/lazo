@@ -1,4 +1,4 @@
-"""LaZoo 0.63: un móvil = una sesión, saltar anuncios, primer toque, «Pasar por wifi» y notas cifradas.
+"""LaZoo 0.63: un móvil = una sesión, saltar anuncios, primer toque, «Portapapeles Wifi» y notas cifradas.
 
     python3 test_v063.py
 
@@ -7,7 +7,7 @@
   distingue del navegador; la lista dice «visto hace…» y «Este móvil».
 - YouTube: anuncios.py pulsa «Saltar» por accesibilidad; la flecha ⏭ lo intenta primero; la
   ventana que estaba detrás espera a recibir el teclado antes de la tecla (primer toque).
-- «Pasar por wifi»: notas, portapapeles y archivos en una sola pestaña y una sola caja del
+- «Portapapeles Wifi»: notas, portapapeles y archivos en una sola pestaña y una sola caja del
   Panel, con el aviso de privacidad; borrar notas desde el móvil; notas cifradas también en
   Linux/Mac, archivo 600 en la carpeta privada; las copias marcadas como privadas por un
   gestor de contraseñas no entran en las notas.
@@ -404,7 +404,7 @@ class PrimerToque(unittest.TestCase):
 
 class PasarPorWifi(unittest.TestCase):
     def test_una_pestana(self):
-        self.assertIn('{ id: "bridge", name: "Pasar por wifi" }', JS)
+        self.assertIn('{ id: "bridge", name: "Portapapeles Wifi" }', JS)
         self.assertNotIn('{ id: "notes"', JS)
         self.assertNotIn('id="view-notes"', HTML)
         view = HTML[HTML.index('<div id="view-bridge"'):HTML.index('<div id="view-system"')]
@@ -416,7 +416,7 @@ class PasarPorWifi(unittest.TestCase):
 
     def test_panel_una_caja(self):
         box = MESA[MESA.index('<section id="pasar"'):]
-        self.assertIn("<h2>Pasar por wifi</h2>", box)
+        self.assertIn("<h2>Portapapeles Wifi</h2>", box)
         self.assertIn("No pasa por internet.", box)
         self.assertLess(box.index('id="clip-box"'), box.index('id="archivos"'))
         self.assertIn('"cola side pasar pasar"', MESA)  # 0.69: Conectar va en la columna `cola`
@@ -425,7 +425,7 @@ class PasarPorWifi(unittest.TestCase):
         import bandeja
 
         names = dict(bandeja.CUBES)
-        self.assertEqual(names["bridge"], "Pasar por wifi")
+        self.assertEqual(names["bridge"], "Portapapeles Wifi")
         self.assertNotIn("notes", names)
 
     def test_movil_borra_notas(self):

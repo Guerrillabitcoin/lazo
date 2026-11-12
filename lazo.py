@@ -269,6 +269,7 @@ def connection_info() -> dict:
             _QR_CACHE[url] = qr
     return {
         "connected": PAIRING.phone_count(),
+        "otro_pc": PAIRING.away_count(),  # 0.69: móviles que se fueron a otro PC (naranja)
         "alive_seconds": protocol.ALIVE_SECONDS,
         "pin": PAIRING.pin,
         "qr": qr,
@@ -380,6 +381,7 @@ def kick_device(who: str) -> bool:
     if done:
         KICKED.add(who)
     PAIRING.phone_gone(who)
+    PAIRING.away_gone(who)
     conn_log(f"{who[:4]} expulsado" if done else f"{who[:4]} expulsar: no estaba")
     return done
 
@@ -521,9 +523,10 @@ def connect_page() -> bytes:
         const data = await fetch("/api/seen").then((res) => res.json());
         const bar = document.querySelector("#status");
         const on = data.paired === true;
+        const otro = !on && data.otro > 0;  // 0.69: el móvil está en otro PC (naranja)
         document.body.classList.toggle("on", on);
-        bar.dataset.link = on ? "on" : "off";
-        document.querySelector("#link-label").textContent = on ? "Móvil conectado" : "Sin conexión";
+        bar.dataset.link = on ? "on" : otro ? "otro" : "off";
+        document.querySelector("#link-label").textContent = on ? "Móvil conectado" : otro ? "Móvil en otro PC" : "Sin conexión";
         document.querySelector("#pending").hidden = !(data.pending || []).length;
       }} catch (_err) {{}}
     }}
@@ -765,7 +768,7 @@ class Handler(BaseHTTPRequestHandler):
             if not (_local_pc(self.client_address[0]) and self._host_ok()):
                 self._send(404, {"error": "no está"})
                 return
-            self._send(200, {"visits": list(VISITS), "paired": PAIRING.phone_online(), "pending": [d for d in APPROVALS.listing() if d["state"] == "pendiente"]})
+            self._send(200, {"visits": list(VISITS), "paired": PAIRING.phone_online(), "otro": PAIRING.away_count(), "pending": [d for d in APPROVALS.listing() if d["state"] == "pendiente"]})
             return
         if path == "/api/windows":
             self._guard(lambda _body: control.windows_with_icons())
@@ -966,6 +969,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/dispositivos/expulsar":
             self._guard(self._kick)
             return
+        if path == "/api/ausente":
+            # 0.69: el móvil se va a otro PC de su lista: este PC lo enseña en naranja, no en rojo.
+            self._guard(lambda _body: self._ausente())
+            return
         if path == "/api/about/check":
             self._guard(lambda _body: sobre.check_update(VERSION))
             return
@@ -1068,6 +1075,13 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # 0.57: nunca cortar sin respuesta
             conn_log(f"emparejamiento ({step}): fallo del PC {type(exc).__name__}")
             self._send(500, {"error": f"Fallo del PC al emparejar ({step}). Copia el diagnóstico del Panel."}, seal=False)
+
+    def _ausente(self) -> dict:
+        if not self.remote or not self.peer:
+            raise control.ControlError("Solo un móvil puede decir que se va a otro PC")
+        PAIRING.phone_away(self.peer)
+        conn_log(f"{self.peer[:4]} se va a otro PC")
+        return {"ok": True}
 
     def _guard(self, fn) -> None:
         if not self._authed():

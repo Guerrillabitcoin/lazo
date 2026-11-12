@@ -3557,6 +3557,10 @@ def _read_clipboard_text() -> str:
             result = _run(["wl-paste", "-n"])
             if result.returncode == 0:
                 return result.stdout
+        if GTK_CLIP is not None:  # 0.69: Xorg con la bandeja
+            got = GTK_CLIP.leer()
+            if got is not None:
+                return got
         if _which("xclip"):
             result = _run(["xclip", "-selection", "clipboard", "-o"])
             if result.returncode == 0:
@@ -3664,6 +3668,10 @@ def _mark_injected(text: str | None = None) -> None:
     CLIP_WATCH.seen(text)
 
 
+# 0.69: en Linux con Xorg, la bandeja GTK pone aquí su portapapeles (escribir/leer). None = no hay.
+GTK_CLIP: Any = None
+
+
 def _write_clipboard_text(text: str) -> bool:
     """0.52: escribe texto en el portapapeles del sistema. Devuelve si lo consiguió."""
     try:
@@ -3674,6 +3682,8 @@ def _write_clipboard_text(text: str) -> bool:
         if os.environ.get("WAYLAND_DISPLAY") and _which("wl-copy"):
             if _run_input(["wl-copy"], text):
                 return True
+        if GTK_CLIP is not None and GTK_CLIP.escribir(text):  # 0.69: Xorg con la bandeja, sin xclip
+            return True
         if _which("xclip"):
             return _run_input(["xclip", "-selection", "clipboard", "-i"], text)
         if _which("xsel"):

@@ -89,6 +89,7 @@ CLOCK_SECONDS = 60
 MAX_NONCES = 4096
 H_ID, H_T, H_N, H_S = "X-Lazo-Id", "X-Lazo-T", "X-Lazo-N", "X-Lazo-S"
 ALIVE_SECONDS = 5
+AWAY_SECONDS = 12 * 3600  # 0.69: un móvil que se fue a otro PC cuenta como «en otro PC» hasta 12 h
 CHUNK = 256 * 1024
 
 
@@ -271,6 +272,7 @@ class Pairing:
         self._locks = 0
         self._locked_until = 0.0
         self._seen: dict[str, float] = {}
+        self._away: dict[str, float] = {}  # 0.69: móviles en otro PC
         self._nonces: dict[str, float] = {}
 
     def set_key(self, key: bytes) -> None:
@@ -486,6 +488,27 @@ class Pairing:
     def note_phone(self, who: str = "") -> None:
         with self._lock:
             self._seen[who] = time.time()
+            self._away.pop(who, None)
+
+    # 0.69: el móvil avisa antes de cambiar a otro PC de su lista. Este PC no lo da por
+    # desconectado (rojo) sino «en otro PC» (naranja) hasta que vuelva, lo expulsen o pasen
+    # AWAY_SECONDS. El aviso de «me voy» de la página (/api/bye) no lo borra.
+
+    def phone_away(self, who: str) -> None:
+        with self._lock:
+            self._seen.pop(who, None)
+            self._away[who] = time.time()
+
+    def away_gone(self, who: str) -> None:
+        with self._lock:
+            self._away.pop(who, None)
+
+    def away_count(self) -> int:
+        with self._lock:
+            now = time.time()
+            for who in [who for who, t in self._away.items() if now - t >= AWAY_SECONDS]:
+                del self._away[who]
+            return len([who for who in self._away if who not in self._seen])
 
     def phone_gone(self, who: str = "") -> None:
         with self._lock:
@@ -494,6 +517,7 @@ class Pairing:
     def forget_phones(self) -> None:
         with self._lock:
             self._seen.clear()
+            self._away.clear()
 
     def phone_count(self) -> int:
         with self._lock:

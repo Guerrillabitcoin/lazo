@@ -40,7 +40,7 @@ ID_REMEMBER, ID_FORGET = 1009, 1010
 PANEL = "Panel de LaZoo"
 ID_CUBE, ID_KICK, ID_ACCEPT, ID_REJECT = 1100, 2000, 3000, 4000
 
-CUBES = [("mouse", "Ratón"), ("bridge", "Pasar por wifi"), ("windows", "Ventanas"), ("youtube", "YouTube"),
+CUBES = [("mouse", "Ratón"), ("bridge", "Portapapeles Wifi"), ("windows", "Ventanas"), ("youtube", "YouTube"),
          ("spotify", "Spotify"), ("system", "Sistema"), ("lab", "Pruebas"), ("about", "Sobre LaZoo")]
 
 AVAILABLE = sys.platform == "win32"
@@ -109,10 +109,13 @@ def resolve(command: int, listing: list[dict]) -> tuple[str, object]:
     return names.get(command, ""), None
 
 
-def tray_state(count: int) -> tuple[str, str]:
+def tray_state(count: int, away: int = 0) -> tuple[str, str]:
     """0.55: icono y texto de la bandeja según los móviles conectados (función pura).
 
-    Rojo = ninguno; verde = al menos uno. Devuelve (archivo .ico en static/, tooltip)."""
+    Rojo = ninguno; verde = al menos uno; 0.69: naranja = ninguno aquí, pero un móvil emparejado
+    se fue a otro PC de su lista. Devuelve (archivo .ico en static/, tooltip)."""
+    if count <= 0 and away > 0:
+        return "lazoo.ico", "LaZoo · el móvil está en otro PC"
     if count <= 0:
         return "lazoo-rojo.ico", "LaZoo · sin dispositivos"
     if count == 1:
@@ -247,7 +250,7 @@ class Tray:
         self.hwnd = u.CreateWindowExW(0, CLASS_NAME, "LaZoo", 0, 0, 0, 0, 0, None, None, hinst, None)
         self.taskbar_created = u.RegisterWindowMessageW("TaskbarCreated")
         self.icons: dict[str, int] = {}
-        self.state = tray_state(self._count())
+        self.state = tray_state(self._count(), self._away())
         self.hicon = self._icon(self.state[0])
         self._add_icon()
         u.SetTimer(self.hwnd, TIMER_ID, 1500, None)  # 0.55: rojo/verde según el estado real
@@ -273,9 +276,15 @@ class Tray:
         except Exception:
             return 0
 
+    def _away(self) -> int:
+        try:
+            return int(self.lazo.PAIRING.away_count())
+        except Exception:
+            return 0
+
     def refresh_icon(self) -> None:
         """Cambia icono y tooltip solo si el estado cambió (NIM_MODIFY: sin parpadeo)."""
-        state = tray_state(self._count())
+        state = tray_state(self._count(), self._away())
         if state == self.state:
             return
         self.state = state
@@ -353,8 +362,8 @@ class Tray:
         u.AppendMenuW(menu, MF_POPUP, devs, f"Dispositivos conectados ({len(model['approved'])})")
         bridge = u.CreatePopupMenu()
         u.AppendMenuW(bridge, MF_STRING, ID_FOLDER, "Abrir carpeta «Recibido del móvil»")
-        u.AppendMenuW(bridge, MF_STRING, ID_BRIDGE, f"Abrir «Pasar por wifi» en el {PANEL}")
-        u.AppendMenuW(menu, MF_POPUP, bridge, "Pasar por wifi")
+        u.AppendMenuW(bridge, MF_STRING, ID_BRIDGE, f"Abrir «Portapapeles Wifi» en el {PANEL}")
+        u.AppendMenuW(menu, MF_POPUP, bridge, "Portapapeles Wifi")
         u.AppendMenuW(menu, MF_SEP, 0, None)
         u.AppendMenuW(menu, MF_STRING, ID_PROPS, "Propiedades…")
         u.AppendMenuW(menu, MF_STRING | (MF_CHECKED if autorun_enabled() else 0), ID_AUTORUN, "Iniciar con Windows")

@@ -134,3 +134,166 @@ class VariosPc(unittest.TestCase):
         self.assertIn("window.lazooProbado", ESC)
         self.assertIn('if (!pcs.length) start();', ESC)  # con PC guardados, la cámara solo al añadir
         self.assertIn("privateHost(url.hostname)", ESC)
+
+
+class ArreglosTrasPrueba(unittest.TestCase):
+    """12 nov, prueba del dueño con la App 3: notas con el teclado abierto, «Al PC» en Linux y
+    la barra de PC bajo la de arriba."""
+
+    def test_cajas_no_se_encogen_con_teclado(self):
+        css = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
+        self.assertIn(".view > .deck:not(:only-child) { flex: none; }", css)
+
+    def test_barra_de_pc_bajo_la_de_arriba(self):
+        self.assertIn('</header>\n      <nav id="pc-bar" class="pc-bar"', HTML)
+        css = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
+        self.assertIn('.top[data-link="on"] + .pc-bar:not(:empty) { display: flex; }', css)
+        i = JS.index("function pcBarPinta()")
+        bloque = JS[i:i + 1600]
+        self.assertIn('pc.url !== location.origin', bloque)
+        self.assertIn('pcIrA(pc.url)', bloque)
+
+    def test_gtk_clip_en_xorg(self):
+        from unittest import mock
+        import control
+        import bandeja_linux
+
+        hechos = []
+
+        class Clip:
+            texto = None
+
+            def set_text(self, t, n):
+                Clip.texto = t
+
+            def store(self):
+                hechos.append("store")
+
+            def wait_for_text(self):
+                return Clip.texto
+
+        class Gtk:
+            class Clipboard:
+                @staticmethod
+                def get(_sel):
+                    return Clip()
+
+        class GLib:
+            @staticmethod
+            def idle_add(fn):
+                fn()
+
+        c = bandeja_linux.GtkClip.__new__(bandeja_linux.GtkClip)
+        c.Gtk, c.GLib, c.Gdk = Gtk, GLib, type("Gdk", (), {"SELECTION_CLIPBOARD": 1})
+        self.assertTrue(c.escribir("hola ñ"))
+        self.assertEqual(c.leer(), "hola ñ")
+        self.assertEqual(hechos, ["store"])
+        with mock.patch.object(control, "SYSTEM", "Linux"), \
+             mock.patch.dict(control.os.environ, {"WAYLAND_DISPLAY": ""}), \
+             mock.patch.object(control, "GTK_CLIP", c), \
+             mock.patch.object(control, "_which", lambda n: False):
+            self.assertTrue(control._write_clipboard_text("al pc"))  # sin xclip
+            self.assertEqual(control._read_clipboard_text(), "al pc")
+
+    def test_bandeja_pone_gtk_clip_solo_en_xorg(self):
+        src = (ROOT / "bandeja_linux.py").read_text(encoding="utf-8")
+        self.assertIn('if not os.environ.get("WAYLAND_DISPLAY"):', src)
+        self.assertIn("self.lazo.control.GTK_CLIP = GtkClip(self.Gtk, self.GLib)", src)
+
+
+class NombrePortapapelesWifi(unittest.TestCase):
+    def test_nombre_y_aviso(self):
+        import bandeja
+        self.assertEqual(dict(bandeja.CUBES)["bridge"], "Portapapeles Wifi")
+        self.assertIn('{ id: "bridge", name: "Portapapeles Wifi" }', JS)
+        mesa = (ROOT / "static" / "mesa.html").read_text(encoding="utf-8")
+        for page in (HTML, mesa):
+            self.assertNotIn("Pasar por wifi", page)
+            self.assertIn("va encriptado", page)
+            self.assertIn("nunca por internet", page)
+
+
+class MovilEnOtroPc(unittest.TestCase):
+    """Al cambiar de PC desde el móvil, el PC que deja se queda en naranja, no en rojo."""
+
+    def test_protocolo(self):
+        import protocol
+        p = protocol.Pairing()
+        p.note_phone("a")
+        self.assertEqual((p.phone_count(), p.away_count()), (1, 0))
+        p.phone_away("a")
+        self.assertEqual((p.phone_count(), p.away_count()), (0, 1))
+        p.phone_gone("a")  # el /api/bye de la página que se cierra no lo borra
+        self.assertEqual(p.away_count(), 1)
+        p.note_phone("a")  # vuelve
+        self.assertEqual((p.phone_count(), p.away_count()), (1, 0))
+        p.phone_away("a")
+        p.away_gone("a")  # expulsado
+        self.assertEqual(p.away_count(), 0)
+        p.phone_away("b")
+        p._away["b"] -= protocol.AWAY_SECONDS + 1
+        self.assertEqual(p.away_count(), 0)
+        p.phone_away("c")
+        p.forget_phones()
+        self.assertEqual(p.away_count(), 0)
+
+    def test_bandeja(self):
+        import bandeja
+        import bandeja_linux
+        self.assertEqual(bandeja.tray_state(0, 1)[0], "lazoo.ico")
+        self.assertIn("otro PC", bandeja.tray_state(0, 1)[1])
+        self.assertEqual(bandeja.tray_state(1, 1)[0], "lazoo-verde.ico")  # conectado manda
+        self.assertEqual(bandeja.tray_state(0, 0)[0], "lazoo-rojo.ico")
+        self.assertEqual(bandeja_linux.state(0, 1)[0].name, "infinito-naranja.svg")
+        self.assertTrue(bandeja_linux.state(0, 1)[0].exists())
+
+    def test_logo_y_paneles(self):
+        logo = (ROOT / "static" / "logo.js").read_text(encoding="utf-8")
+        self.assertIn('estado === "otro" ? "rgb(" + NARANJA.join(",") + ")" : "#fff"', logo)
+        self.assertIn('estado === "conectado" || estado === "otro" ? 1 : 0', logo)
+        self.assertIn('getAttribute("data-link") === "otro") return "otro"', logo)
+        mesa = (ROOT / "static" / "mesa.html").read_text(encoding="utf-8")
+        self.assertIn('otro ? "Móvil en otro PC"', mesa)
+        import lazo
+        self.assertIn('otro ? "Móvil en otro PC"', lazo.connect_page().decode())
+        self.assertIn('api("/api/ausente", {}).catch', JS)
+
+    def test_ruta_firmada(self):
+        import shutil, tempfile, threading
+        import lazo, recordar
+        from test_v062 import Phone
+        tmp = Path(tempfile.mkdtemp())
+        server = lazo.LazoServer(("127.0.0.1", 0), lazo.Handler)
+        port = server.server_address[1]
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        saved = (lazo.Handler._loopback, lazo.APPROVALS.auto, lazo.maybe_open_mesa, lazo.STORE, list(lazo.APPROVALS.on_change))
+        try:
+            lazo.APPROVALS.auto = True
+            lazo.maybe_open_mesa = lambda: None
+            lazo.STORE = recordar.Store(tmp)
+            lazo.Handler._loopback = lambda self: False
+            lazo.PAIRING.rekey()
+            lazo.PAIRING.forget_phones()
+            a = Phone(port)
+            a.pair_and_get_key()
+            self.assertEqual(a.get("/api/status")[0], 200)
+            self.assertEqual(lazo.PAIRING.phone_count(), 1)
+            status, _ = a.signed_post("/api/ausente", {})
+            self.assertEqual(status, 200)
+            self.assertEqual((lazo.PAIRING.phone_count(), lazo.PAIRING.away_count()), (0, 1))
+            self.assertEqual(lazo.connection_info()["otro_pc"], 1)
+            self.assertEqual(a.get("/api/status")[0], 200)  # vuelve: verde otra vez
+            self.assertEqual(lazo.PAIRING.away_count(), 0)
+            a.signed_post("/api/ausente", {})
+            lazo.kick_device(a.who)
+            self.assertEqual(lazo.PAIRING.away_count(), 0)
+        finally:
+            lazo.Handler._loopback, lazo.APPROVALS.auto, lazo.maybe_open_mesa, lazo.STORE, hooks = saved
+            lazo.APPROVALS.on_change[:] = hooks
+            lazo.APPROVALS.devices.clear()
+            lazo.KICKED.clear()
+            lazo.PAIRING.rekey()
+            lazo.PAIRING.forget_phones()
+            server.shutdown()
+            server.server_close()
+            shutil.rmtree(tmp, ignore_errors=True)

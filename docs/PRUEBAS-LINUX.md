@@ -60,7 +60,7 @@ python3 linux_yt.py --diagnostico   # con YouTube abierto
 - [ ] Cursor grande y enorme, y vuelta a normal.
 - [ ] Volumen del sistema y bloquear el PC (Sistema).
 - [ ] Brillo (Sistema): si no cambia, apuntarlo (puede faltar permiso).
-- [ ] Pasar por wifi: una nota del móvil al PC con «Al PC» y Ctrl+V en el PC; un archivo del móvil al PC.
+- [ ] Portapapeles Wifi: una nota del móvil al PC con «Al PC» y Ctrl+V en el PC; un archivo del móvil al PC.
 
 ## 6. Para pasar a beta / main
 

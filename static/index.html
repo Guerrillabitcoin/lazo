@@ -29,6 +29,7 @@
         <button id="qr-top" type="button" class="qr-top" aria-label="Escanear el QR del PC">QR</button>
         <button id="pc-top" type="button" class="pc-top" aria-haspopup="dialog" aria-label="Este PC: cambiar de PC o salir">PC</button>
       </header>
+      <nav id="pc-bar" class="pc-bar" aria-label="PC"></nav>
 
       <section id="pin" class="panel pin" hidden>
         <span class="lz-logo grande" data-estado="desconectado" title="LaZoo"></span>
@@ -269,8 +270,8 @@
 
         <div id="view-bridge" class="view" hidden>
           <article class="deck">
-            <p class="pasar-title">Pasar por wifi</p>
-            <p class="notes-info pasar-privado"><b>No pasa por internet.</b> Va cifrado (LZ2) por tu Wi-Fi con la clave de este móvil. Las notas se guardan cifradas en el PC y puedes borrarlas.</p>
+            <p class="pasar-title">Portapapeles Wifi</p>
+            <p class="notes-info pasar-privado"><b>No pasa por internet.</b> Todo lo que mandas entre este móvil y el PC (notas, portapapeles y archivos) va encriptado y viaja solo por tu Wi-Fi, nunca por internet. Las notas se guardan cifradas en el PC y puedes borrarlas.</p>
             <p class="sys-title">Notas y portapapeles</p>
             <form id="clip-form" class="phrase">
               <textarea id="clip-input" rows="3" maxlength="8000" placeholder="Nota"></textarea>

@@ -697,3 +697,15 @@ button[data-cursor] { min-height: 44px; }
 .pcs-lista li .ir small { display: block; color: #c4b8aa; font-weight: 400; }
 .pcs-lista li .ir.fuera { opacity: 0.6; }
 .pcs-lista li .quitar { flex: none; width: 44px; }
+/* 0.69: con el teclado abierto la vista se queda baja; si tiene varias cajas («Pasar por wifi»,
+   Sistema…) no se encogen (se encimaban y las notas no se veían): la vista hace scroll.
+   Una caja sola (el ratón) sigue ocupando todo el alto. */
+.view > .deck:not(:only-child) { flex: none; }
+/* 0.69: bajo la barra de arriba, a todo lo ancho, el PC al que estás conectado y, si hay más
+   guardados (App 3), los demás para cambiar con un toque. Solo con conexión. */
+.pc-bar { display: none; gap: 6px; margin-top: 6px; overflow-x: auto; scrollbar-width: none; }
+.pc-bar::-webkit-scrollbar { display: none; }
+.top[data-link="on"] + .pc-bar:not(:empty) { display: flex; }
+.pc-chip { flex: 1 0 auto; min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid #5a4a3a; background: #241f1a; color: #c4b8aa; font-size: 13px; white-space: nowrap; }
+.pc-chip.activo { border-color: #e07a3d; color: #f3eee6; font-weight: 650; }
+.pc-chip small { color: #c4b8aa; font-weight: 400; margin-left: 4px; }

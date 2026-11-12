@@ -20,6 +20,7 @@
       #link-label { margin: 0; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; }
       .top[data-link="on"] #link-label { color: #3dbe6e; }
       .top[data-link="off"] #link-label { color: #e23b3b; }
+      .top[data-link="otro"] #link-label { color: #e07a3d; }
       .top .grow { flex: 1; min-width: 8px; }
       .chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 99px; background: var(--hondo); border: 1px solid var(--borde); color: var(--suave); font-size: 13px; }
       .chip input { accent-color: var(--naranja); width: 18px; height: 18px; margin: 0; }
@@ -44,7 +45,7 @@
       .board > * { min-width: 0; }
       .col-a { grid-area: cola; display: grid; gap: 18px; align-content: start; min-width: 0; }
       .side { grid-area: side; display: grid; gap: 18px; }
-      /* 0.63: «Pasar por wifi» junta portapapeles/notas y archivos en una sola caja. */
+      /* 0.63: «Portapapeles Wifi» junta portapapeles/notas y archivos en una sola caja. */
       #pasar { grid-area: pasar; }
       #pasar > h2 { margin: 0 0 4px; }
       .privado { margin: 0 0 14px; padding: 8px 12px; border-left: 3px solid var(--naranja); background: rgba(224,122,61,0.08); border-radius: 8px; font-size: 13px; line-height: 1.45; color: var(--suave); }
@@ -203,8 +204,8 @@
           </section>
         </div>
         <section id="pasar" class="box">
-          <h2>Pasar por wifi</h2>
-          <p class="privado"><b>No pasa por internet.</b> Va cifrado (LZ2) por tu Wi-Fi, con una clave por móvil. Las notas se guardan cifradas en este PC.</p>
+          <h2>Portapapeles Wifi</h2>
+          <p class="privado"><b>No pasa por internet.</b> Todo lo que va entre el móvil y este PC (notas, portapapeles y archivos) va encriptado, con una clave por móvil, y viaja solo por tu Wi-Fi, nunca por internet. Las notas se guardan cifradas en este PC.</p>
           <div class="pasar-cols">
         <section id="clip-box">
           <h3>Notas · Portapapeles Móvil ↔ PC</h3>
@@ -471,8 +472,9 @@
         try {
           const data = await fetch("/api/seen").then((res) => res.json());
           const bar = document.querySelector("#status");
-          bar.dataset.link = data.paired ? "on" : "off";
-          document.querySelector("#link-label").textContent = data.paired ? "Móvil conectado" : "Sin conexión";
+          const otro = !data.paired && data.otro > 0;  // 0.69: el móvil está en otro PC (naranja)
+          bar.dataset.link = data.paired ? "on" : otro ? "otro" : "off";
+          document.querySelector("#link-label").textContent = data.paired ? "Móvil conectado" : otro ? "Móvil en otro PC" : "Sin conexión";
         } catch (_err) {}
       }
 

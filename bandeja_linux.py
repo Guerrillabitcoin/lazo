@@ -18,6 +18,7 @@ los dos sistemas hacen lo mismo.
 from __future__ import annotations
 
 import os
+import threading
 import shlex
 import shutil
 import subprocess
@@ -73,10 +74,11 @@ def icon_path(color: str) -> Path:
     return ROOT / "static" / "img" / f"infinito-{color}.svg"
 
 
-def state(count: int) -> tuple[Path, str]:
-    """(icono, texto) según los móviles conectados: rojo ninguno, verde alguno (como Windows)."""
-    ico, text = bandeja.tray_state(count)
-    return icon_path("verde" if "verde" in ico else "rojo"), text
+def state(count: int, away: int = 0) -> tuple[Path, str]:
+    """(icono, texto) según los móviles conectados: rojo ninguno, verde alguno, naranja en otro PC
+    (como Windows)."""
+    ico, text = bandeja.tray_state(count, away)
+    return icon_path("verde" if "verde" in ico else "rojo" if "rojo" in ico else "naranja"), text
 
 
 def menu_items(listing: list[dict], remember: bool, autostart: bool) -> list[tuple]:
@@ -98,8 +100,8 @@ def menu_items(listing: list[dict], remember: bool, autostart: bool) -> list[tup
     devs += [("sep",), ("item", b.ID_KICKALL, "Expulsar a todos…"), ("check", b.ID_REMEMBER, "Recordar dispositivos", remember),
              ("item", b.ID_FORGET, "Olvidar todos…")]
     out.append(("sub", f"Dispositivos conectados ({len(model['approved'])})", devs))
-    out.append(("sub", "Pasar por wifi", [("item", b.ID_FOLDER, "Abrir carpeta «Recibido del móvil»"),
-                                          ("item", b.ID_BRIDGE, f"Abrir «Pasar por wifi» en el {b.PANEL}")]))
+    out.append(("sub", "Portapapeles Wifi", [("item", b.ID_FOLDER, "Abrir carpeta «Recibido del móvil»"),
+                                          ("item", b.ID_BRIDGE, f"Abrir «Portapapeles Wifi» en el {b.PANEL}")]))
     out += [("sep",), ("item", b.ID_PROPS, "Propiedades…"), ("check", b.ID_AUTORUN, "Iniciar con el sistema", autostart),
             ("sep",), ("item", b.ID_QUIT, "Salir")]
     return out
@@ -143,6 +145,43 @@ def consejo(info: dict[str, Any]) -> str:
 
 
 # --- la bandeja con GTK -----------------------------------------------------------------------
+class GtkClip:
+    """0.69: portapapeles de Xorg desde el propio proceso de la bandeja, sin xclip. GTK solo se usa
+    desde su hilo: cada petición va con GLib.idle_add y se espera la respuesta (como mucho 1,5 s).
+    Mientras LaZoo sigue abierto, el texto puesto se queda pegable; `store()` lo deja al gestor
+    del portapapeles del escritorio para cuando se cierre."""
+
+    def __init__(self, Gtk: Any, GLib: Any) -> None:
+        from gi.repository import Gdk
+
+        self.Gtk, self.GLib, self.Gdk = Gtk, GLib, Gdk
+
+    def _en_gtk(self, fn: Any) -> Any:
+        hecho, caja = threading.Event(), {}
+
+        def correr() -> bool:
+            try:
+                caja["r"] = fn(self.Gtk.Clipboard.get(self.Gdk.SELECTION_CLIPBOARD))
+            except Exception:  # noqa: BLE001
+                caja["r"] = None
+            hecho.set()
+            return False
+
+        self.GLib.idle_add(correr)
+        return caja.get("r") if hecho.wait(1.5) else None
+
+    def escribir(self, text: str) -> bool:
+        def poner(clip: Any) -> bool:
+            clip.set_text(text, -1)
+            clip.store()
+            return True
+
+        return bool(self._en_gtk(poner))
+
+    def leer(self) -> str | None:
+        return self._en_gtk(lambda clip: clip.wait_for_text())
+
+
 class LinuxTray:
     """Mismo papel que bandeja.Tray, con GTK. `run_command` es el de Windows."""
 
@@ -278,7 +317,7 @@ class LinuxTray:
             if self.indicator is not None:
                 self.indicator.set_menu(menu)
             self.menu = menu
-        ico, text = state(self.lazo.PAIRING.phone_count())
+        ico, text = state(self.lazo.PAIRING.phone_count(), self.lazo.PAIRING.away_count())
         if str(ico) != self.last_icon:
             self.last_icon = str(ico)
             if self.indicator is not None:
@@ -327,6 +366,8 @@ class LinuxTray:
             print("No pude arrancar LaZoo: el puerto está ocupado o falta un permiso.", flush=True)
             return 1
         self.create()  # start_server (el de Windows) ya engancha _on_new
+        if not os.environ.get("WAYLAND_DISPLAY"):  # 0.69: en Xorg, el portapapeles lo lleva GTK
+            self.lazo.control.GTK_CLIP = GtkClip(self.Gtk, self.GLib)
         self.balloon("LaZoo está en marcha", f"Puerto {self.lazo.PORT}. El menú está en el icono de la bandeja.")
         if open_panel:
             self.open(self.url("/mesa"))

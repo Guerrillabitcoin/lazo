@@ -144,7 +144,7 @@ const views = {
 
 const TOOLS = [
   { id: "mouse", name: "Ratón" },
-  { id: "bridge", name: "Pasar por wifi" },  // 0.63: puente + notas + portapapeles en uno
+  { id: "bridge", name: "Portapapeles Wifi" },  // 0.63: puente + notas + portapapeles en uno
   { id: "windows", name: "Ventanas" },
   { id: "youtube", name: "YouTube" },
   { id: "spotify", name: "Spotify" },
@@ -297,11 +297,51 @@ function pcSeen(data) {
     pcTop.textContent = data.pc;
     pcTop.title = [data.pc, sistema].filter(Boolean).join(" · ");
   }
+  if (cambio || !pcBar.childElementCount) pcBarPinta();
   const b = pcBridge("recordarPc");
   if (b && (cambio || Date.now() - pcInfo.avisado > 60000)) {
     pcInfo.avisado = Date.now();
     try { b.recordarPc(location.origin, data.pc, sistema); } catch (_e) { /* APK sin lista */ }
   }
+}
+const pcBar = document.querySelector("#pc-bar");
+/* Antes de irse a otro PC de la lista, avisa a este (firmado) para que se quede en naranja
+   («el móvil está en otro PC») y no en rojo. Si no contesta en 0,8 s, se va igual. */
+async function pcIrA(url) {
+  const b = pcBridge("open");
+  if (!b) { say("No puedo abrir esa dirección"); return; }
+  try {
+    await Promise.race([api("/api/ausente", {}).catch(() => {}), new Promise((ok) => window.setTimeout(ok, 800))]);
+  } catch (_e) { /* un PC viejo no lo conoce: da igual */ }
+  if (!b.open(url)) say("No puedo abrir esa dirección");
+}
+function pcBarPinta() {
+  const este = document.createElement("button");
+  este.type = "button";
+  este.className = "pc-chip activo";
+  este.setAttribute("aria-current", "true");
+  este.textContent = pcInfo.nombre || "Este PC";
+  if (pcInfo.sistema) {
+    const s = document.createElement("small");
+    s.textContent = pcInfo.sistema;
+    este.append(s);
+  }
+  este.addEventListener("click", () => { pcsPinta(); pcsBox.hidden = false; });
+  const otros = pcGuardados().filter((pc) => pc && pc.url && pc.url !== location.origin).map((pc) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pc-chip";
+    b.textContent = pc.nombre || pc.url.replace(/^https?:\/\//, "");
+    if (pc.sistema) {
+      const s = document.createElement("small");
+      s.textContent = pc.sistema;
+      b.append(s);
+    }
+    b.title = "Cambiar a " + b.textContent;
+    b.addEventListener("click", () => pcIrA(pc.url));
+    return b;
+  });
+  pcBar.replaceChildren(este, ...otros);
 }
 function pcGuardados() {
   const b = pcBridge("pcs");
@@ -328,11 +368,7 @@ function pcsPinta() {
     sub.textContent = [pc.sistema, pc.url.replace(/^https?:\/\//, ""),
       pc.visto ? "visto " + seenText(Math.max(0, (Date.now() - pc.visto) / 1000)) : ""].filter(Boolean).join(" · ");
     ir.append(sub);
-    ir.addEventListener("click", () => {
-      const b = pcBridge("open");
-      if (b && b.open(pc.url)) { pcsBox.hidden = true; return; }
-      say("No puedo abrir esa dirección");
-    });
+    ir.addEventListener("click", () => { pcsBox.hidden = true; pcIrA(pc.url); });
     const quitar = document.createElement("button");
     quitar.type = "button";
     quitar.className = "quitar";
@@ -343,6 +379,7 @@ function pcsPinta() {
       const b = pcBridge("olvidarPc");
       if (b) b.olvidarPc(pc.url);
       pcsPinta();
+      pcBarPinta();
     });
     li.append(ir, quitar);
     return li;
@@ -1583,7 +1620,7 @@ renderDock();
 const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
 const fromQr = hash.get("p") || "";
 const keyFromLink = localStorage.getItem("lazo-key") || "";
-// 0.63: «notas» y «puente» viven ahora en «Pasar por wifi».
+// 0.63: «notas» y «puente» viven ahora en «Portapapeles Wifi».
 const fromTray = ({ notes: "bridge", notas: "bridge", puente: "bridge" })[hash.get("pastilla") || ""] || hash.get("pastilla") || "";
 const onThisPc = ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
 if (fromQr || fromTray) history.replaceState(null, "", location.pathname);

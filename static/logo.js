@@ -88,7 +88,7 @@
       svg.appendChild(p);
       return p;
     }
-    forma(LETRAS, "#fff");
+    this.fletras = forma(LETRAS, "#fff");
     this.fo1 = forma(O1_TRAZO, "#fff");
     this.frojo = forma(ROJO_TRAZO, "rgb(" + ROJO.join(",") + ")");
     this.frojo.setAttribute("class", "lz-anillo");
@@ -137,7 +137,10 @@
     if (estado === this.estado) return;
     this.estado = estado;
     this.el.setAttribute("data-estado", estado);
-    var meta = estado === "conectado" ? 1 : 0;
+    // 0.69: «otro» = conectado, pero el móvil está en otro PC (o este no es el principal): el
+    // infinito verde como siempre y las letras «LaZ» en naranja. Los demás estados, sin cambios.
+    this.fletras.setAttribute("fill", estado === "otro" ? "rgb(" + NARANJA.join(",") + ")" : "#fff");
+    var meta = estado === "conectado" || estado === "otro" ? 1 : 0;
     window.cancelAnimationFrame(this.raf);
     if (ya || sinMovimiento() || this.p === meta) {
       this.dibujar(meta);
@@ -159,6 +162,7 @@
     if (el.getAttribute("data-fijo")) return el.getAttribute("data-fijo");
     var top = el.closest("[data-link]");
     if (top && top.getAttribute("data-link") === "on") return "conectado";
+    if (top && top.getAttribute("data-link") === "otro") return "otro";
     var aviso = document.getElementById("wait-banner");
     if (aviso && !aviso.hidden) return "esperando";
     return "desconectado";
@@ -168,7 +172,8 @@
   function favicon(estado) {
     var link = document.querySelector("link[rel=icon][data-dinamico]");
     if (!link) return;
-    var href = estado === "conectado" ? "/img/infinito-verde.svg" : "/img/infinito-rojo.svg";
+    var href = estado === "conectado" ? "/img/infinito-verde.svg"
+      : estado === "otro" ? "/img/infinito-naranja.svg" : "/img/infinito-rojo.svg";
     if (link.getAttribute("href") !== href) link.setAttribute("href", href);
   }
 
