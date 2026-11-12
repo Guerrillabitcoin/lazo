@@ -38,10 +38,11 @@
       .waiting b { color: var(--naranja); }
       @keyframes late { 50% { opacity: 0.35; } }
       /* 0.61: Conectar a la izquierda (QR pequeño); se oculta con móvil conectado. */
-      .board { display: grid; grid-template-columns: 280px 280px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "conn side pasar pasar"; gap: 18px; align-items: start; }
-      body.connected .board { grid-template-columns: 300px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "side pasar pasar"; }
+      /* 0.69: primera columna = Conectar (sin móvil) y debajo Configuración e historial;
+         al conectar se oculta Conectar y Configuración sube a su sitio. */
+      .board { display: grid; grid-template-columns: 300px 280px minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "cola side pasar pasar"; gap: 18px; align-items: start; }
       .board > * { min-width: 0; }
-      #conexion { grid-area: conn; }
+      .col-a { grid-area: cola; display: grid; gap: 18px; align-content: start; min-width: 0; }
       .side { grid-area: side; display: grid; gap: 18px; }
       /* 0.63: «Pasar por wifi» junta portapapeles/notas y archivos en una sola caja. */
       #pasar { grid-area: pasar; }
@@ -92,11 +93,10 @@
       @media (prefers-reduced-motion: reduce) { .lz-logo[data-estado="esperando"] .lz-anillo { animation: none; } }
       .top .lz-logo { height: 40px; }
       @media (max-width: 1280px) {
-        .board { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "conn pasar" "side pasar"; }
-        body.connected .board { grid-template-columns: 260px minmax(0, 1fr); grid-template-areas: "side pasar"; }
+        .board { grid-template-columns: 280px minmax(0, 1fr); grid-template-areas: "cola pasar" "side pasar"; }
       }
       @media (max-width: 760px) {
-        .board, body.connected .board { grid-template-columns: 1fr; grid-template-areas: "conn" "side" "pasar"; }
+        .board { grid-template-columns: 1fr; grid-template-areas: "cola" "side" "pasar"; }
         .pasar-cols { grid-template-columns: 1fr; }
       }
       /* 0.66: Configuración (los ajustes que estaban arriba) e historial de saltos */
@@ -104,18 +104,17 @@
       .cfg button.chip { width: auto; cursor: pointer; }
       .cfg-sub { margin: 12px 0 6px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--naranja); }
       .cfg-sub:first-of-type { margin-top: 0; }
-      .hist { margin-top: 18px; }
+      .hist { margin-top: 0; }
       .hist-total { color: var(--texto); font-size: 15px; }
       .hist-lista { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; max-height: 420px; overflow: auto; }
-      .hist-lista li { display: grid; grid-template-columns: 70px 92px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--hondo); font-size: 13px; }
+      .hist-lista li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--hondo); font-size: 13px; }
       .hist-lista .tipo { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #3a332b; color: var(--suave); text-align: center; }
       .hist-lista .tipo.patrocinio { background: rgba(224,122,61,0.18); color: var(--naranja); }
-      .hist-lista .vid { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .hist-lista .vid { grid-column: 1 / -1; grid-row: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .hist-lista .vid a { color: var(--texto); }
-      .hist-lista .seg { color: var(--suave); font-variant-numeric: tabular-nums; white-space: nowrap; }
+      .hist-lista .seg { justify-self: end; color: var(--suave); font-variant-numeric: tabular-nums; white-space: nowrap; }
       .hist-lista button { min-height: 30px; padding: 0 10px; }
       .hist-vacio { margin-top: 10px; }
-      @media (max-width: 700px) { .hist-lista li { grid-template-columns: 1fr auto; } }
     </style>
   </head>
   <body>
@@ -136,6 +135,7 @@
         <p id="ask-text">Hay un dispositivo esperando aprobación: acéptalo desde el aviso de Windows o el icono de la bandeja.</p>
       </div>
       <div class="board">
+        <div class="col-a">
         <section id="conexion" class="conn" aria-label="Conectar" hidden>
           <h2>Conectar</h2>
           <div id="conn-qr" class="qr" aria-label="Código QR para conectar"></div>
@@ -147,6 +147,42 @@
             <button id="conn-diag" type="button" title="Pasos de conexión sin claves ni PIN">Diagnóstico</button>
           </div>
         </section>
+        <section id="config" class="box cfg">
+          <h2>Configuración</h2>
+          <p class="cfg-sub">Dispositivos</p>
+          <label class="chip" title="Guarda la clave cifrada en este PC para que los móviles aprobados se reconecten solos tras reiniciar">
+          <input id="recordar" type="checkbox" /> Recordar dispositivos
+          </label>
+          <p class="cfg-sub">YouTube</p>
+          <label class="chip" title="Pulsa «Sí» en «¿Quieres seguir viendo?» sin mover el ratón ni traer la ventana delante">
+          <input id="sigues" type="checkbox" /> Evitar el aviso «¿Sigues ahí?» de YouTube
+          </label>
+          <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
+          <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
+          <label class="chip" title="Pulsa «Saltar» en cuanto YouTube lo deja, sin mover el ratón ni traer la ventana delante">
+          <input id="anuncios" type="checkbox" /> Saltar anuncios de YouTube
+          </label>
+          <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
+          <label class="chip" title="Salta el tramo en que el vídeo habla de su patrocinador, sin mover el ratón ni traer la ventana. Sale a internet: SponsorBlock ve tu IP, no qué vídeo ves.">
+          <input id="patrocinios" type="checkbox" /> Saltar patrocinios dentro del vídeo (se conecta a SponsorBlock)
+          </label>
+          <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
+          <p class="cfg-sub">Este PC</p>
+          <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
+          <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
+          </label>
+        </section>
+        <section id="historial" class="box hist">
+            <h2>Anuncios y patrocinios saltados</h2>
+            <p id="hist-total" class="hist-total">Ahorrado desde siempre: —</p>
+            <div class="row">
+              <button id="hist-borrar" type="button" title="Borra la lista. Lo ahorrado desde siempre se queda.">Borrar historial</button>
+              <button id="hist-cero" class="danger" type="button" title="Pone a cero el tiempo ahorrado desde siempre">Poner a cero lo ahorrado</button>
+            </div>
+            <ul id="hist-lista" class="hist-lista"></ul>
+            <p id="hist-vacio" class="hist-vacio">Aún no se ha saltado nada.</p>
+          </section>
+        </div>
         <div class="side">
           <section class="box">
             <h2>Estado</h2>
@@ -164,31 +200,6 @@
               <button id="kick-all" type="button">Expulsar a todos</button>
               <button id="forget-all" class="danger" type="button">Olvidar todos</button>
             </div>
-          </section>
-          <section id="config" class="box cfg">
-            <h2>Configuración</h2>
-            <p class="cfg-sub">Dispositivos</p>
-            <label class="chip" title="Guarda la clave cifrada en este PC para que los móviles aprobados se reconecten solos tras reiniciar">
-            <input id="recordar" type="checkbox" /> Recordar dispositivos
-            </label>
-            <p class="cfg-sub">YouTube</p>
-            <label class="chip" title="Pulsa «Sí» en «¿Quieres seguir viendo?» sin mover el ratón ni traer la ventana delante">
-            <input id="sigues" type="checkbox" /> Evitar el aviso «¿Sigues ahí?» de YouTube
-            </label>
-            <span class="chip" id="sigues-cuenta" title="Solo cuenta cuando el aviso desapareció de verdad tras pulsar «Sí»">Avisos quitados: 0</span>
-            <button type="button" class="chip" id="sigues-cero" title="Poner el contador a cero">Poner a cero</button>
-            <label class="chip" title="Pulsa «Saltar» en cuanto YouTube lo deja, sin mover el ratón ni traer la ventana delante">
-            <input id="anuncios" type="checkbox" /> Saltar anuncios de YouTube
-            </label>
-            <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
-            <label class="chip" title="Salta el tramo en que el vídeo habla de su patrocinador, sin mover el ratón ni traer la ventana. Sale a internet: SponsorBlock ve tu IP, no qué vídeo ves.">
-            <input id="patrocinios" type="checkbox" /> Saltar patrocinios dentro del vídeo (se conecta a SponsorBlock)
-            </label>
-            <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
-            <p class="cfg-sub">Este PC</p>
-            <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
-            <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
-            </label>
           </section>
         </div>
         <section id="pasar" class="box">
@@ -216,16 +227,6 @@
           </div>
         </section>
       </div>
-      <section id="historial" class="box hist">
-          <h2>Anuncios y patrocinios saltados</h2>
-          <p id="hist-total" class="hist-total">Ahorrado desde siempre: —</p>
-          <div class="row">
-            <button id="hist-borrar" type="button" title="Borra la lista. Lo ahorrado desde siempre se queda.">Borrar historial</button>
-            <button id="hist-cero" class="danger" type="button" title="Pone a cero el tiempo ahorrado desde siempre">Poner a cero lo ahorrado</button>
-          </div>
-          <ul id="hist-lista" class="hist-lista"></ul>
-          <p id="hist-vacio" class="hist-vacio">Aún no se ha saltado nada.</p>
-        </section>
     </main>
     <script>
       const nativeFetch = window.fetch.bind(window);

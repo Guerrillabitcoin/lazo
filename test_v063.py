@@ -419,7 +419,7 @@ class PasarPorWifi(unittest.TestCase):
         self.assertIn("<h2>Pasar por wifi</h2>", box)
         self.assertIn("No pasa por internet.", box)
         self.assertLess(box.index('id="clip-box"'), box.index('id="archivos"'))
-        self.assertIn('"conn side pasar pasar"', MESA)
+        self.assertIn('"cola side pasar pasar"', MESA)  # 0.69: Conectar va en la columna `cola`
 
     def test_bandeja(self):
         import bandeja
