@@ -23,16 +23,16 @@ fi
 #   bandeja (PyGObject + indicador), ratón/teclado en X11 (pynput va por pip), ventanas,
 #   multimedia (playerctl), volumen, brillo y avisos.
 if command -v apt-get >/dev/null 2>&1; then
-  PKGS="python3 python3-venv python3-pip python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 playerctl wmctrl xdotool pulseaudio-utils brightnessctl libnotify-bin wl-clipboard ydotool"
+  PKGS="python3 python3-venv python3-pip python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 playerctl wmctrl xdotool pulseaudio-utils brightnessctl libnotify-bin wl-clipboard xclip ydotool"
   INSTALL="sudo apt-get install -y"
 elif command -v dnf >/dev/null 2>&1; then
-  PKGS="python3 python3-pip python3-gobject gtk3 libayatana-appindicator-gtk3 playerctl wmctrl xdotool pulseaudio-utils brightnessctl libnotify wl-clipboard ydotool"
+  PKGS="python3 python3-pip python3-gobject gtk3 libayatana-appindicator-gtk3 playerctl wmctrl xdotool pulseaudio-utils brightnessctl libnotify wl-clipboard xclip ydotool"
   INSTALL="sudo dnf install -y"
 elif command -v pacman >/dev/null 2>&1; then
-  PKGS="python python-pip python-gobject gtk3 libayatana-appindicator playerctl wmctrl xdotool libpulse brightnessctl libnotify wl-clipboard ydotool"
+  PKGS="python python-pip python-gobject gtk3 libayatana-appindicator playerctl wmctrl xdotool libpulse brightnessctl libnotify wl-clipboard xclip ydotool"
   INSTALL="sudo pacman -S --needed --noconfirm"
 elif command -v zypper >/dev/null 2>&1; then
-  PKGS="python3 python3-pip python3-gobject python3-gobject-Gdk typelib-1_0-Gtk-3_0 typelib-1_0-AyatanaAppIndicator3-0_1 playerctl wmctrl xdotool pulseaudio-utils brightnessctl libnotify-tools wl-clipboard ydotool"
+  PKGS="python3 python3-pip python3-gobject python3-gobject-Gdk typelib-1_0-Gtk-3_0 typelib-1_0-AyatanaAppIndicator3-0_1 playerctl wmctrl xdotool pulseaudio-utils brightnessctl libnotify-tools wl-clipboard xclip ydotool"
   INSTALL="sudo zypper install -y"
 else
   PKGS=""

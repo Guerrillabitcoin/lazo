@@ -41,3 +41,30 @@ class PanelColumna(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PortapapelesLinux(unittest.TestCase):
+    ROOT = Path(__file__).parent
+
+    def test_instalador_pone_xclip_en_las_cuatro_familias(self):
+        inst = (self.ROOT / "instalar-linux.sh").read_text(encoding="utf-8")
+        self.assertEqual(inst.count("wl-clipboard xclip ydotool"), 4)
+
+    def test_iniciar_avisa_sin_herramienta_y_sin_venv(self):
+        import subprocess
+        ini = (self.ROOT / "iniciar.sh").read_text(encoding="utf-8")
+        self.assertEqual(subprocess.run(["sh", "-n", str(self.ROOT / "iniciar.sh")]).returncode, 0)
+        self.assertIn("command -v xclip", ini)
+        self.assertIn("sudo apt install xclip wl-clipboard", ini)
+        self.assertIn('python$v-venv', ini)
+        self.assertIn("rm -rf .venv  # 0.69", ini)
+
+    def test_xorg_escribe_con_xclip(self):
+        from unittest import mock
+        import control
+        with mock.patch.object(control, "SYSTEM", "Linux"), \
+             mock.patch.dict(control.os.environ, {"WAYLAND_DISPLAY": ""}), \
+             mock.patch.object(control, "_which", lambda n: n == "xclip"), \
+             mock.patch.object(control, "_run_input", return_value=True) as run:
+            self.assertTrue(control._write_clipboard_text("hola"))
+        run.assert_called_once_with(["xclip", "-selection", "clipboard", "-i"], "hola")
