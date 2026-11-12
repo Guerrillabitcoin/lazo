@@ -683,3 +683,17 @@ button[data-cursor] { min-height: 44px; }
 .yt-barra input[type="range"] { height: 34px; }
 .yt-preview { text-align: center; font-size: 22px; font-weight: 700; color: #e07a3d; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
 .yt-movil-link { display: block; text-align: center; margin-top: 8px; color: #e07a3d; font-weight: 600; }
+
+/* 0.69: varios PC. Botón con el nombre del PC (solo conectado) y su hoja. */
+.pc-top { display: none; margin-left: auto; min-height: 36px; max-width: 42vw; padding: 0 12px; border-radius: 999px; background: #3a332b; color: var(--texto, #f3eee6); font-weight: 650; border: 1px solid #5a4a3a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top[data-link="on"] .pc-top { display: inline-block; }
+.pcs .confirm-box { border-color: #5a4a3a; display: grid; gap: 10px; }
+.pcs .confirm-box > button { width: 100%; min-height: 46px; }
+.pcs-sub { margin: 4px 0 0; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #e07a3d; }
+.pcs-lista { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.pcs-lista li { display: flex; gap: 6px; }
+.pcs-lista li button { min-height: 44px; }
+.pcs-lista li .ir { flex: 1; text-align: left; padding: 0 12px; }
+.pcs-lista li .ir small { display: block; color: #c4b8aa; font-weight: 400; }
+.pcs-lista li .ir.fuera { opacity: 0.6; }
+.pcs-lista li .quitar { flex: none; width: 44px; }

@@ -12,6 +12,7 @@ import platform
 import secrets
 import shutil
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -3404,9 +3405,21 @@ def status() -> dict[str, Any]:
         now = ""
     return {
         "platform": SYSTEM,
+        "pc": pc_name(),
         "cursor": _cursor_mode,
         "spotify": now,
     }
+
+
+def pc_name() -> str:
+    """0.69: nombre del PC para la lista de PC del móvil. Solo va en /api/status (firmado y sellado),
+    nunca en /api/time, que contesta sin clave."""
+    try:
+        name = socket.gethostname().split(".")[0]
+    except OSError:
+        name = ""
+    name = "".join(ch for ch in name if ch.isalnum() or ch in "-_ ")[:40].strip()
+    return name or "PC"
 
 
 def set_history_path(path: Path) -> None:

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="net.lazoo.app"
-    android:versionCode="65"
-    android:versionName="2">
+    android:versionCode="66"
+    android:versionName="3">
     <!-- La APK lleva su propio número («App N»), aparte del de LaZoo (el .exe).
          Solo sube si cambia algo de android/; versionCode = 63 + N y nunca baja. -->
     <uses-sdk android:minSdkVersion="24" android:targetSdkVersion="34" />

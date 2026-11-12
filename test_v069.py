@@ -68,3 +68,69 @@ class PortapapelesLinux(unittest.TestCase):
              mock.patch.object(control, "_run_input", return_value=True) as run:
             self.assertTrue(control._write_clipboard_text("hola"))
         run.assert_called_once_with(["xclip", "-selection", "clipboard", "-i"], "hola")
+
+
+ROOT = Path(__file__).parent
+JS = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
+HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+JAVA = (ROOT / "android" / "src" / "net" / "lazoo" / "app" / "MainActivity.java").read_text(encoding="utf-8")
+ESC = (ROOT / "android" / "assets" / "escaner.html").read_text(encoding="utf-8")
+
+
+class VariosPc(unittest.TestCase):
+    def test_nombre_del_pc_solo_en_status_firmado(self):
+        import control
+        import lazo
+        st = control.status()
+        self.assertTrue(st["pc"])
+        self.assertLessEqual(len(st["pc"]), 40)
+        src = (ROOT / "lazo.py").read_text(encoding="utf-8")
+        linea = next(l for l in src.splitlines() if 'path == "/api/time"' in l)
+        bloque = src[src.index(linea):src.index(linea) + 300]
+        self.assertNotIn("pc_name", bloque)
+        self.assertNotIn("gethostname", bloque)
+
+    def test_pc_name_limpio(self):
+        from unittest import mock
+        import control
+        with mock.patch.object(control.socket, "gethostname", return_value="vaio<script>.local"):
+            self.assertEqual(control.pc_name(), "vaioscript")
+        with mock.patch.object(control.socket, "gethostname", side_effect=OSError):
+            self.assertEqual(control.pc_name(), "PC")
+
+    def test_web_usa_el_puente_solo_si_existe(self):
+        self.assertIn('typeof b[name] === "function"', JS)
+        for fn in ("recordarPc", "pcs", "olvidarPc", "anadirPc"):
+            self.assertIn(f'pcBridge("{fn}")', JS)
+        self.assertNotIn("LaZooApp.pcs(", JS)
+        self.assertIn('id="pc-top"', HTML)
+        self.assertIn('id="pcs-salir"', HTML)
+        self.assertIn('.top[data-link="on"] .pc-top', (ROOT / "static" / "app.css").read_text(encoding="utf-8"))
+
+    def test_salir_expulsa_y_olvida_la_clave(self):
+        i = JS.index('querySelector("#pcs-salir")')
+        bloque = JS[i:i + 900]
+        self.assertIn('"/api/dispositivos/expulsar", { id: deviceId }', bloque)
+        self.assertIn("forgetKey();", bloque)
+        self.assertIn("showPin(", bloque)
+        self.assertIn("askConfirm(", bloque)
+
+    def test_apk_app3(self):
+        apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
+        self.assertIn('android:versionCode="66"', apk)
+        self.assertIn('android:versionName="3"', apk)
+        for fn in ("pcs()", "recordarPc(", "olvidarPc(", "anadirPc()", "probar("):
+            self.assertIn("public ", JAVA[JAVA.index(fn) - 40:JAVA.index(fn)])
+        self.assertIn('o.equals(pageOrigin)', JAVA)  # un PC no renombra a otro
+        self.assertIn('new URL(base + "/")', JAVA)  # sin /api/: la APK no depende del PC por dentro
+        self.assertIn('"<title>LaZoo"', JAVA)
+        self.assertIn("setConnectTimeout(1500)", JAVA)
+        self.assertIn('SCANNER + "#inicio"', JAVA)
+        self.assertIn("MAX_PCS = 12", JAVA)
+        self.assertNotIn("lazo-key", JAVA)  # la lista nunca guarda claves
+
+    def test_inicio_de_la_apk(self):
+        self.assertIn('location.hash === "#inicio"', ESC)
+        self.assertIn("window.lazooProbado", ESC)
+        self.assertIn('if (!pcs.length) start();', ESC)  # con PC guardados, la cámara solo al añadir
+        self.assertIn("privateHost(url.hostname)", ESC)

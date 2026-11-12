@@ -44,7 +44,7 @@ const deviceId = (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.68";
+const PAGE_VERSION = "0.69";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -273,6 +273,107 @@ function showPin(reason) {
   window.clearInterval(caretTimer);
   fetch("/api/bye?i=" + deviceId, { method: "POST", headers: authHeaders() }).catch(() => {});
 }
+
+/* 0.69: varios PC. El botón de arriba enseña el nombre del PC; su hoja deja salir de este PC
+   (siempre) y, con la App 3, cambiar a otro PC guardado o añadir uno. Cada PC tiene su propia
+   clave (localStorage es por dirección), así que cambiar de PC no empareja de nuevo. */
+const pcTop = document.querySelector("#pc-top");
+const pcsBox = document.querySelector("#pcs");
+let pcInfo = { nombre: "", sistema: "", avisado: 0 };
+function pcBridge(name) {
+  const b = window.LaZooApp;
+  return b && typeof b[name] === "function" ? b : null;
+}
+function pcSistema(platform) {
+  return { Windows: "Windows", Linux: "Linux", Darwin: "Mac" }[platform] || platform || "";
+}
+function pcSeen(data) {
+  if (!data || !data.pc) return;
+  const sistema = pcSistema(data.platform);
+  const cambio = pcInfo.nombre !== data.pc || pcInfo.sistema !== sistema;
+  if (cambio) {
+    pcInfo.nombre = data.pc;
+    pcInfo.sistema = sistema;
+    pcTop.textContent = data.pc;
+    pcTop.title = [data.pc, sistema].filter(Boolean).join(" · ");
+  }
+  const b = pcBridge("recordarPc");
+  if (b && (cambio || Date.now() - pcInfo.avisado > 60000)) {
+    pcInfo.avisado = Date.now();
+    try { b.recordarPc(location.origin, data.pc, sistema); } catch (_e) { /* APK sin lista */ }
+  }
+}
+function pcGuardados() {
+  const b = pcBridge("pcs");
+  if (!b) return [];
+  try {
+    const list = JSON.parse(b.pcs() || "[]");
+    return Array.isArray(list) ? list : [];
+  } catch (_e) {
+    return [];
+  }
+}
+function pcsPinta() {
+  document.querySelector("#pcs-este").textContent =
+    [pcInfo.nombre || "Este PC", pcInfo.sistema, location.host].filter(Boolean).join(" · ");
+  const otros = pcGuardados().filter((pc) => pc && pc.url && pc.url !== location.origin);
+  const lista = document.querySelector("#pcs-otros");
+  lista.replaceChildren(...otros.map((pc) => {
+    const li = document.createElement("li");
+    const ir = document.createElement("button");
+    ir.type = "button";
+    ir.className = "ir";
+    ir.textContent = pc.nombre || pc.url.replace(/^https?:\/\//, "");
+    const sub = document.createElement("small");
+    sub.textContent = [pc.sistema, pc.url.replace(/^https?:\/\//, ""),
+      pc.visto ? "visto " + seenText(Math.max(0, (Date.now() - pc.visto) / 1000)) : ""].filter(Boolean).join(" · ");
+    ir.append(sub);
+    ir.addEventListener("click", () => {
+      const b = pcBridge("open");
+      if (b && b.open(pc.url)) { pcsBox.hidden = true; return; }
+      say("No puedo abrir esa dirección");
+    });
+    const quitar = document.createElement("button");
+    quitar.type = "button";
+    quitar.className = "quitar";
+    quitar.textContent = "✕";
+    quitar.setAttribute("aria-label", "Quitar " + (pc.nombre || pc.url) + " de la lista");
+    quitar.addEventListener("click", async () => {
+      if (!(await askConfirm("¿Quitar este PC de la lista?", "Para volver a usarlo tendrás que escanear su QR.", "Quitar"))) return;
+      const b = pcBridge("olvidarPc");
+      if (b) b.olvidarPc(pc.url);
+      pcsPinta();
+    });
+    li.append(ir, quitar);
+    return li;
+  }));
+  document.querySelector("#pcs-otros-box").hidden = !otros.length;
+  document.querySelector("#pcs-anadir").hidden = !pcBridge("anadirPc");
+  document.querySelector("#pcs-solo-app").hidden = Boolean(pcBridge("pcs"));
+}
+pcTop.addEventListener("click", () => {
+  pcsPinta();
+  pcsBox.hidden = false;
+});
+document.querySelector("#pcs-cerrar").addEventListener("click", () => { pcsBox.hidden = true; });
+pcsBox.addEventListener("click", (event) => { if (event.target === pcsBox) pcsBox.hidden = true; });
+document.querySelector("#pcs-anadir").addEventListener("click", () => {
+  const b = pcBridge("anadirPc");
+  if (b) b.anadirPc();
+});
+document.querySelector("#pcs-salir").addEventListener("click", async () => {
+  pcsBox.hidden = true;
+  const ok = await askConfirm("¿Salir de este PC?",
+    "Este móvil dejará de controlar " + (pcInfo.nombre || "este PC") + ". Para volver tendrás que escanear el QR o poner el PIN.", "Salir");
+  if (!ok) return;
+  try {
+    await api("/api/dispositivos/expulsar", { id: deviceId });
+  } catch (_err) { /* aunque el PC no conteste, este móvil olvida su clave */ }
+  const b = pcBridge("olvidarPc");
+  if (b) { try { b.olvidarPc(location.origin); } catch (_e) { /* sigue */ } }
+  forgetKey();
+  showPin("Has salido de este PC.");
+});
 
 function showHome() {
   openCube("mouse");
@@ -601,6 +702,7 @@ async function refreshStatus() {
   try {
     const data = await api("/api/status", null, "GET");
     applyPlatform(data.platform);
+    pcSeen(data);
     document.querySelectorAll("[data-cursor]").forEach((button) => {
       button.classList.toggle("on", button.dataset.cursor === data.cursor);
     });

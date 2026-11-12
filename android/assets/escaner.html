@@ -20,16 +20,34 @@
   button.primary { background: #e07a3d; color: #141210; }
   input { flex: 2; background: #241f1a; color: #fff; }
   [hidden] { display: none !important; }
+  /* App 3: PC guardados */
+  #pcs { padding: 0 16px; }
+  #pcs h2 { margin: 6px 0 8px; font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: #e07a3d; font-weight: 600; }
+  #pcs ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+  #pcs li { display: flex; gap: 8px; }
+  #pcs li .ir { flex: 1; text-align: left; padding: 8px 14px; min-height: 56px; }
+  #pcs li .ir small { display: block; color: #c4b8aa; font-size: 13px; }
+  #pcs li .ir .est { color: #c4b8aa; }
+  #pcs li .ir .est.si { color: #3dbe6e; }
+  #pcs li .ir .est.no { color: #d0574c; }
+  #pcs li .quitar { flex: none; width: 52px; }
+  body.con-pcs #view { flex: 0 0 0; margin: 0; }
+  body.con-pcs.camara #view { flex: 1; margin: 8px 16px; }
 </style>
 </head>
 <body>
 <main>
   <header><p class="brand">LaZ<b>oo</b></p></header>
+  <section id="pcs" hidden>
+    <h2>Tus PC</h2>
+    <ul id="pcs-lista"></ul>
+  </section>
   <div id="view"><video id="cam" playsinline muted></video><div class="frame"></div></div>
   <p id="msg" aria-live="polite">Apunta al QR que sale en la ventana de LaZoo del PC.</p>
   <div class="row">
     <button id="last" class="primary" type="button" hidden>Volver al último PC</button>
     <button id="retry" type="button">Reintentar cámara</button>
+    <button id="nuevo" type="button" class="primary" hidden>Añadir PC (escanear QR)</button>
   </div>
   <div class="row">
     <input id="manual" inputmode="url" placeholder="o escribe http://192.168.1.x:8787" />
@@ -97,12 +115,90 @@
     setTimeout(() => requestAnimationFrame(tick), 120);
   }
 
-  const last = app ? app.last() : "";
-  if (last) {
-    const b = document.querySelector("#last");
-    b.hidden = false;
-    try { b.textContent = "Volver a " + new URL(last).host; } catch (_e) {}
-    b.addEventListener("click", () => tryOpen(last));
+  // App 3 (LaZoo 0.69): varios PC. Con PC guardados, el inicio enseña la lista y, si se abrió la
+  // app (#inicio), prueba el último y entra solo si contesta. La cámara, solo al añadir un PC.
+  const fn = (n) => app && typeof app[n] === "function";
+  let pcs = [];
+  try { pcs = fn("pcs") ? JSON.parse(app.pcs() || "[]") : []; } catch (_e) { pcs = []; }
+  const nombre = (pc) => pc.nombre || pc.url.replace(/^https?:\/\//, "");
+  const estados = {};
+  let auto = location.hash === "#inicio";
+  let camara = false;
+
+  function verCamara() {
+    if (camara) return;
+    camara = true;
+    auto = false;
+    document.body.classList.add("camara");
+    document.querySelector("#nuevo").hidden = true;
+    document.querySelector("#retry").hidden = false;
+    start();
+  }
+
+  function pinta() {
+    const ul = document.querySelector("#pcs-lista");
+    ul.replaceChildren(...pcs.map((pc) => {
+      const li = document.createElement("li");
+      const ir = document.createElement("button");
+      ir.type = "button";
+      ir.className = "ir";
+      ir.textContent = nombre(pc);
+      const sub = document.createElement("small");
+      const est = document.createElement("span");
+      const e = estados[pc.url];
+      est.className = "est" + (e === true ? " si" : e === false ? " no" : "");
+      est.textContent = e === true ? "● encendido" : e === false ? "● no contesta" : "comprobando…";
+      sub.append(est, " · " + [pc.sistema, pc.url.replace(/^https?:\/\//, "")].filter(Boolean).join(" · "));
+      ir.append(sub);
+      ir.addEventListener("click", () => { auto = false; tryOpen(pc.url); });
+      const quitar = document.createElement("button");
+      quitar.type = "button";
+      quitar.className = "quitar";
+      quitar.textContent = "✕";
+      quitar.setAttribute("aria-label", "Quitar " + nombre(pc));
+      quitar.addEventListener("click", () => {
+        if (!confirm("¿Quitar " + nombre(pc) + " de la lista? Para volver a usarlo tendrás que escanear su QR.")) return;
+        if (fn("olvidarPc")) app.olvidarPc(pc.url);
+        pcs = pcs.filter((x) => x.url !== pc.url);
+        if (!pcs.length) { document.body.classList.remove("con-pcs"); document.querySelector("#pcs").hidden = true; verCamara(); }
+        pinta();
+      });
+      li.append(ir, quitar);
+      return li;
+    }));
+  }
+
+  window.lazooProbado = (url, ok) => {
+    estados[url] = Boolean(ok);
+    pinta();
+    const ultimo = pcs.find((pc) => pc.ultimo) || pcs[0];
+    if (auto && ultimo && url === ultimo.url) {
+      if (ok) tryOpen(ultimo.url);
+      else msg(nombre(ultimo) + " no contesta. ¿Está encendido y con LaZoo abierto? Elige otro PC o añade uno.");
+      auto = false;
+    }
+  };
+
+  if (pcs.length) {
+    document.body.classList.add("con-pcs");
+    document.querySelector("#pcs").hidden = false;
+    document.querySelector("#retry").hidden = true;
+    document.querySelector("#nuevo").hidden = false;
+    document.querySelector("#nuevo").addEventListener("click", verCamara);
+    const ultimo = pcs.find((pc) => pc.ultimo) || pcs[0];
+    msg(auto ? "Conectando con " + nombre(ultimo) + "…" : "Elige un PC o añade otro.");
+    pinta();
+    if (fn("probar")) pcs.forEach((pc) => app.probar(pc.url));
+    else auto = false;
+    if (location.hash !== "#inicio") verCamara();  // «Escanear QR» desde un PC: cámara directa
+  } else {
+    const last = app ? app.last() : "";
+    if (last) {
+      const b = document.querySelector("#last");
+      b.hidden = false;
+      try { b.textContent = "Volver a " + new URL(last).host; } catch (_e) {}
+      b.addEventListener("click", () => tryOpen(last));
+    }
   }
   document.querySelector("#retry").addEventListener("click", () => { busy = false; start(); });
   document.querySelector("#manual").addEventListener("keydown", (e) => { if (e.key === "Enter") document.querySelector("#go").click(); });
@@ -111,7 +207,7 @@
     if (t && !/^https?:\/\//.test(t)) t = "http://" + t;
     if (!tryOpen(t)) msg("Dirección no válida o fuera de tu red local.");
   });
-  start();
+  if (!pcs.length) start();
 </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-# LaZoo 0.68
+# LaZoo 0.69
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,10 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux, desde 0.67, también hay bandeja (mira «Novedad 0.67»); en macOS llegará más adelante.
+
+**Novedad 0.69 (varios PC):** un móvil, varios PC (por ejemplo, uno con Windows y otro con Linux). Arriba sale el nombre del PC al que estás conectado; al tocarlo puedes **salir de este PC** (en cualquier móvil) y, con la **App 3**, **cambiar a otro PC guardado** o **añadir otro** escaneando su QR. Cada PC guarda su propia clave, así que cambiar de uno a otro no pide emparejar de nuevo. Al abrir la App 3 prueba sola el último PC y entra si contesta; si no, enseña la lista con cuál está encendido. El nombre del PC solo viaja dentro de la conexión cifrada. Panel: al conectar el móvil, Configuración sube al sitio del QR y el historial de saltos va debajo. Linux: el instalador pone `xclip` (portapapeles en Xorg) y avisa si falta. Las notas todavía no pasan de un PC a otro.
+
+**App 3 (0.69):** lista de PC guardados, reconexión automática al último al abrir, «Añadir PC» y cambio de PC desde la web. Con la App 2 todo lo demás sigue igual (el botón del PC solo deja salir).
 
 **Novedad 0.68 (Linux con Wayland):** LaZoo funciona en el Ubuntu de hoy (GNOME en Wayland) sin cambiar de sesión. **Ratón y teclado** con `ydotool`: `instalar-linux.sh` lo deja preparado (una regla solo para `/dev/uinput` con un grupo propio, `uinput`, y el servicio de usuario `lazoo-ydotoold`); hay que cerrar sesión una vez. El texto con ñ, acentos o símbolos se pega (y el portapapeles de antes vuelve). **YouTube sin teclas:** play/pausa, ±10 s, siguiente, anterior y la barra van por los controles multimedia (`playerctl`); silencio, subtítulos, modo cine, pantalla completa y el volumen exacto, pulsando los botones del propio reproductor por accesibilidad. Encuentra la ventana de YouTube también con Firefox de Ubuntu. En Wayland aún no van la velocidad ni el tamaño de los subtítulos desde el móvil (avisa). **La pestaña Ventanas no sale con un PC Linux.** Lista de pruebas: [`docs/PRUEBAS-LINUX.md`](docs/PRUEBAS-LINUX.md).
 

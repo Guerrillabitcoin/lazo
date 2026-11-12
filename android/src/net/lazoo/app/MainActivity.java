@@ -24,7 +24,12 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
 import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
+import java.net.URL;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * LaZoo para Android: al abrir sale el escáner de QR (assets/escaner.html, con jsQR, sin
@@ -37,6 +42,8 @@ public class MainActivity extends Activity {
     static final int REQ_CAMERA = 1, REQ_FILE = 2, REQ_NOTIFY = 3;
     static final String CHANNEL = "lazoo-aprobacion";
     static final int NOTE_WAIT = 54;
+    static final int MAX_PCS = 12;   // App 3: PC guardados como mucho
+    volatile String pageOrigin = ""; // origen de la página cargada (para recordarPc)
 
     WebView web;
     WifiManager.WifiLock wifiLock;
@@ -58,7 +65,12 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new Client());
         web.setWebChromeClient(new Chrome());
         if (state != null) web.restoreState(state);
-        else web.loadUrl(SCANNER);
+        else {
+            // App 3: quien viene de la App 2 tiene «last» y aún no tiene lista: entra en ella.
+            String last = origin(prefs().getString("last", ""));
+            if (loadPcs().length() == 0 && !last.isEmpty()) savePc(last, null, null);
+            web.loadUrl(SCANNER + "#inicio");
+        }  // App 3: el inicio prueba antes el último PC
     }
 
     // 0.50: Wi-Fi despierto y en baja latencia solo mientras la app está delante.
@@ -196,10 +208,93 @@ public class MainActivity extends Activity {
         if (!allowedUrl(url)) return;
         int cut = url.indexOf('#');  // 0.56: sin la ficha del QR (#p=...), que caduca al usarla
         prefs().edit().putString("last", cut >= 0 ? url.substring(0, cut) : url).apply();
+        savePc(origin(url), null, null);
         web.loadUrl(url);
     }
 
     void rescan() { web.loadUrl(SCANNER); }
+
+    /** App 3: http://ip:puerto de una dirección, o "" si no es de la red local. */
+    static String origin(String url) {
+        try {
+            if (!allowedUrl(url)) return "";
+            Uri u = Uri.parse(url);
+            String host = u.getHost();
+            if (host.contains(":") && !host.startsWith("[")) host = "[" + host + "]";
+            return u.getScheme() + "://" + host + (u.getPort() > 0 ? ":" + u.getPort() : "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    // App 3: la lista de PC guardados, en SharedPreferences «pcs»: [{url, nombre, sistema, visto}].
+    // Solo direcciones de la red local y textos cortos; nunca claves (cada PC guarda la suya en el
+    // localStorage de su propia dirección).
+    synchronized JSONArray loadPcs() {
+        try { return new JSONArray(prefs().getString("pcs", "[]")); }
+        catch (Exception e) { return new JSONArray(); }
+    }
+
+    static String clean(String t, int max) {
+        if (t == null) return null;
+        String x = t.replaceAll("[\\p{Cntrl}<>]", "").trim();
+        return x.substring(0, Math.min(max, x.length()));
+    }
+
+    synchronized void savePc(String url, String nombre, String sistema) {
+        if (url == null || url.isEmpty()) return;
+        try {
+            JSONArray old = loadPcs(), out = new JSONArray();
+            JSONObject me = null;
+            for (int k = 0; k < old.length(); k++) {
+                JSONObject o = old.optJSONObject(k);
+                if (o == null) continue;
+                if (url.equals(o.optString("url"))) me = o; else out.put(o);
+            }
+            if (me == null) me = new JSONObject().put("url", url);
+            if (nombre != null && !clean(nombre, 40).isEmpty()) me.put("nombre", clean(nombre, 40));
+            if (sistema != null) me.put("sistema", clean(sistema, 20));
+            me.put("visto", System.currentTimeMillis());
+            JSONArray list = new JSONArray().put(me);  // el último usado, el primero
+            for (int k = 0; k < out.length() && list.length() < MAX_PCS; k++) list.put(out.get(k));
+            prefs().edit().putString("pcs", list.toString()).apply();
+        } catch (Exception e) {
+            // la lista es una comodidad: si falla, LaZoo sigue igual
+        }
+    }
+
+    synchronized void forgetPc(String url) {
+        JSONArray old = loadPcs(), out = new JSONArray();
+        for (int k = 0; k < old.length(); k++) {
+            JSONObject o = old.optJSONObject(k);
+            if (o != null && !url.equals(o.optString("url"))) out.put(o);
+        }
+        SharedPreferences.Editor e = prefs().edit().putString("pcs", out.toString());
+        if (url.equals(origin(prefs().getString("last", "")))) e.remove("last");
+        e.apply();
+    }
+
+    /** App 3: ¿contesta LaZoo en esa dirección? Pide la página de inicio (como al abrirla), 1,5 s
+     *  como mucho. Nada de la API: la APK sigue sin depender de cómo es el PC por dentro. */
+    static boolean alive(String base) {
+        HttpURLConnection c = null;
+        try {
+            c = (HttpURLConnection) new URL(base + "/").openConnection();
+            c.setConnectTimeout(1500);
+            c.setReadTimeout(1500);
+            c.setUseCaches(false);
+            if (c.getResponseCode() != 200) return false;
+            byte[] buf = new byte[4096];
+            InputStream in = c.getInputStream();
+            int n = 0, r;
+            while (n < buf.length && (r = in.read(buf, n, buf.length - n)) > 0) n += r;
+            return n > 0 && new String(buf, 0, n, "UTF-8").contains("<title>LaZoo");
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (c != null) c.disconnect();
+        }
+    }
 
     class Bridge {
         @JavascriptInterface
@@ -266,9 +361,60 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void clearNote() { runOnUiThread(MainActivity.this::clearWaitNote); }
+
+        // App 3 (LaZoo 0.69): varios PC. La web solo usa estas funciones tras comprobar que
+        // existen (typeof … === "function"), así una APK vieja o el navegador siguen igual.
+        @JavascriptInterface
+        public String pcs() {
+            JSONArray list = loadPcs();
+            String last = origin(prefs().getString("last", ""));
+            try {
+                for (int k = 0; k < list.length(); k++) {
+                    JSONObject o = list.getJSONObject(k);
+                    o.put("ultimo", last.equals(o.optString("url")));
+                }
+            } catch (Exception e) { /* tal cual */ }
+            return list.toString();
+        }
+
+        /** Solo para el PC cuya página está cargada: un PC no puede renombrar a otro. */
+        @JavascriptInterface
+        public boolean recordarPc(String url, String nombre, String sistema) {
+            String o = origin(url);
+            if (o.isEmpty() || !o.equals(pageOrigin)) return false;
+            savePc(o, nombre, sistema);
+            return true;
+        }
+
+        @JavascriptInterface
+        public void olvidarPc(String url) {
+            String o = origin(url);
+            if (!o.isEmpty()) forgetPc(o);
+        }
+
+        @JavascriptInterface
+        public void anadirPc() { runOnUiThread(MainActivity.this::rescan); }
+
+        /** Sin bloquear: contesta luego con window.lazooProbado(url, true|false). */
+        @JavascriptInterface
+        public void probar(String url) {
+            final String o = origin(url);
+            if (o.isEmpty()) return;
+            new Thread(() -> {
+                final boolean ok = alive(o);
+                runOnUiThread(() -> web.evaluateJavascript(
+                        "window.lazooProbado && window.lazooProbado(" + JSONObject.quote(o) + "," + ok + ")", null));
+            }, "lazoo-probar").start();
+        }
     }
 
     class Client extends WebViewClient {
+        @Override
+        public void onPageStarted(WebView view, String url, android.graphics.Bitmap icon) {
+            pageOrigin = origin(url);
+            super.onPageStarted(view, url, icon);
+        }
+
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest req) {
             Uri u = req.getUrl();

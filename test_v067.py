@@ -430,16 +430,16 @@ class Paquete(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_067(self):
-        self.assertEqual(lazo.VERSION, "0.68")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.68")
+        self.assertEqual(lazo.VERSION, "0.69")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.69")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("# LaZoo 0.68", readme)
+        self.assertIn("# LaZoo 0.69", readme)
         self.assertIn("**Novedad 0.67 (Linux):**", readme)
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         for txt in ("linux_yt.py", "bandeja_linux.py", "test_v067.py"):
             self.assertIn(txt, agents)
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        self.assertIn('android:versionName="2"', apk)  # la APK sirve igual para Windows y Linux
+        self.assertIn('android:versionName="3"', apk)  # la APK sirve igual para Windows y Linux
 
 
 if __name__ == "__main__":

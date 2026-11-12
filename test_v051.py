@@ -73,10 +73,10 @@ def longest_still(per_tick, t0, t1):
 
 class Version(unittest.TestCase):
     def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.68")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.68")
-        self.assertIn('android:versionName="2"', APK)
-        self.assertIn('android:versionCode="65"', APK)
+        self.assertEqual(lazo.VERSION, "0.69")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.69")
+        self.assertIn('android:versionName="3"', APK)
+        self.assertIn('android:versionCode="66"', APK)
 
 
 class Prediccion(unittest.TestCase):

@@ -266,17 +266,17 @@ class Panel(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_066(self):
-        self.assertEqual(lazo.VERSION, "0.68")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.68")
-        self.assertIn('<p class="ver">0.68', MESA)
+        self.assertEqual(lazo.VERSION, "0.69")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.69")
+        self.assertIn('<p class="ver">0.69', MESA)
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("# LaZoo 0.68", readme)
+        self.assertIn("# LaZoo 0.69", readme)
         self.assertIn("**Novedad 0.66:**", readme)
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("historial.py", agents)
         self.assertIn("test_v066.py", agents)
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
-        self.assertIn('android:versionName="2"', apk)  # la APK no cambia
+        self.assertIn('android:versionName="3"', apk)  # la APK no cambia
 
 
 if __name__ == "__main__":
