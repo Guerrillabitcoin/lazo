@@ -41,6 +41,8 @@ def make(preset=None, cls=None, out=None):
     c = (cls or control.Continuo)(dispatch=lambda dx, dy: out.append((dx, dy)), clock=lambda: 0.0)
     if preset:
         c.aplicar(control.PRESETS[preset], preset)
+        if preset == "equilibrado":
+            c.set_pred(True)  # 0.72: el preset ya no predice; aquí se mide la corrección de lo predicho
     return c, out
 
 
@@ -76,12 +78,12 @@ def jerk(per, t0, t1):
 
 class Version(unittest.TestCase):
     def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.71")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.71")
+        self.assertEqual(lazo.VERSION, "0.72")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.72")
         self.assertIn('android:versionName="3"', APK)
         self.assertIn('android:versionCode="66"', APK)
-        self.assertIn("0.71", (ROOT / "static" / "mesa.html").read_text(encoding="utf-8"))
-        self.assertIn("LaZoo 0.71", HTML)
+        self.assertIn("0.72", (ROOT / "static" / "mesa.html").read_text(encoding="utf-8"))
+        self.assertIn("LaZoo 0.72", HTML)
 
 
 class CorreccionSuave(unittest.TestCase):
@@ -240,7 +242,7 @@ class Validacion(unittest.TestCase):
 
     def test_por_defecto_equilibrado(self) -> None:
         self.assertEqual(control.CONTINUO.preset, "equilibrado")
-        self.assertTrue(control.CONTINUO.pred)
+        self.assertFalse(control.CONTINUO.pred)  # 0.72: sin predicción de serie
         self.assertIn("ajuste", lazo.ACTIONS)
 
 

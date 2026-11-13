@@ -185,9 +185,9 @@ class Instalador(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_068(self):
-        self.assertEqual(lazo.VERSION, "0.71")
+        self.assertEqual(lazo.VERSION, "0.72")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("# LaZoo 0.71", readme)
+        self.assertIn("# LaZoo 0.72", readme)
         self.assertIn("**Novedad 0.68 (Linux con Wayland):**", readme)
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("ydo.py", agents)

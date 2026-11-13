@@ -103,9 +103,10 @@ class VariosPc(unittest.TestCase):
         for fn in ("recordarPc", "pcs", "olvidarPc", "anadirPc"):
             self.assertIn(f'pcBridge("{fn}")', JS)
         self.assertNotIn("LaZooApp.pcs(", JS)
-        self.assertIn('id="pc-top"', HTML)
+        # 0.72: sin botón arriba; la hoja «Este PC» se abre desde la pastilla del PC actual.
+        self.assertNotIn('id="pc-top"', HTML)
         self.assertIn('id="pcs-salir"', HTML)
-        self.assertIn('.top[data-link="on"] .pc-top', (ROOT / "static" / "app.css").read_text(encoding="utf-8"))
+        self.assertIn('este.addEventListener("click", () => { pcsPinta(); pcsBox.hidden = false; });', JS)
 
     def test_salir_expulsa_y_olvida_la_clave(self):
         i = JS.index('querySelector("#pcs-salir")')

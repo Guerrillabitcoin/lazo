@@ -54,8 +54,8 @@ def bursty(seconds=2.0, seed=1):
 
 class Version(unittest.TestCase):
     def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.71")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.71")
+        self.assertEqual(lazo.VERSION, "0.72")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.72")
         self.assertIn('android:versionName="3"', APK)
         self.assertIn('android:versionCode="66"', APK)
 

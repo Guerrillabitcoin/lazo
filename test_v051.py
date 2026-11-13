@@ -73,8 +73,8 @@ def longest_still(per_tick, t0, t1):
 
 class Version(unittest.TestCase):
     def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.71")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.71")
+        self.assertEqual(lazo.VERSION, "0.72")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.72")
         self.assertIn('android:versionName="3"', APK)
         self.assertIn('android:versionCode="66"', APK)
 
@@ -191,7 +191,7 @@ class Api(unittest.TestCase):
         d = lazo.mouse_diag()["continuo"]
         for k in ("prediccion", "inercia", "predichos_px_s", "error_medio_px", "error_max_px", "deriva_px"):
             self.assertIn(k, d)
-        self.assertTrue(control.CONTINUO.pred)
+        self.assertFalse(control.CONTINUO.pred)  # 0.72: apagada de serie (antes, encendida)
 
 
 class Interfaz(unittest.TestCase):

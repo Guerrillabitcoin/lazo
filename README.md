@@ -1,4 +1,4 @@
-# LaZoo 0.71
+# LaZoo 0.72
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux, desde 0.67, también hay bandeja (mira «Novedad 0.67»); en macOS llegará más adelante.
+
+**Novedad 0.72 (arreglos tras probar la 0.71):** en el móvil, la cabecera ya no se aprieta: logo y versión, el estado en una línea y debajo **una sola fila de PCs** con el nombre entero (o el que pongas en el Panel: Configuración → Este PC → «Renombrar este PC», y los de «Controlar otro PC»); la pastilla del PC actual abre «Este PC» (salir, quitar, añadir). Cada pestaña cabe en su tarjeta (en YouTube, «Vista», los subtítulos y las casillas quedaban fuera). En el Panel ya no se pierde lo que escribes ni la selección: solo se repinta lo que cambia, nunca encima de un campo con el foco o de un texto seleccionado; ya no lee ni pega el portapapeles solo (botón **Pegar**) y la IP, el PIN y la huella tienen botón **Copiar**. Ratón del móvil: **predicción de movimiento apagada de serie** y el resto de la fluidez encendida (movimiento continuo, colchón adaptativo, interpolación, sub-píxeles, suavizado); lo que hayas cambiado a mano se respeta. APK sin cambios (App 3).
 
 **Novedad 0.71 (controlar otro PC, de Linux también):** ahora también se manda **desde Linux** a Windows o a otro Linux (Xorg sin permisos; Wayland con un permiso de un paso: `sh instalar-linux.sh --pcapc` o el botón «Arreglar» del Panel, y cerrar sesión una vez). Al pasar con Ctrl+Alt+L **el texto copiado viaja contigo** y vuelve (solo texto, hasta 1 MB, cifrado; se apaga en Configuración). **Renombrar** PCs y dispositivos. Arreglado: controlando un Linux, el puntero no se veía o se iba a una esquina. `python3 linux_kvm.py --diagnostico` dice qué método usa este Linux.
 
