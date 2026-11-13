@@ -137,6 +137,13 @@
       .tarjetas li .t-acciones button { flex: none; grid-row: auto; grid-column: auto; min-height: 32px; padding: 0 10px; font-size: 13px; }
       .pc-falta { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--naranja); color: var(--texto); font-size: 13px; }
       .pc-falta[hidden] { display: none; }
+      /* 0.72: lo que se copia (IP, PIN, huella) se puede seleccionar y tiene su botón «Copiar». */
+      .sel { user-select: text; -webkit-user-select: text; font-family: ui-monospace, Consolas, monospace; color: var(--texto); }
+      .tarjetas li .t-linea, .tarjetas li .t-nombre, .conn .url { user-select: text; -webkit-user-select: text; }
+      .copiar { min-height: 26px; padding: 0 8px; font-size: 12px; border-radius: 8px; }
+      .cfg .chip.pc-pin { flex-wrap: wrap; gap: 6px 8px; }
+      .url-fila { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
+      .clip-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
     </style>
   </head>
   <body>
@@ -144,7 +151,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.71</p>
+          <p class="ver">0.72</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -190,6 +197,8 @@
           </label>
           <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
           <p class="cfg-sub">Este PC</p>
+          <span class="chip" id="nombre-este" title="Así sale este PC en la fila de PCs del móvil (y en «Controlar otro PC» de los demás, si allí lo renombran)">Nombre para el móvil: —</span>
+          <button type="button" class="chip" id="nombre-este-ok">Renombrar este PC</button>
           <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
           <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
           </label>
@@ -197,7 +206,7 @@
           <label class="chip" title="Otro PC con LaZoo podrá usar el ratón y el teclado de este. Solo en tu red local, y solo después de aceptarlo aquí, como un móvil.">
           <input id="pc-permitir" type="checkbox" /> Permitir que otro PC me controle
           </label>
-          <span class="chip" id="pc-pin" hidden title="En el otro PC: Controlar otro PC → Añadir, con esta dirección y este PIN"></span>
+          <span class="chip pc-pin" id="pc-pin" hidden title="En el otro PC: Controlar otro PC → Añadir, con esta dirección y este PIN"></span>
           <label class="chip" title="Pulsa esta tecla para pasar al otro PC y otra vez para volver. Ctrl+Alt+Esc suelta siempre.">
           Tecla rápida <input id="pc-tecla" class="pc-campo" type="text" maxlength="24" spellcheck="false" autocomplete="off" />
           </label>
@@ -259,7 +268,8 @@
         <section id="clip-box">
           <h3>Notas · Portapapeles Móvil ↔ PC</h3>
           <textarea id="paste" placeholder="Pega aquí un texto"></textarea>
-          <div class="row"><button id="save" class="primary" type="button">Guardar en el móvil</button></div>
+          <div class="row clip-acciones"><button id="save" class="primary" type="button">Guardar en el móvil</button>
+            <button id="pegar" type="button" title="Trae aquí lo que tienes copiado en este PC (solo al pulsarlo)">Pegar</button></div>
           <ul id="clips"></ul>
         </section>
         <section id="archivos">
@@ -285,7 +295,6 @@
       const clips = document.querySelector("#clips");
       const files = document.querySelector("#files");
       let seen = "";
-      let primed = false;
 
       const TRASH = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v9h-2V9zm4 0h2v9h-2V9zM7 9h2v9H7V9zm-1 12h12V7H6v14z"/></svg>';
 
@@ -302,17 +311,87 @@
       }
 
       document.querySelector("#save").addEventListener("click", () => pushText(paste.value, false));
+      /* 0.72: nada de pegado automático. Antes el Panel leía el portapapeles cada 2 s
+         (clipboard.readText: el navegador pedía permiso o pegaba solo, y el campo que
+         estabas escribiendo perdía el foco) y cualquier Ctrl+V, también en la IP, se guardaba
+         como nota. Ahora: Ctrl+V fuera de un campo de texto guarda la nota, y «Pegar» trae lo
+         copiado solo al pulsarlo. Lo que copias en el PC ya lo apunta LaZoo por su cuenta. */
+      function editable(el) {
+        return !!(el && el.closest && el.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
+      }
       document.addEventListener("paste", (event) => {
+        if (editable(event.target)) return;  // pegar en un campo es solo pegar en ese campo
         const text = event.clipboardData && event.clipboardData.getData("text");
         if (text) pushText(text, false);
       });
-
-      async function watchClipboard() {
+      document.querySelector("#pegar").addEventListener("click", async () => {
         try {
           const text = await navigator.clipboard.readText();
-          if (!primed) { primed = true; seen = text || ""; return; }
-          await pushText(text, true);
-        } catch (_err) {}
+          if (text) { paste.value = text; paste.focus(); }
+        } catch (_err) { paste.focus(); }
+      });
+
+      /* 0.72: refresco que no estorba. Cada lista se repinta solo si cambió lo que enseña, y
+         nunca mientras tiene el foco un campo suyo, hay texto seleccionado dentro o el ratón
+         está pulsado encima (empezando a seleccionar). */
+      let pulsado = null;
+      document.addEventListener("pointerdown", (e) => { pulsado = e.target; }, true);
+      document.addEventListener("pointerup", () => { window.setTimeout(() => { pulsado = null; }, 0); }, true);
+      function quieto(el) {
+        const a = document.activeElement;
+        if (a && el.contains(a) && editable(a)) return true;
+        const sel = window.getSelection ? window.getSelection() : null;
+        if (sel && !sel.isCollapsed && sel.rangeCount) {
+          const r = sel.getRangeAt(0);
+          if (el.contains(r.commonAncestorContainer) || r.intersectsNode(el)) return true;
+        }
+        return !!(pulsado && pulsado.nodeType === 1 && el.contains(pulsado) && !pulsado.closest("button"));
+      }
+      function ponTexto(el, texto) {
+        if (el.textContent !== texto && !quieto(el)) el.textContent = texto;
+      }
+      function pintaLista(el, datos, hacer) {
+        const firma = JSON.stringify(datos);
+        if (el.dataset.firma === firma || quieto(el)) return false;
+        el.replaceChildren(...hacer());
+        el.dataset.firma = firma;
+        return true;
+      }
+      async function copiar(texto, boton) {
+        let ok = false;
+        try { await navigator.clipboard.writeText(texto); ok = true; } catch (_err) {
+          const t = document.createElement("textarea");
+          t.value = texto;
+          t.setAttribute("readonly", "");
+          t.style.position = "fixed";
+          t.style.opacity = "0";
+          document.body.append(t);
+          t.select();
+          try { ok = document.execCommand("copy"); } catch (_e) { ok = false; }
+          t.remove();
+        }
+        if (boton) {
+          const antes = boton.dataset.texto || boton.textContent;
+          boton.dataset.texto = antes;
+          boton.textContent = ok ? "Copiado" : "No se pudo";
+          window.setTimeout(() => { boton.textContent = antes; }, 1500);
+        }
+        return ok;
+      }
+      function botonCopiar(texto, titulo) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "copiar";
+        b.textContent = "Copiar";
+        b.title = titulo || "Copiar " + texto;
+        b.addEventListener("click", () => copiar(texto, b));
+        return b;
+      }
+      function trozo(texto) {
+        const s = document.createElement("span");
+        s.className = "sel";
+        s.textContent = texto;
+        return s;
       }
 
       function stamp(at) {
@@ -347,7 +426,8 @@
 
       async function load() {
         const data = await fetch("/api/clipboard").then((res) => res.json());
-        clips.replaceChildren();
+        pintaLista(clips, (data.items || []).map((i) => [i.id, i.text.slice(0, 180), i.at]), () => {
+        const filas = [];
         for (const item of data.items || []) {
           const row = document.createElement("li");
           const button = document.createElement("button");
@@ -371,15 +451,16 @@
             load();
           });
           row.append(button, copy, when, del);
-          clips.append(row);
+          filas.push(row);
         }
+        return filas;
+        });
 
         const listed = await fetch("/api/files").then((res) => res.json());
         const photos = await fetch("/api/photos").then((res) => res.json());
         const pathEl = document.querySelector("#fotos-path");
-        pathEl.textContent = shortPath(photos.folder || "");
         pathEl.title = photos.folder || "";
-        if (photos.count) pathEl.textContent = shortPath(photos.folder) + " · " + photos.count + " · " + size(photos.bytes || 0);
+        ponTexto(pathEl, photos.count ? shortPath(photos.folder) + " · " + photos.count + " · " + size(photos.bytes || 0) : shortPath(photos.folder || ""));
 
         const mixed = [];
         for (const item of listed.files || []) {
@@ -389,7 +470,8 @@
           mixed.push({ kind: "in", at: item.at || 0, item });
         }
         mixed.sort((a, b) => (b.at || 0) - (a.at || 0));
-        files.replaceChildren();
+        pintaLista(files, mixed.map((r) => [r.kind, r.item.id || r.item.name, r.item.name, r.item.size]), () => {
+        const filas = [];
         for (const row of mixed) {
           const li = document.createElement("li");
           const badge = document.createElement("span");
@@ -416,8 +498,10 @@
             });
             li.append(badge, label, remove);
           }
-          files.append(li);
+          filas.push(li);
         }
+        return filas;
+        });
       }
 
       const upQueue = [];
@@ -543,14 +627,17 @@
           if (show) {
             const qr = document.querySelector("#conn-qr");
             if (qr.dataset.svg !== data.qr) { qr.innerHTML = data.qr || ""; qr.dataset.svg = data.qr || ""; }
-            document.querySelector("#conn-pin").textContent = data.pin || "";
+            ponTexto(document.querySelector("#conn-pin"), data.pin || "");
             const urls = document.querySelector("#conn-urls");
-            urls.replaceChildren(...(data.targets || []).map((t) => {
+            pintaLista(urls, (data.targets || []).map((t) => [t.url, t.label]), () => (data.targets || []).map((t) => {
+              const fila = document.createElement("div");
+              fila.className = "url-fila";
               const p = document.createElement("p");
               p.className = "url";
               p.textContent = t.url;
               p.title = t.label;
-              return p;
+              fila.append(p, botonCopiar(t.url, "Copiar la dirección"));
+              return fila;
             }));
           }
           connDiag = data.diag || "";
@@ -561,10 +648,12 @@
           if (waiting.length) {
             const d = waiting[0];
             const more = waiting.length > 1 ? ` (y ${waiting.length - 1} más)` : "";
-            $("#ask-text").innerHTML = "";
-            const b = document.createElement("b");
-            b.textContent = "Hay un dispositivo esperando aprobación";
-            $("#ask-text").append(b, document.createTextNode(`: ${d.label} (${d.ip}${d.fp ? ", huella " + d.fp : ""})${more}. Acéptalo ${data.approve_where || "en el aviso de Windows o en el icono de la bandeja"}. Quedan ${d.left} s.`));
+            const resto = `: ${d.label} (${d.ip}${d.fp ? ", huella " + d.fp : ""})${more}. Acéptalo ${data.approve_where || "en el aviso de Windows o en el icono de la bandeja"}. Quedan ${d.left} s.`;
+            pintaLista($("#ask-text"), resto, () => {
+              const b = document.createElement("b");
+              b.textContent = "Hay un dispositivo esperando aprobación";
+              return [b, document.createTextNode(resto)];
+            });
           }
           document.title = waiting.length ? "Esperando aprobación · Panel de LaZoo" : "Panel de LaZoo";
           $("#st-on").textContent = String(data.connected || 0);
@@ -579,7 +668,7 @@
           if (data.anuncios_info) $("#anuncios-cuenta").textContent = `Anuncios saltados: ${data.anuncios_info.total || 0} · hoy: ${data.anuncios_info.hoy || 0}`;
           if (document.activeElement !== $("#patrocinios")) $("#patrocinios").checked = !!data.patrocinios;
           if (data.patrocinios_info) $("#patrocinios-cuenta").textContent = patrociniosTexto(data.patrocinios_info);
-          $("#st-net").textContent = (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red";
+          ponTexto($("#st-net"), (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red");
         } catch (_err) {}
       }
 
@@ -629,10 +718,14 @@
       async function loadDevices() {
         let list = [];
         try { list = (await devCall("/api/dispositivos")).devices || []; } catch (_err) { return; }
-        $("#devs").replaceChildren(...(list.length ? list : [null]).map((d) => {
-          if (!d) return tarjetaVacia("Ninguno.");
+        const vistoDe = (d) => {
           const ago = Number(d.ago) || 0;  // 0.63: «visto» separa el móvil real de un id viejo
-          const visto = ago < 0 ? "sin ver desde que se abrió LaZoo" : ago < 20 ? "visto ahora" : ago < 3600 ? `visto hace ${Math.max(1, Math.round(ago / 60))} min` : ago < 86400 ? `visto hace ${Math.round(ago / 3600)} h` : `visto hace ${Math.round(ago / 86400)} d`;
+          return ago < 0 ? "sin ver desde que se abrió LaZoo" : ago < 20 ? "visto ahora" : ago < 3600 ? `visto hace ${Math.max(1, Math.round(ago / 60))} min` : ago < 86400 ? `visto hace ${Math.round(ago / 3600)} h` : `visto hace ${Math.round(ago / 86400)} d`;
+        };
+        const firma = list.map((d) => [d.id, d.label, d.apodo, d.tipo, d.state, d.duplicado, d.ip, d.fp, d.fecha, d.recordado, vistoDe(d)]);
+        pintaLista($("#devs"), firma, () => (list.length ? list : [null]).map((d) => {
+          if (!d) return tarjetaVacia("Ninguno.");
+          const visto = vistoDe(d);
           const estado = d.duplicado ? "id antiguo (parece el mismo móvil; si vuelve, entra solo)" : STATES[d.state] || d.state;
           const botones = [["Renombrar", () => renombrar(d.label, d.apodo, (nombre) => devCall("/api/dispositivos/renombrar", { id: d.id, nombre }).then(loadDevices))]];
           if (d.state === "aprobado") botones.push([d.duplicado ? "Quitar" : "Expulsar", () => devCall("/api/dispositivos/expulsar", { id: d.id }).then(loadDevices).catch(() => {})]);
@@ -676,10 +769,23 @@
       function pcPinta(d) {
         pcData = d;
         if (document.activeElement !== $("#pc-permitir")) $("#pc-permitir").checked = !!d.permitir;
-        if (document.activeElement !== $("#pc-tecla")) $("#pc-tecla").value = d.tecla || "";
+        if (document.activeElement !== $("#pc-tecla") && !quieto($("#pc-tecla").parentElement)) $("#pc-tecla").value = d.tecla || "";
         const pin = $("#pc-pin");
         pin.hidden = !d.permitir;
-        pin.textContent = d.permitir ? `Para el otro PC: ${(d.direcciones || []).join(" o ") || "sin red"} · PIN ${d.pin || ""}` : "";
+        // 0.72: IP y PIN seleccionables, cada uno con su «Copiar», y sin repintar si no cambian.
+        pintaLista(pin, d.permitir ? [d.direcciones || [], d.pin || ""] : [], () => {
+          if (!d.permitir) return [];
+          const partes = [document.createTextNode("Para el otro PC:")];
+          const dirs = d.direcciones || [];
+          if (!dirs.length) partes.push(document.createTextNode(" sin red"));
+          dirs.forEach((dir, i) => {
+            if (i) partes.push(document.createTextNode(" o"));
+            partes.push(trozo(dir), botonCopiar(dir, "Copiar la IP:puerto"));
+          });
+          partes.push(document.createTextNode("· PIN"), trozo(d.pin || ""), botonCopiar(d.pin || "", "Copiar el PIN"));
+          return partes;
+        });
+        ponTexto($("#nombre-este"), `Nombre para el móvil: ${d.nombre_este || d.nombre_sistema || "—"}` + (d.nombre_este && d.nombre_sistema ? ` (PC «${d.nombre_sistema}»)` : ""));
         const c = d.control || {};
         const est = $("#pc-estado");
         est.classList.toggle("on", c.estado === "controlando");
@@ -689,7 +795,8 @@
         else if (!d.puede_mandar) est.textContent = d.motivo || "Este PC no puede mandar su ratón a otro.";
         else est.textContent = c.mensaje || (d.pcs.length ? `Pulsa ${d.tecla} para pasar al último PC, o elige uno.` : "Añade otro PC para empezar.");
         if (d.puede_mandar && d.pcs.length && !d.tecla_ok && c.estado === "libre") est.textContent += ` (Ojo: otro programa usa ${d.tecla}; cámbiala en Configuración.)`;
-        $("#pc-lista").replaceChildren(...(d.pcs.length ? d.pcs : [null]).map((pc) => {
+        const firmaPcs = [d.pcs, c.estado, c.id, d.puede_mandar];
+        pintaLista($("#pc-lista"), firmaPcs, () => (d.pcs.length ? d.pcs : [null]).map((pc) => {
           if (!pc) return tarjetaVacia("Ninguno.");
           const activo = c.estado !== "libre" && c.id === pc.id;
           return tarjeta(pc.nombre || pc.host, [
@@ -704,16 +811,22 @@
         }));
         if (document.activeElement !== $("#pc-porta")) $("#pc-porta").checked = d.portapapeles !== false;
         $("#pc-falta").hidden = !d.falta;
-        $("#pc-falta-txt").textContent = d.falta || "";
+        ponTexto($("#pc-falta-txt"), d.falta || "");
         $("#pc-arreglar").hidden = !d.arreglable;
         $("#pc-diag").hidden = !d.diagnostico;
-        $("#pc-diag").textContent = d.diagnostico ? "Método: " + d.diagnostico : "";
+        ponTexto($("#pc-diag"), d.diagnostico ? "Método: " + d.diagnostico : "");
         const par = d.emparejar || {};
-        $("#pc-par").textContent = par.estado && par.estado !== "nada" ? par.mensaje || "" : "";
+        const parTxt = par.estado && par.estado !== "nada" ? par.mensaje || "" : "";
+        // 0.72: la huella del emparejamiento se puede copiar para compararla en el otro PC.
+        pintaLista($("#pc-par"), [parTxt, par.estado === "esperando" ? par.fp || "" : ""], () => {
+          const out = [document.createTextNode(parTxt)];
+          if (par.estado === "esperando" && par.fp) out.push(document.createTextNode(" "), botonCopiar(par.fp, "Copiar la huella"));
+          return out;
+        });
       }
       async function pcCall(paso, body) {
         try { pcPinta(await devCall("/api/pcapc/" + paso, body || {})); }
-        catch (err) { $("#pc-par").textContent = err.message; }
+        catch (err) { $("#pc-par").textContent = err.message; $("#pc-par").dataset.firma = ""; }
       }
       async function watchPc() {
         try { pcPinta(await devCall("/api/pcapc")); } catch (_err) {}
@@ -726,12 +839,19 @@
           const r = await devCall("/api/pcapc/arreglar", {});
           pcPinta(r);
           $("#pc-par").textContent = (r.arreglo || {}).mensaje || "";
-        } catch (err) { $("#pc-par").textContent = err.message; }
+          $("#pc-par").dataset.firma = "";
+        } catch (err) { $("#pc-par").textContent = err.message; $("#pc-par").dataset.firma = ""; }
+      });
+      $("#nombre-este-ok").addEventListener("click", () => {
+        const d = pcData || {};
+        renombrar(d.nombre_sistema, d.nombre_este, (nombre) => pcCall("nombre", { nombre }));
       });
       $("#pc-anadir").addEventListener("click", () => {
         $("#pc-par").textContent = "Conectando con el otro PC…";
+        $("#pc-par").dataset.firma = "";
         pcCall("anadir", { destino: $("#pc-destino").value, pin: $("#pc-codigo").value }).then(() => { $("#pc-codigo").value = ""; });
       });
+      $("#pc-codigo").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#pc-anadir").click(); });
       watchPc();
       setInterval(() => { if (!document.hidden) watchPc(); }, 1500);
       $("#recordar").addEventListener("change", (event) => {
@@ -804,7 +924,7 @@
       function histPinta(data) {
         $("#hist-total").textContent = histTotal(data);
         const lista = $("#hist-lista");
-        lista.replaceChildren(...(data.entradas || []).map(histFila));
+        pintaLista(lista, data.entradas || [], () => (data.entradas || []).map(histFila));
         $("#hist-vacio").hidden = (data.entradas || []).length > 0;
       }
       async function histCarga() {
@@ -823,7 +943,6 @@
       histCarga();
       setInterval(() => { if (!document.hidden) histCarga(); }, 5000);
       setInterval(() => { if (!document.hidden) watchLink(); }, 2000);
-      setInterval(() => { if (!document.hidden) watchClipboard(); }, 2000);
 
       (() => {
         let want = new URLSearchParams(location.hash.slice(1)).get("pastilla");
@@ -834,6 +953,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.71"></script>
+    <script src="/logo.js?v=0.72"></script>
   </body>
 </html>

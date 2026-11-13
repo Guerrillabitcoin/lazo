@@ -13,7 +13,7 @@ RAIZ = Path(sys.argv[1]); DEST = Path(sys.argv[2])
 DATOS = {
   "/api/pcapc": {"permitir": True, "tecla": "Ctrl+Alt+L", "emergencia": "Ctrl+Alt+Esc", "portapapeles": True,
     "puede_mandar": True, "motivo": "", "tecla_ok": True, "recibiendo": "", "pin": "123456",
-    "direcciones": ["192.168.1.144:8787"], "falta": "", "arreglable": False,
+    "direcciones": ["192.168.1.144:8787"], "falta": "", "arreglable": False, "nombre_este": "", "nombre_sistema": "DESKTOP-L7JG8QK",
     "diagnostico": "Que otro PC controle este: xtest (Xorg con XTest (sin permisos extra).) · Controlar otro desde este: x11 (Xorg: XGrabKey y XGrabKeyboard/XGrabPointer (sin permisos extra).)",
     "control": {"estado": "libre", "nombre": "", "id": "", "mensaje": ""}, "emparejar": {"estado": "nada"},
     "pcs": [{"id": "a1b2c3d4e5f6a7b8", "nombre": "Portátil del salón", "apodo": "Portátil del salón", "nombre_pc": "DESKTOP-7Q2K9LM",
@@ -28,8 +28,10 @@ DATOS = {
 }
 STUB = """<script>
 window.__datos = %s;
-window.fetch = async (url) => {
+window.__llamadas = [];
+window.fetch = async (url, opts) => {
   const u = String(url).split("?")[0];
+  window.__llamadas.push([u, (opts && opts.method) || "GET"]);
   const d = Object.prototype.hasOwnProperty.call(window.__datos, u) ? window.__datos[u] : {};
   return new Response(JSON.stringify(d), { status: 200, headers: { "Content-Type": "application/json" } });
 };
