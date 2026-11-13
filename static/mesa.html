@@ -123,8 +123,20 @@
       .pc-estado { margin: 0 0 8px; color: var(--texto); }
       .pc-estado.on { color: var(--naranja); font-weight: 650; }
       .pc-nota { margin: 8px 0 0; color: var(--suave); font-size: 12px; }
-      #pc-lista li { grid-template-columns: minmax(0, 1fr) auto auto; }
-      #pc-lista li button { grid-row: 1 / span 2; grid-column: auto; }
+      /* 0.71: cada dispositivo en su tarjeta: nombre arriba, IP y huella en líneas que se cortan
+         con «…» (nunca letra a letra) y los botones a la derecha o, si no caben, debajo. */
+      .tarjetas { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+      .tarjetas li.tarjeta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--hondo); min-width: 0; }
+      .tarjetas li.vacia { display: block; margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--hondo); color: var(--suave); }
+      .tarjetas li .t-info { flex: 1 1 170px; min-width: 0; display: grid; gap: 2px; }
+      .tarjetas li .t-nombre, .tarjetas li .t-linea { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
+      .tarjetas li .t-nombre { color: var(--texto); font-weight: 650; }
+      .tarjetas li .t-linea { color: var(--suave); font-size: 12px; }
+      .tarjetas li .t-linea.estado-pendiente { color: var(--naranja); }
+      .tarjetas li .t-acciones { flex: 0 1 auto; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-left: auto; }
+      .tarjetas li .t-acciones button { flex: none; grid-row: auto; grid-column: auto; min-height: 32px; padding: 0 10px; font-size: 13px; }
+      .pc-falta { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--naranja); color: var(--texto); font-size: 13px; }
+      .pc-falta[hidden] { display: none; }
     </style>
   </head>
   <body>
@@ -132,7 +144,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.70</p>
+          <p class="ver">0.71</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -190,11 +202,15 @@
           Tecla rápida <input id="pc-tecla" class="pc-campo" type="text" maxlength="24" spellcheck="false" autocomplete="off" />
           </label>
           <button type="button" class="chip" id="pc-tecla-ok">Guardar tecla</button>
+          <label class="chip" title="Al pulsar la tecla rápida, el texto copiado pasa al otro PC; al volver, el del otro PC vuelve a este. Solo con «Controlar otro PC».">
+          <input id="pc-porta" type="checkbox" /> Compartir portapapeles al cambiar de PC
+          </label>
         </section>
         <section id="otro-pc" class="box cfg">
           <h2>Controlar otro PC</h2>
           <p id="pc-estado" class="pc-estado">Con el ratón y el teclado de este PC, maneja otro PC de tu red.</p>
-          <ul id="pc-lista" class="devs"></ul>
+          <p id="pc-falta" class="pc-falta" hidden><span id="pc-falta-txt"></span> <button id="pc-arreglar" type="button">Arreglar</button></p>
+          <ul id="pc-lista" class="tarjetas"></ul>
           <p class="cfg-sub">Añadir otro PC</p>
           <div class="row">
             <input id="pc-destino" class="pc-campo" type="text" placeholder="IP del otro PC, p. ej. 192.168.1.20:8787" spellcheck="false" autocomplete="off" />
@@ -204,6 +220,7 @@
           <p id="pc-par" class="pc-nota"></p>
           <p class="pc-nota">En el otro PC: Configuración → «Permitir que otro PC me controle». Allí verás su IP y su PIN, y allí lo aceptas.
             Se mandan Win y Alt+Tab; Ctrl+Alt+Supr y la pantalla de bloqueo o de administrador (UAC) no.</p>
+          <p id="pc-diag" class="pc-nota" hidden></p>
         </section>
         <section id="historial" class="box hist">
             <h2>Anuncios y patrocinios saltados</h2>
@@ -228,7 +245,7 @@
           </section>
           <section id="dispositivos" class="box devs">
             <h2>Dispositivos</h2>
-            <ul id="devs"></ul>
+            <ul id="devs" class="tarjetas"></ul>
             <div class="row">
               <button id="kick-all" type="button">Expulsar a todos</button>
               <button id="forget-all" class="danger" type="button">Olvidar todos</button>
@@ -566,28 +583,66 @@
         } catch (_err) {}
       }
 
+      /* 0.71: tarjeta de un dispositivo. textContent siempre (nunca HTML con nombres). */
+      function tarjeta(nombre, lineas, botones) {
+        const li = document.createElement("li");
+        li.className = "tarjeta";
+        const info = document.createElement("div");
+        info.className = "t-info";
+        const n = document.createElement("strong");
+        n.className = "t-nombre";
+        n.textContent = nombre;
+        n.title = nombre;
+        info.append(n);
+        for (const texto of lineas.filter(Boolean)) {
+          const l = document.createElement("span");
+          l.className = "t-linea";
+          l.textContent = texto;
+          l.title = texto;
+          info.append(l);
+        }
+        const acc = document.createElement("div");
+        acc.className = "t-acciones";
+        for (const [texto, fn, apagado] of botones) {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = texto;
+          b.disabled = !!apagado;
+          b.addEventListener("click", fn);
+          acc.append(b);
+        }
+        li.append(info, acc);
+        return li;
+      }
+      function tarjetaVacia(texto) {
+        const li = document.createElement("li");
+        li.className = "vacia";
+        li.textContent = texto;
+        return li;
+      }
+      function renombrar(actual, apodo, guardar) {
+        const nuevo = window.prompt("Nombre para reconocerlo (máximo 40; vacío = el de siempre):", apodo || actual || "");
+        if (nuevo === null) return;
+        Promise.resolve(guardar(nuevo.trim())).catch((err) => window.alert(err.message || "No se pudo renombrar"));
+      }
+
       async function loadDevices() {
         let list = [];
         try { list = (await devCall("/api/dispositivos")).devices || []; } catch (_err) { return; }
         $("#devs").replaceChildren(...(list.length ? list : [null]).map((d) => {
-          const li = document.createElement("li");
-          if (!d) { li.textContent = "Ninguno."; return li; }
-          const t = document.createElement("span");
-          t.textContent = `${d.label} · ${d.duplicado ? "id antiguo (parece el mismo móvil; si vuelve, entra solo)" : STATES[d.state] || d.state}`;
-          if (d.state === "pendiente") t.className = "estado-pendiente";
-          if (d.duplicado) li.style.opacity = "0.6";
-          const s = document.createElement("small");
+          if (!d) return tarjetaVacia("Ninguno.");
           const ago = Number(d.ago) || 0;  // 0.63: «visto» separa el móvil real de un id viejo
           const visto = ago < 0 ? "sin ver desde que se abrió LaZoo" : ago < 20 ? "visto ahora" : ago < 3600 ? `visto hace ${Math.max(1, Math.round(ago / 60))} min` : ago < 86400 ? `visto hace ${Math.round(ago / 3600)} h` : `visto hace ${Math.round(ago / 86400)} d`;
-          s.textContent = [d.ip, "id " + d.short, d.fp ? "huella " + d.fp : "", visto, d.fecha ? "desde " + d.fecha : "", d.recordado ? "recordado" : ""].filter(Boolean).join(" · ");
-          li.append(t, s);
-          if (d.state === "aprobado") {
-            const b = document.createElement("button");
-            b.type = "button";
-            b.textContent = d.duplicado ? "Quitar" : "Expulsar";
-            b.addEventListener("click", () => devCall("/api/dispositivos/expulsar", { id: d.id }).then(loadDevices).catch(() => {}));
-            li.append(b);
-          }
+          const estado = d.duplicado ? "id antiguo (parece el mismo móvil; si vuelve, entra solo)" : STATES[d.state] || d.state;
+          const botones = [["Renombrar", () => renombrar(d.label, d.apodo, (nombre) => devCall("/api/dispositivos/renombrar", { id: d.id, nombre }).then(loadDevices))]];
+          if (d.state === "aprobado") botones.push([d.duplicado ? "Quitar" : "Expulsar", () => devCall("/api/dispositivos/expulsar", { id: d.id }).then(loadDevices).catch(() => {})]);
+          const li = tarjeta(d.label, [
+            (d.apodo ? d.tipo + " · " : "") + estado,
+            [d.ip, "id " + d.short, d.fp ? "huella " + d.fp : ""].filter(Boolean).join(" · "),
+            [visto, d.fecha ? "desde " + d.fecha : "", d.recordado ? "recordado" : ""].filter(Boolean).join(" · "),
+          ], botones);
+          if (d.state === "pendiente") li.querySelector(".t-linea").classList.add("estado-pendiente");
+          if (d.duplicado) li.style.opacity = "0.6";
           return li;
         }));
         $("#kick-all").disabled = !list.some((d) => d.state === "aprobado");
@@ -635,25 +690,24 @@
         else est.textContent = c.mensaje || (d.pcs.length ? `Pulsa ${d.tecla} para pasar al último PC, o elige uno.` : "Añade otro PC para empezar.");
         if (d.puede_mandar && d.pcs.length && !d.tecla_ok && c.estado === "libre") est.textContent += ` (Ojo: otro programa usa ${d.tecla}; cámbiala en Configuración.)`;
         $("#pc-lista").replaceChildren(...(d.pcs.length ? d.pcs : [null]).map((pc) => {
-          const li = document.createElement("li");
-          if (!pc) { li.textContent = "Ninguno."; return li; }
-          const t = document.createElement("span");
-          t.textContent = pc.nombre || pc.host;
-          const s = document.createElement("small");
-          s.textContent = [`${pc.host}:${pc.puerto}`, pc.fp ? "huella " + pc.fp : "", pc.fecha ? "desde " + pc.fecha : "", pc.ultimo ? "último" : ""].filter(Boolean).join(" · ");
+          if (!pc) return tarjetaVacia("Ninguno.");
           const activo = c.estado !== "libre" && c.id === pc.id;
-          const b = document.createElement("button");
-          b.type = "button";
-          b.textContent = activo ? "Dejar de controlar" : "Controlar";
-          b.disabled = !d.puede_mandar;
-          b.addEventListener("click", () => pcCall(activo ? "soltar" : "controlar", { id: pc.id }));
-          const x = document.createElement("button");
-          x.type = "button";
-          x.textContent = "Olvidar";
-          x.addEventListener("click", () => { if (window.confirm(`¿Olvidar «${pc.nombre || pc.host}»? Para volver a usarlo habrá que añadirlo otra vez.`)) pcCall("olvidar", { id: pc.id }); });
-          li.append(t, s, b, x);
-          return li;
+          return tarjeta(pc.nombre || pc.host, [
+            pc.apodo && pc.nombre_pc ? `PC «${pc.nombre_pc}»` : "",
+            `${pc.host}:${pc.puerto}` + (pc.ultimo ? " · último" : ""),
+            [pc.fp ? "huella " + pc.fp : "", pc.fecha ? "desde " + pc.fecha : ""].filter(Boolean).join(" · "),
+          ], [
+            [activo ? "Dejar de controlar" : "Controlar", () => pcCall(activo ? "soltar" : "controlar", { id: pc.id }), !d.puede_mandar],
+            ["Renombrar", () => renombrar(pc.nombre || pc.host, pc.apodo, (nombre) => pcCall("renombrar", { id: pc.id, nombre }))],
+            ["Olvidar", () => { if (window.confirm(`¿Olvidar «${pc.nombre || pc.host}»? Para volver a usarlo habrá que añadirlo otra vez.`)) pcCall("olvidar", { id: pc.id }); }],
+          ]);
         }));
+        if (document.activeElement !== $("#pc-porta")) $("#pc-porta").checked = d.portapapeles !== false;
+        $("#pc-falta").hidden = !d.falta;
+        $("#pc-falta-txt").textContent = d.falta || "";
+        $("#pc-arreglar").hidden = !d.arreglable;
+        $("#pc-diag").hidden = !d.diagnostico;
+        $("#pc-diag").textContent = d.diagnostico ? "Método: " + d.diagnostico : "";
         const par = d.emparejar || {};
         $("#pc-par").textContent = par.estado && par.estado !== "nada" ? par.mensaje || "" : "";
       }
@@ -666,6 +720,14 @@
       }
       $("#pc-permitir").addEventListener("change", (event) => pcCall("permitir", { on: event.target.checked }));
       $("#pc-tecla-ok").addEventListener("click", () => pcCall("tecla", { tecla: $("#pc-tecla").value }));
+      $("#pc-porta").addEventListener("change", (event) => pcCall("portapapeles", { on: event.target.checked }));
+      $("#pc-arreglar").addEventListener("click", async () => {
+        try {
+          const r = await devCall("/api/pcapc/arreglar", {});
+          pcPinta(r);
+          $("#pc-par").textContent = (r.arreglo || {}).mensaje || "";
+        } catch (err) { $("#pc-par").textContent = err.message; }
+      });
       $("#pc-anadir").addEventListener("click", () => {
         $("#pc-par").textContent = "Conectando con el otro PC…";
         pcCall("anadir", { destino: $("#pc-destino").value, pin: $("#pc-codigo").value }).then(() => { $("#pc-codigo").value = ""; });
@@ -772,6 +834,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.70"></script>
+    <script src="/logo.js?v=0.71"></script>
   </body>
 </html>
