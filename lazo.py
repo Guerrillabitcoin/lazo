@@ -39,7 +39,7 @@ import pcapc
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.70"
+VERSION = "0.71"
 pcapc.VERSION = VERSION  # 0.70: el User-Agent de «Controlar otro PC» lleva la versión
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
@@ -950,6 +950,16 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def _renombrar(self, body: dict) -> dict:
+        who = str(body.get("id", ""))[:40]
+        if not any(d["id"] == who for d in APPROVALS.listing()):
+            raise control.ControlError("Ese dispositivo ya no está")
+        try:
+            apodo = aprobacion.APODOS.poner(who, str(body.get("nombre", ""))[:200])
+        except ValueError as exc:
+            raise control.ControlError(str(exc)) from exc
+        return {"ok": True, "apodo": apodo}
+
     def _pcapc_estado(self) -> dict:
         data = pcapc.estado()
         if data["permitir"]:  # para emparejar desde el otro PC (aunque haya un móvil conectado)
@@ -974,6 +984,22 @@ class Handler(BaseHTTPRequestHandler):
                 pcapc.CONTROL.parar("Has vuelto a este PC.")
             elif step == "olvidar":
                 pcapc.olvidar(str(body.get("id", ""))[:40])
+            elif step == "renombrar":  # 0.71: nombre propio de un PC de la lista
+                pcapc.PCS.renombrar(str(body.get("id", ""))[:40], str(body.get("nombre", ""))[:200])
+                pcapc.CONTROL.armar()
+            elif step == "portapapeles":  # 0.71: «Compartir portapapeles al cambiar de PC»
+                pcapc.AJUSTES.set_portapapeles(body.get("on") is True)
+            elif step == "arreglar":  # 0.71: Linux: permisos en un paso (pkexec)
+                if not sys.platform.startswith("linux"):
+                    raise control.ControlError("Solo en Linux")
+                import linux_kvm
+
+                data = self._pcapc_estado()
+                data["arreglo"] = linux_kvm.arreglar()
+                return data
+            elif step == "diagnostico":
+                if sys.platform.startswith("linux"):
+                    pcapc.diagnostico_linux(forzar=True)
             else:
                 raise control.ControlError("no está")
         except pcapc.ErrorPC as exc:
@@ -1073,6 +1099,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/bye":
             PAIRING.phone_gone(parse_qs(urlsplit(self.path).query).get("i", [self._who()])[0])
             self._send(200, {"ok": True})
+            return
+        if path == "/api/dispositivos/renombrar":  # 0.71: nombre propio, solo desde este PC
+            self._local_only(self._renombrar)
             return
         if path == "/api/dispositivos/decidir":
             self._local_only(lambda body: {"ok": APPROVALS.decide(str(body.get("id", "")), bool(body.get("ok")))})

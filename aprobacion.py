@@ -73,6 +73,95 @@ LOOPBACK = ("127.0.0.1", "::1", "localhost")
 TWIN_IDLE = 600
 
 
+# ---- 0.71: nombres propios («Renombrar») -------------------------------------
+
+MAX_APODO = 40
+
+
+def limpiar_apodo(texto: object) -> str:
+    """Nombre propio para un dispositivo: corto (≤40), sin HTML ni caracteres de control.
+    "" = quitarlo (vuelve el de siempre). ValueError con el motivo, en español."""
+    t = re.sub(r"\s+", " ", str(texto if texto is not None else "")).strip()
+    if any(ord(c) < 32 or 0x7F <= ord(c) < 0xA0 or c in "\u200b\u200e\u200f\u202a\u202b\u202c\u202d\u202e\ufeff" for c in t):
+        raise ValueError("El nombre tiene caracteres raros")
+    if re.search(r"[<>&\"'`]", t):
+        raise ValueError("El nombre no puede llevar < > & ni comillas")
+    if len(t) > MAX_APODO:
+        raise ValueError(f"Nombre demasiado largo (máximo {MAX_APODO})")
+    return t
+
+
+class Apodos:
+    """`apodos.json` en la carpeta de datos: id del dispositivo → nombre propio. Solo en este PC."""
+
+    MAX = 200
+
+    def __init__(self, carpeta=None) -> None:
+        self._carpeta = carpeta
+        self._datos: dict[str, str] | None = None
+        self.lock = threading.Lock()
+
+    def archivo(self):
+        from pathlib import Path
+
+        if self._carpeta is not None:
+            return Path(self._carpeta) / "apodos.json"
+        import recordar
+
+        return recordar.data_dir() / "apodos.json"
+
+    def _cargar(self) -> dict[str, str]:
+        if self._datos is None:
+            import json
+
+            try:
+                data = json.loads(self.archivo().read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            self._datos = {str(k): str(v)[:MAX_APODO] for k, v in (data.items() if isinstance(data, dict) else [])
+                           if re.fullmatch(r"[0-9a-f]{8,40}", str(k)) and isinstance(v, str)}
+        return self._datos
+
+    def get(self, who: str) -> str:
+        with self.lock:
+            try:
+                return self._cargar().get(who, "")
+            except Exception:  # noqa: BLE001
+                return ""
+
+    def poner(self, who: str, texto: object) -> str:
+        if not re.fullmatch(r"[0-9a-f]{8,40}", str(who or "")):
+            raise ValueError("Ese dispositivo no está")
+        apodo = limpiar_apodo(texto)
+        import json
+
+        with self.lock:
+            datos = self._cargar()
+            if apodo:
+                datos[who] = apodo
+            else:
+                datos.pop(who, None)
+            while len(datos) > self.MAX:
+                datos.pop(next(iter(datos)))
+            try:
+                import recordar
+
+                f = self.archivo()
+                f.parent.mkdir(parents=True, exist_ok=True)
+                recordar._write_private(f, json.dumps(datos, ensure_ascii=False).encode("utf-8"))
+            except OSError as exc:
+                raise ValueError("No pude guardar el nombre") from exc
+        return apodo
+
+
+APODOS = Apodos()
+
+
+def con_apodo(who: str, label: str) -> str:
+    apodo = APODOS.get(who)
+    return apodo or label
+
+
 def device_label(ua: str) -> str:
     ua = ua or ""
     m = re.match(r"LaZoo-PC/[\d.]+ \(([^;)]*);\s*([^)]*)\)", ua)  # 0.70: otro PC de LaZoo («Controlar otro PC»)
@@ -140,7 +229,7 @@ class Approvals:
     def approved_rows(self) -> list[dict]:
         with self.lock:
             return [{"id": who, "label": row["label"], "fp": row.get("fp", ""), "fecha": row.get("fecha", ""), "ip": row.get("ip", ""),
-                     "duplicado": "1" if row.get("duplicado") else ""}
+                     "duplicado": "1" if row.get("duplicado") else ""}  # tal cual: esto se guarda (Recordar)
                     for who, row in self.devices.items() if row["state"] == "aprobado"]
 
     def _twins_unlocked(self, who: str) -> list[str]:
@@ -253,7 +342,8 @@ class Approvals:
         with self.lock:
             self._expire(now)
             return [
-                {"id": who, "short": who[:4], "state": row["state"], "label": row["label"], "ip": row["ip"],
+                {"id": who, "short": who[:4], "state": row["state"], "label": con_apodo(who, row["label"]),
+                 "tipo": row["label"], "apodo": APODOS.get(who), "ip": row["ip"],
                  "left": max(0, int(WAIT_SECONDS - (now - row["since"]))) if row["state"] == "pendiente" else 0,
                  "ago": int(now - row["seen"]) if row["seen"] else -1, "fp": row.get("fp", ""), "fecha": row.get("fecha", ""),
                  "recordado": bool(row.get("recordado")), "duplicado": bool(row.get("duplicado"))}
@@ -263,7 +353,7 @@ class Approvals:
 
 def ask_text(who: str, row: dict) -> str:
     huella = f", huella {row['fp']}" if row.get("fp") else ""
-    return f"Nuevo dispositivo {row['label']} ({row['ip']}, id {who[:4]}{huella}) quiere entrar en LaZoo."
+    return f"Nuevo dispositivo {con_apodo(who, row['label'])} ({row['ip']}, id {who[:4]}{huella}) quiere entrar en LaZoo."
 
 
 # ---- Preguntar en el PC -------------------------------------------------------

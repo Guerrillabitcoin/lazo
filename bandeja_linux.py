@@ -104,7 +104,7 @@ def menu_items(listing: list[dict], remember: bool, autostart: bool, pcs: list[d
     out.append(("sub", f"Dispositivos conectados ({len(model['approved'])})", devs))
     out.append(("sub", "Portapapeles Wifi", [("item", b.ID_FOLDER, "Abrir carpeta «Recibido del móvil»"),
                                           ("item", b.ID_BRIDGE, f"Abrir «Portapapeles Wifi» en el {b.PANEL}")]))
-    # 0.70: «Controlar otro PC». Desde Linux aún no se manda (ver pcapc.py); sí se deja controlar.
+    # 0.70-0.71: «Controlar otro PC». Desde 0.71 Linux también manda (linux_kvm.py).
     other: list[tuple] = [("check", pid, b.pc_label(d), ctl["estado"] != "libre" and ctl["id"] == d["id"]) for pid, d in model["pcs"]]
     other = other or [("gray", "Aún no has añadido ningún PC")]
     soltar = f"Dejar de controlar ({tecla})"
