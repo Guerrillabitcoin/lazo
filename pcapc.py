@@ -1,4 +1,4 @@
-"""LaZoo 0.70: «Controlar otro PC». El ratón y el teclado de este PC manejan otro PC de la red
+"""LaZoo 0.70-0.71: «Controlar otro PC». El ratón y el teclado de este PC manejan otro PC de la red
 local, como Mouse Without Borders. Se cambia con una tecla rápida (Ctrl+Alt+L de serie), no por
 el borde de la pantalla. Solo biblioteca estándar (ctypes en Windows y en X11).
 
@@ -33,6 +33,18 @@ Canal (`GET /kvm`, WebSocket en el mismo puerto, solo red local)
     El emisor manda un latido cada 0,5 s. Si en 3 s no hay respuesta, suelta (vuelve a este
     PC). El receptor, si en 3 s no recibe nada, suelta todo lo pulsado y cierra.
 
+Portapapeles (0.71)
+    Al pasar al otro PC, el texto del portapapeles de este va al de aquel; al volver, el de aquel
+    vuelve a este. Solo texto, hasta 1 MB, por el mismo canal sellado y solo si los DOS PCs tienen
+    «Compartir portapapeles al cambiar de PC» (encendido de serie). No se guarda en disco.
+        8 PIDE_PORTA <I   (en una trama K1) el emisor pide el portapapeles del receptor
+        b"P1" + número_u32 + id_u32 + total_u32 + desde_u32 + trozo   un trozo del texto (UTF-8)
+    Un P1 con total 0 = «no hay nada (o no se comparte)».
+
+Linux (0.71, linux_kvm.py)
+    Receptor: ratón y teclado virtuales en /dev/uinput; si no, XTest (Xorg) o ydotool con la
+    sintaxis de su versión (Wayland). Emisor: evdev con EVIOCGRAB; si no, XGrabKeyboard (Xorg).
+
 Teclas
     Ctrl+Alt+L (se cambia en el Panel) alterna. Ctrl+Alt+Esc suelta SIEMPRE (emergencia). Win y
     Alt+Tab se mandan. Ctrl+Alt+Supr y la pantalla de bloqueo o de UAC no se pueden capturar ni
@@ -58,7 +70,10 @@ from typing import Any, Callable
 import protocol
 
 RUTA = "/kvm"
-MAX_TRAMA = 2048
+MAX_TRAMA = 40000      # 0.71: cabe un trozo del portapapeles
+TROZO_PORTA = 32000
+MAX_PORTA = 1_000_000  # bytes de texto (UTF-8) como mucho
+ESPERA_PORTA = 1.5     # s que se espera el portapapeles del otro PC al volver
 LOTE = 0.006           # s: los movimientos se juntan en tandas de ~6 ms
 LATIDO = 0.5           # s entre latidos del emisor
 SIN_RESPUESTA = 3.0    # s sin respuesta (emisor) o sin tramas (receptor): se suelta todo
@@ -68,13 +83,16 @@ EMERGENCIA = "Ctrl+Alt+Esc"
 UA_PREFIJO = "LaZoo-PC/"
 ARCHIVO_PCS = "otros-pcs.json"
 MAX_PCS = 20
-VERSION = "0.70"
+VERSION = "0.71"
 
-MOVER, BOTON, RUEDA, TECLA, SOLTAR, LATIDO_EV, RESPUESTA = 1, 2, 3, 4, 5, 6, 7
+MOVER, BOTON, RUEDA, TECLA, SOLTAR, LATIDO_EV, RESPUESTA, PIDE_PORTA = 1, 2, 3, 4, 5, 6, 7, 8
+PORTA = 9  # solo en tramas P1
 _FORMATOS = {MOVER: struct.Struct("<hh"), BOTON: struct.Struct("<BB"), RUEDA: struct.Struct("<Bh"),
              TECLA: struct.Struct("<HHB"), SOLTAR: struct.Struct(""), LATIDO_EV: struct.Struct("<I"),
-             RESPUESTA: struct.Struct("<I")}
+             RESPUESTA: struct.Struct("<I"), PIDE_PORTA: struct.Struct("<I")}
 CABECERA = b"K1"
+CABECERA_PORTA = b"P1"
+_PORTA = struct.Struct("<IIII")
 MAX_EVENTOS = 200
 
 
@@ -111,7 +129,53 @@ def codificar(numero: int, eventos: list[tuple]) -> bytes:
     return b"".join(partes)
 
 
+def codificar_porta(numero: int, ident: int, total: int, desde: int, trozo: bytes) -> bytes:
+    """Un trozo del portapapeles (texto UTF-8)."""
+    return CABECERA_PORTA + _PORTA.pack(numero & 0xFFFFFFFF, ident & 0xFFFFFFFF, total, desde) + bytes(trozo)
+
+
+def trozos_porta(ident: int, texto: str | None) -> list[tuple[int, int, int, bytes]]:
+    """(id, total, desde, trozo) para mandar un texto. Vacío, None o > MAX_PORTA: un único «nada»."""
+    datos = (texto or "").encode("utf-8")
+    if not datos or len(datos) > MAX_PORTA:
+        return [(ident, 0, 0, b"")]
+    return [(ident, len(datos), i, datos[i:i + TROZO_PORTA]) for i in range(0, len(datos), TROZO_PORTA)]
+
+
+class Juntar:
+    """Junta los trozos P1 de un texto (en orden: el canal es TCP). Devuelve el texto al completarse."""
+
+    def __init__(self) -> None:
+        self.ident = -1
+        self.buf = bytearray()
+        self.total = 0
+
+    def trozo(self, ident: int, total: int, desde: int, datos: bytes) -> str | None:
+        if total == 0:
+            self.ident, self.buf, self.total = -1, bytearray(), 0
+            return ""
+        if desde == 0:
+            self.ident, self.buf, self.total = ident, bytearray(), total
+        if ident != self.ident or total != self.total or desde != len(self.buf):
+            self.ident, self.buf, self.total = -1, bytearray(), 0
+            return None
+        self.buf += datos
+        if len(self.buf) < self.total:
+            return None
+        texto = bytes(self.buf).decode("utf-8", "replace")
+        self.ident, self.buf, self.total = -1, bytearray(), 0
+        return texto
+
+
 def decodificar(datos: bytes) -> tuple[int, list[tuple]]:
+    if datos.startswith(CABECERA_PORTA):
+        if len(datos) < 2 + _PORTA.size:
+            raise protocol.ProtocolError("trozo de portapapeles no válido")
+        numero, ident, total, desde = _PORTA.unpack_from(datos, 2)
+        trozo = bytes(datos[2 + _PORTA.size:])
+        if total > MAX_PORTA or len(trozo) > TROZO_PORTA or desde + len(trozo) > total or (total == 0 and trozo):
+            raise protocol.ProtocolError("trozo de portapapeles no válido")
+        return numero, [(PORTA, ident, total, desde, trozo)]
     if len(datos) < 6 or not datos.startswith(CABECERA):
         raise protocol.ProtocolError("trama de otro PC no válida")
     numero = struct.unpack_from("<I", datos, 2)[0]
@@ -205,11 +269,13 @@ def _carpeta() -> Path:
 
 
 class Ajustes:
-    """«Permitir que otro PC me controle» (apagado de serie) y la tecla rápida."""
+    """«Permitir que otro PC me controle» (apagado de serie), la tecla rápida y (0.71) «Compartir
+    portapapeles al cambiar de PC» (encendido de serie; solo actúa con «Controlar otro PC»)."""
 
     def __init__(self) -> None:
         self.permitir = False
         self.tecla = TECLA_DEFECTO
+        self.portapapeles = True
         self._lock = threading.Lock()
 
     def archivo(self) -> Path:
@@ -223,6 +289,7 @@ class Ajustes:
         if not isinstance(data, dict):
             data = {}
         self.permitir = data.get("otro_pc_permitir") is True
+        self.portapapeles = data.get("otro_pc_portapapeles") is not False
         try:
             self.tecla = leer_tecla(str(data.get("otro_pc_tecla") or TECLA_DEFECTO))[2]
         except ErrorPC:
@@ -251,6 +318,11 @@ class Ajustes:
         self.permitir = on is True
         self._guardar(otro_pc_permitir=self.permitir)
         return self.permitir
+
+    def set_portapapeles(self, on: Any) -> bool:
+        self.portapapeles = on is True
+        self._guardar(otro_pc_portapapeles=self.portapapeles)
+        return self.portapapeles
 
     def set_tecla(self, texto: str) -> str:
         mods, vk, limpio = leer_tecla(texto)
@@ -338,10 +410,11 @@ class InyectorWindows:
         self.send.argtypes = [wt.UINT, ctypes.c_void_p, ctypes.c_int]
         self.send.restype = wt.UINT
 
-    def _raton(self, flags: int, dx: int = 0, dy: int = 0, data: int = 0) -> None:
+    def _raton(self, flags: int, dx: int = 0, dy: int = 0, data: int = 0, extra: int | None = None) -> None:
         ev = self.INPUT()
         ev.type = 0
-        ev.mi.dx, ev.mi.dy, ev.mi.mouseData, ev.mi.dwFlags, ev.mi.dwExtraInfo = dx, dy, data & 0xFFFFFFFF, flags, self.EXTRA
+        ev.mi.dx, ev.mi.dy, ev.mi.mouseData, ev.mi.dwFlags = dx, dy, data & 0xFFFFFFFF, flags
+        ev.mi.dwExtraInfo = self.EXTRA if extra is None else extra
         self.send(1, self.ct.byref(ev), self.ct.sizeof(ev))
 
     def mover(self, dx: int, dy: int) -> None:
@@ -418,8 +491,9 @@ class InyectorX11:
 
 
 class InyectorYdotool:
-    """Wayland (0.68): ydotool por /dev/uinput. Cada orden es un proceso, así que el receptor
-    junta los movimientos mientras el anterior aún se hace (`lento`)."""
+    """Wayland (0.68-0.70), SOLO ydotool 1.x. Desde la 0.71 el receptor de Linux usa
+    linux_kvm.py (uinput, o ydotool con la sintaxis de cada versión); esta clase se queda para
+    quien la use directamente."""
 
     lento = True
     BOTONES = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4}
@@ -455,21 +529,40 @@ def inyector_para_este_pc() -> Any:
     if sys.platform == "win32":
         return InyectorWindows()
     if sys.platform.startswith("linux"):
+        import linux_kvm  # 0.71: uinput primero; ydotool según su versión; nunca XTest en Wayland
+
+        return linux_kvm.inyector_linux()
+    raise ErrorPC("El otro PC aún no puede ser controlado desde otro PC (sistema no soportado)")
+
+
+# --- Portapapeles (0.71) ------------------------------------------------------------------------
+
+
+def leer_portapapeles() -> str:
+    """Texto del portapapeles de ESTE PC ("" si no hay o no es texto). Nada se guarda en disco."""
+    try:
         import control
 
-        listo = control._ydotool_ready()
-        tipo = control.backend_for("Linux", os.environ.get("DISPLAY"), os.environ.get("WAYLAND_DISPLAY"), listo)
-        if tipo == "ydotool":
-            if not listo:
-                raise ErrorPC("El otro PC usa Wayland y le falta ydotool: allí, ejecuta instalar-linux.sh")
-            return InyectorYdotool()
-        if tipo == "xtest":
-            try:
-                return InyectorX11()
-            except OSError as exc:
-                raise ErrorPC("El otro PC no puede inyectar con XTest (le falta libXtst)") from exc
-        raise ErrorPC("El otro PC no tiene sesión gráfica")
-    raise ErrorPC("El otro PC aún no puede ser controlado desde otro PC (sistema no soportado)")
+        texto = control._read_clipboard_text() or ""
+    except Exception:  # noqa: BLE001
+        return ""
+    return texto if isinstance(texto, str) else ""
+
+
+def poner_portapapeles(texto: str) -> bool:
+    """Deja el texto en el portapapeles de este PC, marcado como de LaZoo para que el historial
+    de notas no lo apunte (no va al historial del portapapeles)."""
+    if not texto:
+        return False
+    if sys.platform != "win32":
+        texto = texto.replace("\r\n", "\n")
+    try:
+        import control
+
+        control._mark_injected(texto)
+        return bool(control._write_clipboard_text(texto))
+    except Exception:  # noqa: BLE001
+        return False
 
 
 # --- Receptor -------------------------------------------------------------------------------
@@ -478,10 +571,13 @@ def inyector_para_este_pc() -> Any:
 class Receptor:
     """Aplica los eventos de UNA conexión y recuerda qué dejó pulsado para soltarlo al final."""
 
-    def __init__(self, inyector: Any, marcar: Callable[[], None] | None = None) -> None:
+    def __init__(self, inyector: Any, marcar: Callable[[], None] | None = None,
+                 porta_poner: Callable[[str], Any] | None = None) -> None:
         self.iny = inyector
         self.marcar = marcar or (lambda: None)
-        self.teclas: dict[tuple[int, int], tuple[int, int, bool]] = {}
+        self.porta_poner = porta_poner  # None = este PC no comparte el portapapeles
+        self.juntar = Juntar()
+        self.teclas: dict[tuple[int, int, int], tuple[int, int, bool]] = {}
         self.botones: set[int] = set()
         self.numero = -1
         self._mov = [0, 0]
@@ -548,6 +644,14 @@ class Receptor:
                 continue
             if tipo == RESPUESTA:
                 continue
+            if tipo == PIDE_PORTA:
+                respuestas.append((PIDE_PORTA, ev[1]))  # bucle_receptor contesta con el portapapeles
+                continue
+            if tipo == PORTA:
+                texto = self.juntar.trozo(*ev[1:])
+                if texto and self.porta_poner is not None:
+                    self.porta_poner(texto)
+                continue
             self._vaciar_mov()
             if tipo == SOLTAR:
                 self.soltar_todo()
@@ -564,7 +668,7 @@ class Receptor:
             elif tipo == TECLA:
                 vk, scan, bits = ev[1], ev[2], ev[3]
                 ext, abajo = bool(bits & 1), bool(bits & 2)
-                clave = (vk, int(ext))
+                clave = (vk, scan, int(ext))  # 0.71: con el scan (Linux manda vk 0 en muchas teclas)
                 if abajo:
                     self.teclas[clave] = (vk, scan, ext)
                     self.iny.tecla(vk, scan, ext, True)
@@ -603,7 +707,7 @@ class Receptor:
 
 def bucle_receptor(sock: socket.socket, receptor: Receptor, abrir: Callable[[bytes], bytes],
                    sellar: Callable[[bytes], bytes], vivo: Callable[[], bool], tocar: Callable[[], None] | None = None,
-                   espera: float | None = None) -> str:
+                   espera: float | None = None, porta_leer: Callable[[], str] | None = None) -> str:
     """Lee tramas del emisor hasta que cierra, calla `espera` s (SIN_RESPUESTA) o deja de estar
     permitido. SIEMPRE suelta lo pulsado al salir. Devuelve el motivo."""
     sock.settimeout(SIN_RESPUESTA if espera is None else espera)
@@ -630,9 +734,16 @@ def bucle_receptor(sock: socket.socket, receptor: Receptor, abrir: Callable[[byt
             respuestas = receptor.tratar(abrir(payload))
             if tocar is not None:
                 tocar()
+            pedidos = [r[1] for r in respuestas if r[0] == PIDE_PORTA]
+            respuestas = [r for r in respuestas if r[0] != PIDE_PORTA]
             if respuestas:
                 numero += 1
                 protocol.ws_send(sock, 0x2, sellar(codificar(numero, respuestas)))
+            for ident in pedidos:  # 0.71: el emisor vuelve a su PC y se lleva este portapapeles
+                texto = porta_leer() if porta_leer is not None else ""
+                for trozo in trozos_porta(ident, texto):
+                    numero += 1
+                    protocol.ws_send(sock, 0x2, sellar(codificar_porta(numero, *trozo)))
     except protocol.ProtocolError:
         motivo = "trama no válida"
     except (OSError, EOFError, ValueError):
@@ -645,8 +756,10 @@ def bucle_receptor(sock: socket.socket, receptor: Receptor, abrir: Callable[[byt
 class Recepcion:
     """El lado controlado: una sola conexión a la vez (la nueva sustituye a la vieja)."""
 
-    def __init__(self, fabrica: Callable[[], Any] = inyector_para_este_pc) -> None:
+    def __init__(self, fabrica: Callable[[], Any] = inyector_para_este_pc,
+                 porta_leer: Callable[[], str] = leer_portapapeles, porta_poner: Callable[[str], Any] = poner_portapapeles) -> None:
         self.fabrica = fabrica
+        self.porta_leer, self.porta_poner = porta_leer, porta_poner
         self._iny: Any = None
         self.lock = threading.Lock()
         self.actual: dict | None = None
@@ -684,7 +797,8 @@ class Recepcion:
     def atender(self, sock: socket.socket, who: str, nombre: str, abrir: Callable[[bytes], bytes],
                 sellar: Callable[[bytes], bytes], vivo: Callable[[], bool], tocar: Callable[[], None] | None = None,
                 marcar: Callable[[], None] | None = None) -> str:
-        receptor = Receptor(self.inyector(), marcar)
+        comparte = AJUSTES.portapapeles
+        receptor = Receptor(self.inyector(), marcar, porta_poner=self.porta_poner if comparte else None)
         yo = {"sock": sock, "who": who, "nombre": nombre}
         with self.lock:
             viejo, self.actual = self.actual, yo
@@ -696,7 +810,8 @@ class Recepcion:
         self._avisar("recibiendo", f"«{nombre}» está usando el ratón y el teclado de este PC.")
         motivo = "cerrado"
         try:
-            motivo = bucle_receptor(sock, receptor, abrir, sellar, vivo, tocar)
+            motivo = bucle_receptor(sock, receptor, abrir, sellar, vivo, tocar,
+                                    porta_leer=(lambda: self.porta_leer() if AJUSTES.portapapeles else ""))
         finally:
             receptor.cerrar()
             with self.lock:
@@ -768,9 +883,30 @@ class PCs:
     def listar(self) -> list[dict]:
         with self.lock:
             data = self._leer()
-        return [{"id": r["id"], "nombre": str(r.get("nombre", ""))[:40], "host": str(r.get("host", "")),
+        return [{"id": r["id"], "nombre": str(r.get("apodo") or r.get("nombre", ""))[:40], "apodo": str(r.get("apodo", ""))[:40],
+                 "nombre_pc": str(r.get("nombre", ""))[:40], "host": str(r.get("host", "")),
                  "puerto": int(r.get("puerto") or 8787), "fp": str(r.get("fp", "")), "fecha": str(r.get("fecha", "")),
                  "ultimo": r["id"] == data["ultimo"]} for r in data["pcs"]]
+
+    def renombrar(self, pid: str, texto: Any) -> dict:
+        """0.71: un nombre propio para ese PC (vacío = el suyo). Solo en este PC."""
+        import aprobacion
+
+        try:
+            apodo = aprobacion.limpiar_apodo(texto)
+        except ValueError as exc:
+            raise ErrorPC(str(exc)) from exc
+        with self.lock:
+            data = self._leer()
+            fila = next((r for r in data["pcs"] if r["id"] == pid), None)
+            if fila is None:
+                raise ErrorPC("Ese PC ya no está en la lista")
+            if apodo:
+                fila["apodo"] = apodo
+            else:
+                fila.pop("apodo", None)
+            self._escribir(data)
+        return next(r for r in self.listar() if r["id"] == pid)
 
     def buscar(self, pid: str | None) -> dict | None:
         filas = self.listar()
@@ -798,7 +934,10 @@ class PCs:
                  "clave": blob}
         with self.lock:
             data = self._leer()
-            data["pcs"] = [r for r in data["pcs"] if not (r.get("host") == nueva["host"] and int(r.get("puerto") or 0) == nueva["puerto"])]
+            mismo = [r for r in data["pcs"] if r.get("host") == nueva["host"] and int(r.get("puerto") or 0) == nueva["puerto"]]
+            if mismo and mismo[-1].get("apodo"):
+                nueva["apodo"] = str(mismo[-1]["apodo"])[:40]  # 0.71: al volver a añadirlo, conserva su nombre propio
+            data["pcs"] = [r for r in data["pcs"] if r not in mismo]
             data["pcs"] = (data["pcs"] + [nueva])[-MAX_PCS:]
             data["ultimo"] = nueva["id"]
             self._escribir(data)
@@ -1070,6 +1209,13 @@ class Control:
         self._obrero: threading.Thread | None = None
         self._ordenes: list[Callable[[], Any]] = []
         self._ordenes_ev = threading.Event()
+        # 0.71: portapapeles. Lo que sale (trozos P1) y lo que se espera al volver.
+        self.porta_leer: Callable[[], str] = leer_portapapeles
+        self.porta_poner: Callable[[str], Any] = poner_portapapeles
+        self._porta_salida: list[tuple] = []
+        self._porta_id = 0
+        self._porta_espera: tuple[int, threading.Event, list] | None = None
+        self._juntar = Juntar()
 
     # Lo llama el gancho (nada pesado) ------------------------------------------------------
     def vivo(self) -> bool:
@@ -1101,6 +1247,7 @@ class Control:
     def pedir(self, orden: str) -> None:
         """Desde el gancho, la tecla rápida o la bandeja: se hace en el hilo obrero, nunca en el gancho."""
         fn = {"alternar": self.alternar, "emergencia": lambda: self.parar("Tecla de emergencia: has vuelto a este PC."),
+              "volver": lambda: self.parar("Has vuelto a este PC.", traer=True),
               "parar": lambda: self.parar("El otro PC no responde: has vuelto a este PC.")}.get(orden)
         if fn is None:
             return
@@ -1154,11 +1301,10 @@ class Control:
     def puede_mandar(self) -> tuple[bool, str]:
         if self.fabrica is not None or sys.platform == "win32":
             return True, ""
-        if sys.platform.startswith("linux"):
-            if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("XDG_SESSION_TYPE", "").lower() == "wayland":
-                return False, ("En Wayland ningún programa puede capturar el ratón y el teclado de todo el escritorio: "
-                               "este PC solo puede ser controlado (desde un Windows).")
-            return False, "Mandar el ratón y el teclado desde Linux aún no está: este PC sí puede ser controlado desde un Windows."
+        if sys.platform.startswith("linux"):  # 0.71: evdev (X11 y Wayland) o, si no, X11
+            import linux_kvm
+
+            return linux_kvm.puede_capturar()
         return False, "Este sistema aún no puede controlar otro PC."
 
     def armar(self) -> bool:
@@ -1182,7 +1328,7 @@ class Control:
     # Empezar y parar -------------------------------------------------------------------------
     def alternar(self) -> dict:
         if self.estado != "libre":
-            self.parar("Has vuelto a este PC.")
+            self.parar("Has vuelto a este PC.", traer=True)
             return self.ver()
         return self.iniciar(None)
 
@@ -1220,6 +1366,8 @@ class Control:
             with self._buf:
                 self._dx = self._dy = 0
                 self._cola = []
+                self._porta_salida = []
+            self._juntar = Juntar()
             self.ultimo_pong = self.reloj()
             threading.Thread(target=self._leer, args=(sesion, sock, sello), name="lazo-kvm-leer", daemon=True).start()
             threading.Thread(target=self._enviar, args=(sesion, sock, sello), name="lazo-kvm-enviar", daemon=True).start()
@@ -1228,11 +1376,21 @@ class Control:
                 raise ErrorPC("No pude capturar el ratón y el teclado de este PC")
             self.estado = "controlando"
             self.pcs.set_ultimo(fila["id"])
+        if AJUSTES.portapapeles:  # 0.71: lo copiado aquí se pega allí
+            texto = self.porta_leer()
+            if texto and len(texto.encode("utf-8")) <= MAX_PORTA:
+                with self._buf:
+                    self._porta_id += 1
+                    self._porta_salida = trozos_porta(self._porta_id, texto)
+                self._despertar.set()
         nombre = fila.get("nombre") or fila["host"]
         self._avisar("controlando", f"Controlando «{nombre}». {AJUSTES.tecla} vuelve a este PC; {EMERGENCIA} suelta siempre.")
         return self.ver()
 
-    def parar(self, motivo: str = "Has vuelto a este PC.") -> bool:
+    def parar(self, motivo: str = "Has vuelto a este PC.", traer: bool = False) -> bool:
+        """Vuelve a este PC. Con `traer` (la tecla rápida), antes de cerrar se trae el portapapeles
+        del otro PC (como mucho ESPERA_PORTA s); el teclado y el ratón ya han vuelto antes."""
+        espera = None
         with self.lock:
             if self.estado == "libre":
                 return False
@@ -1241,6 +1399,21 @@ class Control:
                     self.captura.parar()  # lo primero: el teclado y el ratón vuelven a este PC
                 except Exception:  # noqa: BLE001
                     pass
+            if traer and AJUSTES.portapapeles and self.estado == "controlando" and self._sesion is not None:
+                self.estado = "volviendo"
+                with self._buf:
+                    self._porta_id += 1
+                    espera = (self._porta_id, threading.Event(), [None])
+                    self._porta_espera = espera
+                self._evento((PIDE_PORTA, espera[0]))
+        if espera is not None:
+            if espera[1].wait(ESPERA_PORTA) and espera[2][0]:
+                self.porta_poner(espera[2][0])
+            with self._buf:
+                self._porta_espera = None
+        with self.lock:
+            if self.estado == "libre":
+                return False
             sock, sello = self._sock, self._sello
             self._sock, self._sesion = None, None
             self.estado, self.destino = "libre", None
@@ -1279,6 +1452,12 @@ class Control:
                     if self._dx or self._dy:
                         eventos.append((MOVER, self._dx, self._dy))
                         self._dx = self._dy = 0
+                    porta, self._porta_salida = self._porta_salida[:4], self._porta_salida[4:]
+                if self._porta_salida:
+                    self._despertar.set()  # quedan trozos: en la siguiente vuelta, sin esperar
+                for trozo in porta:
+                    numero += 1
+                    sock.sendall(trama_cliente(0x2, protocol.seal(codificar_porta(numero, *trozo), sello)))
                 ahora = self.reloj()
                 if ahora - self.ultimo_pong > SIN_RESPUESTA:
                     self.parar("El otro PC no responde: has vuelto a este PC.")
@@ -1300,6 +1479,7 @@ class Control:
 
     def _leer(self, sesion: object, sock: socket.socket, sello: bytes) -> None:
         ultimo = 0
+        juntar = self._juntar
         try:
             while self._sesion is sesion:
                 opcode, payload = protocol.ws_read(sock, MAX_TRAMA)
@@ -1313,6 +1493,14 @@ class Control:
                 ultimo = numero
                 if any(ev[0] == RESPUESTA for ev in eventos):
                     self.ultimo_pong = self.reloj()
+                for ev in eventos:
+                    if ev[0] == PORTA:
+                        self.ultimo_pong = self.reloj()
+                        texto = juntar.trozo(*ev[1:])
+                        espera = self._porta_espera
+                        if texto is not None and espera is not None and espera[0] == ev[1]:
+                            espera[2][0] = texto
+                            espera[1].set()
         except (OSError, EOFError, ValueError):
             pass
         if self._sesion is sesion:
@@ -1492,12 +1680,36 @@ class CapturaWindows:  # pragma: no cover - solo Windows
             physical_pos = lambda _p: 0  # noqa: E731
         u32 = ctypes.c_uint32.from_address
         i32 = ctypes.c_int32.from_address
+        # 0.71: el hilo de los ganchos, consciente de los DPI de cada monitor: así SetCursorPos y
+        # el `pt` del gancho hablan en los mismos píxeles aunque Windows escale al 125 % o 150 %.
+        try:
+            user32.SetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+            user32.SetThreadDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+            if not user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4)):  # PER_MONITOR_AWARE_V2
+                user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-3))
+        except (AttributeError, OSError):
+            pass
+        CALIBRA = 0x4C5A4341  # «LZCA»: el movimiento nulo con el que se mide el centro
+        extra_off = 24 if ctypes.sizeof(ctypes.c_void_p) == 8 else 20
+        calibrando = [False]
+        try:
+            calibrador: Any = InyectorWindows()
+        except Exception:  # noqa: BLE001
+            calibrador = None
         centro = [0, 0]
         guardado = wt.POINT()
         ganchos: list = []
 
         def raton(code, wparam, lparam):
             f = self.filtro
+            if (code == 0 and lparam and calibrando[0] and wparam == 0x200 and u32(lparam + 12).value & 0x1
+                    and ctypes.c_size_t.from_address(lparam + extra_off).value == CALIBRA):
+                # 0.71: el centro, medido en las MISMAS coordenadas que dará el gancho. Antes, con
+                # escalado de pantalla, el centro calculado no coincidía y cada movimiento sumaba un
+                # desfase fijo: en el otro PC el puntero se iba a una esquina.
+                centro[:] = [i32(lparam).value, i32(lparam + 4).value]
+                calibrando[0] = False
+                return 1
             if code == 0 and lparam and f is not None and f.sink is not None:
                 if not (u32(lparam + 12).value & 0x1):  # LLMHF_INJECTED: lo inyectado pasa
                     if not f.sink.vivo():
@@ -1584,8 +1796,15 @@ class CapturaWindows:  # pragma: no cover - solo Windows
                             f.sink = None
                         quitar()
                         user32.SetCursorPos(guardado.x, guardado.y)
-                    elif winmm is not None:
-                        winmm.timeBeginPeriod(1)  # tandas de ~6 ms de verdad
+                    else:
+                        if winmm is not None:
+                            winmm.timeBeginPeriod(1)  # tandas de ~6 ms de verdad
+                        if calibrador is not None:
+                            calibrando[0] = True
+                            try:
+                                calibrador._raton(0x0001, 0, 0, extra=CALIBRA)  # movimiento nulo: lo ve el gancho
+                            except Exception:  # noqa: BLE001
+                                calibrando[0] = False
                     self._hecho.set()
                 elif msg.message == _PARAR:
                     if self.filtro is not None:
@@ -1607,6 +1826,10 @@ class CapturaWindows:  # pragma: no cover - solo Windows
 def captura_para_este_pc(control: Control) -> Any:
     if sys.platform == "win32":
         return CapturaWindows(control)
+    if sys.platform.startswith("linux"):  # 0.71: evdev con EVIOCGRAB, o X11
+        import linux_kvm
+
+        return linux_kvm.captura_linux(control)
     return None
 
 
@@ -1624,10 +1847,34 @@ def estado() -> dict:
     """Para el Panel (solo local)."""
     ok, motivo = CONTROL.puede_mandar()
     cap = CONTROL.captura
-    return {"permitir": AJUSTES.permitir, "tecla": AJUSTES.tecla, "emergencia": EMERGENCIA,
+    data = {"permitir": AJUSTES.permitir, "tecla": AJUSTES.tecla, "emergencia": EMERGENCIA,
+            "portapapeles": AJUSTES.portapapeles,
             "puede_mandar": ok, "motivo": motivo, "pcs": PCS.listar(), "control": CONTROL.ver(),
             "emparejar": EMPAREJAR.ver(), "recibiendo": RECEPCION.nombre_actual(),
-            "tecla_ok": bool(getattr(cap, "tecla_ok", False))}
+            "tecla_ok": bool(getattr(cap, "tecla_ok", False)), "diagnostico": "", "falta": "", "arreglable": False}
+    if sys.platform.startswith("linux"):
+        data.update(diagnostico_linux())
+    return data
+
+
+_DIAG: list = [0.0, {}]
+
+
+def diagnostico_linux(forzar: bool = False) -> dict:
+    """0.71: qué método de inyección y de captura usa este Linux, por qué, y si falta algo
+    (se calcula cada 30 s como mucho)."""
+    if forzar or time.monotonic() - _DIAG[0] > 30 or not _DIAG[1]:
+        try:
+            import linux_kvm
+
+            d = linux_kvm.diagnostico()
+            _DIAG[1] = {"diagnostico": f"Que otro PC controle este: {d['receptor']} ({d['receptor_por']}) · "
+                                       f"Controlar otro desde este: {d['emisor']} ({d['emisor_por']})",
+                        "falta": linux_kvm.falta(d), "arreglable": bool(d.get("arreglable"))}
+        except Exception as exc:  # noqa: BLE001
+            _DIAG[1] = {"diagnostico": f"Sin diagnóstico ({exc.__class__.__name__})", "falta": "", "arreglable": False}
+        _DIAG[0] = time.monotonic()
+    return dict(_DIAG[1])
 
 
 def olvidar(pid: str) -> dict:

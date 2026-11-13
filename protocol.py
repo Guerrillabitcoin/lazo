@@ -576,7 +576,14 @@ def ws_read(sock: socket.socket, limit: int = WS_MAX_FRAME) -> tuple[int, bytes]
 
 
 def ws_send(sock: socket.socket, opcode: int, payload: bytes) -> None:
-    sock.sendall(bytes([0x80 | opcode, len(payload)]) + payload)
+    n = len(payload)
+    if n < 126:
+        head = bytes([0x80 | opcode, n])
+    elif n < 65536:  # 0.71: el portapapeles de «Controlar otro PC» va en tramas largas
+        head = bytes([0x80 | opcode, 126]) + n.to_bytes(2, "big")
+    else:
+        head = bytes([0x80 | opcode, 127]) + n.to_bytes(8, "big")
+    sock.sendall(head + payload)
 
 
 class Arrivals:
