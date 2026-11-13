@@ -558,14 +558,15 @@ def _exact(sock: socket.socket, size: int) -> bytes:
     return buf
 
 
-def ws_read(sock: socket.socket) -> tuple[int, bytes]:
+def ws_read(sock: socket.socket, limit: int = WS_MAX_FRAME) -> tuple[int, bytes]:
+    """Una trama. `limit`: el ratón del móvil usa WS_MAX_FRAME; 0.70 «otro PC» (pcapc) algo más."""
     head = _exact(sock, 2)
     opcode, masked, length = head[0] & 0x0F, head[1] & 0x80, head[1] & 0x7F
     if length == 126:
         length = int.from_bytes(_exact(sock, 2), "big")
     elif length == 127:
         length = int.from_bytes(_exact(sock, 8), "big")
-    if length > WS_MAX_FRAME:
+    if length > limit:
         raise ProtocolError("trama larga")
     mask = _exact(sock, 4) if masked else b""
     data = _exact(sock, length) if length else b""
