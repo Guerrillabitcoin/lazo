@@ -75,6 +75,9 @@ TWIN_IDLE = 600
 
 def device_label(ua: str) -> str:
     ua = ua or ""
+    m = re.match(r"LaZoo-PC/[\d.]+ \(([^;)]*);\s*([^)]*)\)", ua)  # 0.70: otro PC de LaZoo («Controlar otro PC»)
+    if m:
+        return "PC · " + (re.sub(r"[^\w .-]", "", m.group(2))[:30].strip() or "sin nombre")
     if "iPhone" in ua:
         kind = "iPhone"
     elif "iPad" in ua:

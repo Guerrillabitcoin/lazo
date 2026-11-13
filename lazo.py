@@ -34,11 +34,13 @@ import anuncios
 import patrocinios
 import despierto
 import sobre
+import pcapc
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.69"
+VERSION = "0.70"
+pcapc.VERSION = VERSION  # 0.70: el User-Agent de «Controlar otro PC» lleva la versión
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
 APPROVALS = aprobacion.Approvals()
@@ -380,6 +382,7 @@ def kick_device(who: str) -> bool:
     done = APPROVALS.kick(who)
     if done:
         KICKED.add(who)
+    pcapc.RECEPCION.cortar(who)  # 0.70: si era un PC que controlaba este, se corta ya (y suelta las teclas)
     PAIRING.phone_gone(who)
     PAIRING.away_gone(who)
     conn_log(f"{who[:4]} expulsado" if done else f"{who[:4]} expulsar: no estaba")
@@ -389,6 +392,7 @@ def kick_device(who: str) -> bool:
 def kick_everyone() -> int:
     KICKED.update(d["id"] for d in APPROVALS.listing() if d["state"] == "aprobado")
     count = APPROVALS.kick_all()
+    pcapc.RECEPCION.cortar()
     PAIRING.forget_phones()
     conn_log(f"expulsados todos ({count})")
     return count
@@ -697,6 +701,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/ws":
             self._pointer_socket()
             return
+        if path == pcapc.RUTA:
+            self._kvm_socket()  # 0.70: otro PC controla este (pcapc.py)
+            return
+        if path == "/api/pcapc":
+            self._local_only(lambda _body: self._pcapc_estado())
+            return
         if path in ("/", "/index.html"):
             self._file(STATIC / "index.html", "text/html; charset=utf-8")
             return
@@ -872,6 +882,104 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def _kvm_socket(self) -> None:
+        """0.70: canal de «Controlar otro PC». Siempre firmado con la clave de ESE dispositivo
+        (también desde 127.0.0.1), solo aprobados y solo si este PC lo permite. Ver pcapc.py."""
+        self.remote = True
+        self.peer = None
+        if self.headers.get("Upgrade", "").lower() != "websocket":
+            self._send(426, {"error": "hace falta websocket"}, seal=False)
+            return
+        if not pcapc.AJUSTES.permitir:
+            self._send(403, {"error": "Este PC no deja que otro PC lo controle", "apagado": True}, seal=False)
+            return
+        query = self._ws_query()
+        who = self._who(ws=True)
+        if who == self.client_address[0] or not query.get("s"):
+            self._send(401, {"error": "Falta la firma"}, seal=False)
+            return
+        self.denied = PAIRING.verify("GET", pcapc.RUTA, 0, query.get("t", ""), query.get("n", ""), query.get("s", ""), who=who)
+        if self.denied == "ok" and who in KICKED:
+            self.denied = "expulsado"
+        if self.denied == "ok":
+            state = APPROVALS.check(who, self.headers.get("User-Agent", ""), self.client_address[0])
+            self.denied = "ok" if state == "ok" else state
+        if self.denied != "ok":
+            _deny_note(who, self.denied)
+            self._unauth()
+            return
+        try:
+            pcapc.RECEPCION.inyector()
+        except pcapc.ErrorPC as exc:
+            self._send(503, {"error": str(exc)}, seal=False)
+            return
+        nombre = next((d["label"] for d in APPROVALS.listing() if d["id"] == who), "otro PC").removeprefix("PC · ")
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", protocol.ws_accept(self.headers.get("Sec-WebSocket-Key", "")))
+        self.end_headers()
+        sock = self.connection
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            pass
+        last_touch = [0.0]
+
+        def touch() -> None:
+            PAIRING.note_phone(who)
+            now = time.monotonic()
+            if now - last_touch[0] > 5:
+                last_touch[0] = now
+                despierto.DESPIERTO.touch()
+
+        conn_log(f"{who[:4]} controla este PC desde otro PC")
+        try:
+            why = pcapc.RECEPCION.atender(
+                sock, who, nombre,
+                abrir=lambda blob: PAIRING.open(blob, who),
+                sellar=lambda data: PAIRING.seal(data, who),
+                vivo=lambda: pcapc.AJUSTES.permitir and who not in KICKED and APPROVALS.is_ok(who),
+                tocar=touch, marcar=control._mark_injected)
+            conn_log(f"{who[:4]} deja de controlar este PC ({why})")
+        finally:
+            PAIRING.phone_gone(who)
+            self.close_connection = True
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def _pcapc_estado(self) -> dict:
+        data = pcapc.estado()
+        if data["permitir"]:  # para emparejar desde el otro PC (aunque haya un móvil conectado)
+            data["pin"] = PAIRING.pin
+            data["direcciones"] = [f"{ip}:{PORT}" for _label, ip in lan_targets()[:3]]
+        return data
+
+    def _pcapc(self, step: str, body: dict) -> dict:
+        try:
+            if step == "permitir":
+                on = pcapc.AJUSTES.set_permitir(body.get("on") is True)
+                if not on:
+                    pcapc.RECEPCION.cortar()
+            elif step == "tecla":
+                pcapc.AJUSTES.set_tecla(str(body.get("tecla", ""))[:40])
+                pcapc.CONTROL.armar()
+            elif step == "anadir":
+                pcapc.EMPAREJAR.empezar(str(body.get("destino", ""))[:120], str(body.get("pin", ""))[:12])
+            elif step == "controlar":
+                pcapc.CONTROL.iniciar(str(body.get("id", ""))[:40] or None)
+            elif step == "soltar":
+                pcapc.CONTROL.parar("Has vuelto a este PC.")
+            elif step == "olvidar":
+                pcapc.olvidar(str(body.get("id", ""))[:40])
+            else:
+                raise control.ControlError("no está")
+        except pcapc.ErrorPC as exc:
+            raise control.ControlError(str(exc)) from exc
+        return self._pcapc_estado()
+
     def do_POST(self) -> None:  # noqa: N802
         note_visit(self.client_address[0])
         path = self.path.split("?", 1)[0]
@@ -899,6 +1007,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/despierto":
             # 0.63: mantener el PC despierto mientras se usa desde el móvil (despierto.py).
             self._guard(lambda body: despierto.DESPIERTO.set_on(body.get("on")))
+            return
+        if path.startswith("/api/pcapc/"):
+            self._local_only(lambda body: self._pcapc(path.rsplit("/", 1)[-1], body))  # 0.70: solo el Panel de este PC
             return
         if path == "/api/historial/borrar":
             # 0.66: {id} una entrada, {all} la lista, {acumulado} lo ahorrado de siempre. Solo el Panel.
@@ -1025,6 +1136,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not re.fullmatch(r"[0-9a-f]{8,40}", who):
                     raise protocol.ProtocolError("id no válido")
                 mode = str(body.get("mode", ""))
+                if pcapc.nombre_desde_ua(self.headers.get("User-Agent", "")) and not pcapc.AJUSTES.permitir:
+                    # 0.70: otro PC de LaZoo pide entrar, pero aquí no se deja controlar por otro PC.
+                    self._send(403, {"error": "Ese PC no deja que otro PC lo controle: en su Panel → Configuración, "
+                                              "marca «Permitir que otro PC me controle».", "apagado": True}, seal=False)
+                    return
                 if PAIRING.locked():
                     self._send(429, {"error": "Demasiados intentos. Espera un momento."}, seal=False)
                     return
@@ -1062,7 +1178,10 @@ class Handler(BaseHTTPRequestHandler):
                 box = PAIRING.deliver(sid)
                 APPROVALS.note_meta(row["who"], fp=row["fp"])
                 # 0.57: primero la respuesta al móvil; guardar en disco nunca puede impedirla.
-                self._send(200, {"state": "aprobado", "box": box}, seal=False)
+                answer = {"state": "aprobado", "box": box}
+                if pcapc.nombre_desde_ua(self.headers.get("User-Agent", "")):
+                    answer["nombre"] = pcapc.nombre_de_este_pc()  # 0.70: para la lista del otro PC
+                self._send(200, answer, seal=False)
                 if first:
                     conn_log(f"{row['who'][:4]} aceptado: clave entregada")
                     persist_devices()
@@ -1525,6 +1644,7 @@ def start(argv: list[str] | None = None, console: bool = True):
     except OSError:
         pass
     PAIRING.pin = protocol.Pairing(args.pin).pin
+    pcapc.AJUSTES.cargar()  # 0.70: «Permitir que otro PC me controle» y la tecla rápida
     remembered = load_remembered()
     if "unittest" not in sys.modules and "pytest" not in sys.modules:
         try:
@@ -1598,6 +1718,10 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         despierto.watch()
+    except Exception:
+        pass
+    try:
+        pcapc.CONTROL.armar()  # 0.70: la tecla rápida, solo si hay algún PC en la lista (Windows)
     except Exception:
         pass
     if not args.no_browser:
