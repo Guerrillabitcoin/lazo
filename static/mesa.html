@@ -116,6 +116,15 @@
       .hist-lista .seg { justify-self: end; color: var(--suave); font-variant-numeric: tabular-nums; white-space: nowrap; }
       .hist-lista button { min-height: 30px; padding: 0 10px; }
       .hist-vacio { margin-top: 10px; }
+      /* 0.70: «Controlar otro PC» */
+      .pc-campo { flex: 1; min-width: 0; min-height: 38px; border: 1px solid var(--borde); border-radius: 10px; background: var(--hondo); color: var(--texto); padding: 0 10px; font: inherit; }
+      .chip .pc-campo { flex: 1; min-height: 30px; width: auto; height: auto; }
+      #pc-codigo { flex: 0 0 90px; letter-spacing: 0.12em; }
+      .pc-estado { margin: 0 0 8px; color: var(--texto); }
+      .pc-estado.on { color: var(--naranja); font-weight: 650; }
+      .pc-nota { margin: 8px 0 0; color: var(--suave); font-size: 12px; }
+      #pc-lista li { grid-template-columns: minmax(0, 1fr) auto auto; }
+      #pc-lista li button { grid-row: 1 / span 2; grid-column: auto; }
     </style>
   </head>
   <body>
@@ -123,7 +132,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.69</p>
+          <p class="ver">0.70</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -172,6 +181,29 @@
           <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
           <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
           </label>
+          <p class="cfg-sub">Otro PC</p>
+          <label class="chip" title="Otro PC con LaZoo podrá usar el ratón y el teclado de este. Solo en tu red local, y solo después de aceptarlo aquí, como un móvil.">
+          <input id="pc-permitir" type="checkbox" /> Permitir que otro PC me controle
+          </label>
+          <span class="chip" id="pc-pin" hidden title="En el otro PC: Controlar otro PC → Añadir, con esta dirección y este PIN"></span>
+          <label class="chip" title="Pulsa esta tecla para pasar al otro PC y otra vez para volver. Ctrl+Alt+Esc suelta siempre.">
+          Tecla rápida <input id="pc-tecla" class="pc-campo" type="text" maxlength="24" spellcheck="false" autocomplete="off" />
+          </label>
+          <button type="button" class="chip" id="pc-tecla-ok">Guardar tecla</button>
+        </section>
+        <section id="otro-pc" class="box cfg">
+          <h2>Controlar otro PC</h2>
+          <p id="pc-estado" class="pc-estado">Con el ratón y el teclado de este PC, maneja otro PC de tu red.</p>
+          <ul id="pc-lista" class="devs"></ul>
+          <p class="cfg-sub">Añadir otro PC</p>
+          <div class="row">
+            <input id="pc-destino" class="pc-campo" type="text" placeholder="IP del otro PC, p. ej. 192.168.1.20:8787" spellcheck="false" autocomplete="off" />
+            <input id="pc-codigo" class="pc-campo" type="text" placeholder="PIN" inputmode="numeric" maxlength="6" autocomplete="off" />
+            <button id="pc-anadir" type="button">Añadir</button>
+          </div>
+          <p id="pc-par" class="pc-nota"></p>
+          <p class="pc-nota">En el otro PC: Configuración → «Permitir que otro PC me controle». Allí verás su IP y su PIN, y allí lo aceptas.
+            Se mandan Win y Alt+Tab; Ctrl+Alt+Supr y la pantalla de bloqueo o de administrador (UAC) no.</p>
         </section>
         <section id="historial" class="box hist">
             <h2>Anuncios y patrocinios saltados</h2>
@@ -584,6 +616,62 @@
       $("#sigues").addEventListener("change", (event) => {
         devCall("/api/sigues", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
+      /* 0.70: «Controlar otro PC». Todo por /api/pcapc, solo desde este PC. */
+      let pcData = null;
+      function pcPinta(d) {
+        pcData = d;
+        if (document.activeElement !== $("#pc-permitir")) $("#pc-permitir").checked = !!d.permitir;
+        if (document.activeElement !== $("#pc-tecla")) $("#pc-tecla").value = d.tecla || "";
+        const pin = $("#pc-pin");
+        pin.hidden = !d.permitir;
+        pin.textContent = d.permitir ? `Para el otro PC: ${(d.direcciones || []).join(" o ") || "sin red"} · PIN ${d.pin || ""}` : "";
+        const c = d.control || {};
+        const est = $("#pc-estado");
+        est.classList.toggle("on", c.estado === "controlando");
+        if (c.estado === "controlando") est.textContent = `Controlando «${c.nombre}». ${d.tecla} vuelve a este PC; ${d.emergencia} suelta siempre.`;
+        else if (c.estado === "conectando") est.textContent = "Conectando…";
+        else if (d.recibiendo) est.textContent = `«${d.recibiendo}» está controlando este PC.`;
+        else if (!d.puede_mandar) est.textContent = d.motivo || "Este PC no puede mandar su ratón a otro.";
+        else est.textContent = c.mensaje || (d.pcs.length ? `Pulsa ${d.tecla} para pasar al último PC, o elige uno.` : "Añade otro PC para empezar.");
+        if (d.puede_mandar && d.pcs.length && !d.tecla_ok && c.estado === "libre") est.textContent += ` (Ojo: otro programa usa ${d.tecla}; cámbiala en Configuración.)`;
+        $("#pc-lista").replaceChildren(...(d.pcs.length ? d.pcs : [null]).map((pc) => {
+          const li = document.createElement("li");
+          if (!pc) { li.textContent = "Ninguno."; return li; }
+          const t = document.createElement("span");
+          t.textContent = pc.nombre || pc.host;
+          const s = document.createElement("small");
+          s.textContent = [`${pc.host}:${pc.puerto}`, pc.fp ? "huella " + pc.fp : "", pc.fecha ? "desde " + pc.fecha : "", pc.ultimo ? "último" : ""].filter(Boolean).join(" · ");
+          const activo = c.estado !== "libre" && c.id === pc.id;
+          const b = document.createElement("button");
+          b.type = "button";
+          b.textContent = activo ? "Dejar de controlar" : "Controlar";
+          b.disabled = !d.puede_mandar;
+          b.addEventListener("click", () => pcCall(activo ? "soltar" : "controlar", { id: pc.id }));
+          const x = document.createElement("button");
+          x.type = "button";
+          x.textContent = "Olvidar";
+          x.addEventListener("click", () => { if (window.confirm(`¿Olvidar «${pc.nombre || pc.host}»? Para volver a usarlo habrá que añadirlo otra vez.`)) pcCall("olvidar", { id: pc.id }); });
+          li.append(t, s, b, x);
+          return li;
+        }));
+        const par = d.emparejar || {};
+        $("#pc-par").textContent = par.estado && par.estado !== "nada" ? par.mensaje || "" : "";
+      }
+      async function pcCall(paso, body) {
+        try { pcPinta(await devCall("/api/pcapc/" + paso, body || {})); }
+        catch (err) { $("#pc-par").textContent = err.message; }
+      }
+      async function watchPc() {
+        try { pcPinta(await devCall("/api/pcapc")); } catch (_err) {}
+      }
+      $("#pc-permitir").addEventListener("change", (event) => pcCall("permitir", { on: event.target.checked }));
+      $("#pc-tecla-ok").addEventListener("click", () => pcCall("tecla", { tecla: $("#pc-tecla").value }));
+      $("#pc-anadir").addEventListener("click", () => {
+        $("#pc-par").textContent = "Conectando con el otro PC…";
+        pcCall("anadir", { destino: $("#pc-destino").value, pin: $("#pc-codigo").value }).then(() => { $("#pc-codigo").value = ""; });
+      });
+      watchPc();
+      setInterval(() => { if (!document.hidden) watchPc(); }, 1500);
       $("#recordar").addEventListener("change", (event) => {
         devCall("/api/recordar", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
@@ -684,6 +772,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.69"></script>
+    <script src="/logo.js?v=0.70"></script>
   </body>
 </html>
