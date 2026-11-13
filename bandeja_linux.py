@@ -74,18 +74,20 @@ def icon_path(color: str) -> Path:
     return ROOT / "static" / "img" / f"infinito-{color}.svg"
 
 
-def state(count: int, away: int = 0) -> tuple[Path, str]:
+def state(count: int, away: int = 0, controlando: str = "", tecla: str = "Ctrl+Alt+L") -> tuple[Path, str]:
     """(icono, texto) según los móviles conectados: rojo ninguno, verde alguno, naranja en otro PC
-    (como Windows)."""
-    ico, text = bandeja.tray_state(count, away)
+    o mientras se controla otro PC (como Windows)."""
+    ico, text = bandeja.tray_state(count, away, controlando, tecla)
     return icon_path("verde" if "verde" in ico else "rojo" if "rojo" in ico else "naranja"), text
 
 
-def menu_items(listing: list[dict], remember: bool, autostart: bool) -> list[tuple]:
+def menu_items(listing: list[dict], remember: bool, autostart: bool, pcs: list[dict] | None = None,
+               control: dict | None = None, permitir: bool = False, tecla: str = "Ctrl+Alt+L") -> list[tuple]:
     """El menú como datos: ("item", id, texto) · ("check", id, texto, marcado) · ("sep",) ·
     ("sub", texto, [elementos]) · ("gray", texto). Mismos ids que bandeja.py."""
     b = bandeja
-    model = b.menu_model(listing)
+    model = b.menu_model(listing, pcs)
+    ctl = control or {"estado": "libre", "id": ""}
     out: list[tuple] = [("item", b.ID_OPEN, f"Abrir el {b.PANEL}"), ("item", b.ID_QR, "Mostrar QR para conectar"),
                         ("sub", "Pastillas", [("item", cid, name) for cid, _c, name in model["cubes"]]), ("sep",)]
     if len(model["pending"]) == 1:
@@ -102,6 +104,14 @@ def menu_items(listing: list[dict], remember: bool, autostart: bool) -> list[tup
     out.append(("sub", f"Dispositivos conectados ({len(model['approved'])})", devs))
     out.append(("sub", "Portapapeles Wifi", [("item", b.ID_FOLDER, "Abrir carpeta «Recibido del móvil»"),
                                           ("item", b.ID_BRIDGE, f"Abrir «Portapapeles Wifi» en el {b.PANEL}")]))
+    # 0.70: «Controlar otro PC». Desde Linux aún no se manda (ver pcapc.py); sí se deja controlar.
+    other: list[tuple] = [("check", pid, b.pc_label(d), ctl["estado"] != "libre" and ctl["id"] == d["id"]) for pid, d in model["pcs"]]
+    other = other or [("gray", "Aún no has añadido ningún PC")]
+    soltar = f"Dejar de controlar ({tecla})"
+    other += [("sep",), ("item", b.ID_PC_SOLTAR, soltar) if ctl["estado"] != "libre" else ("gray", soltar),
+              ("item", b.ID_PC_ANADIR, "Añadir otro PC…"), ("sep",),
+              ("check", b.ID_PC_PERMITIR, "Permitir que otro PC controle este", permitir)]
+    out.append(("sub", "Controlar otro PC", other))
     out += [("sep",), ("item", b.ID_PROPS, "Propiedades…"), ("check", b.ID_AUTORUN, "Iniciar con el sistema", autostart),
             ("sep",), ("item", b.ID_QUIT, "Salir")]
     return out
@@ -211,6 +221,19 @@ class LinuxTray:
     # bandeja.Tray.run_command usa estos nombres
     run_command = bandeja.Tray.run_command
     start_server = bandeja.Tray.start_server
+    pcs = bandeja.Tray.pcs
+
+    def _on_pcapc(self, event: str, text: str) -> None:
+        """0.70: avisos de «Controlar otro PC» (desde otro hilo)."""
+        titles = {"recibiendo": "LaZoo: otro PC controla este", "fin": "LaZoo", "error": "LaZoo: otro PC"}
+
+        def show() -> bool:
+            if text:
+                self.balloon(titles.get(event, "LaZoo"), text)
+            self.refresh(force=True)
+            return False
+
+        self.GLib.idle_add(show)
 
     def listing(self) -> list[dict]:
         return self.lazo.APPROVALS.listing()
@@ -310,16 +333,20 @@ class LinuxTray:
 
     def refresh(self, force: bool = False) -> bool:
         listing = self.listing()
-        sig = (tuple((d["id"], d["state"]) for d in listing), self.lazo.STORE.enabled(), autostart_enabled())
+        P = self.lazo.pcapc
+        pcs, ctl = P.PCS.listar(), P.CONTROL.ver()
+        sig = (tuple((d["id"], d["state"]) for d in listing), self.lazo.STORE.enabled(), autostart_enabled(),
+               tuple(d["id"] for d in pcs), ctl["estado"], ctl["id"], P.AJUSTES.permitir, P.AJUSTES.tecla)
         if force or sig != self.last_sig:
             self.last_sig = sig
-            menu = self._build(menu_items(listing, self.lazo.STORE.enabled(), autostart_enabled()))
+            menu = self._build(menu_items(listing, self.lazo.STORE.enabled(), autostart_enabled(), pcs, ctl,
+                                          P.AJUSTES.permitir, P.AJUSTES.tecla))
             if self.indicator is not None:
                 self.indicator.set_menu(menu)
             self.menu = menu
-        ico, text = state(self.lazo.PAIRING.phone_count(), self.lazo.PAIRING.away_count())
-        if str(ico) != self.last_icon:
-            self.last_icon = str(ico)
+        ico, text = state(self.lazo.PAIRING.phone_count(), self.lazo.PAIRING.away_count(), P.CONTROL.nombre_controlado(), P.AJUSTES.tecla)
+        if str(ico) + text != self.last_icon:
+            self.last_icon = str(ico) + text
             if self.indicator is not None:
                 self.indicator.set_icon_full(str(ico), text)
                 self.indicator.set_title(text)

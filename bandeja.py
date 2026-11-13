@@ -24,6 +24,7 @@ WM_APP = 0x8000
 WM_TRAY = WM_APP + 1      # clics en el icono
 WM_NEWDEV = WM_APP + 2    # llegó un dispositivo nuevo (desde otro hilo)
 WM_SHOWME = WM_APP + 3    # otra copia pidió abrir la ventana
+WM_PCAPC = WM_APP + 4     # 0.70: «Controlar otro PC» empezó, terminó o falló (desde otro hilo)
 WM_COMMAND = 0x0111
 WM_DESTROY = 0x0002
 WM_CLOSE = 0x0010
@@ -37,6 +38,8 @@ TIMER_ID = 7  # 0.55: revisa si hay móviles conectados para el icono rojo/verde
 # Órdenes del menú (también se pueden mandar por WM_COMMAND, p. ej. en pruebas).
 ID_OPEN, ID_QR, ID_FOLDER, ID_BRIDGE, ID_PROPS, ID_KICKALL, ID_AUTORUN, ID_DEVICES, ID_QUIT = 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1099
 ID_REMEMBER, ID_FORGET = 1009, 1010
+ID_PC_SOLTAR, ID_PC_ANADIR, ID_PC_PERMITIR = 1011, 1012, 1013  # 0.70: «Controlar otro PC»
+ID_PC = 5000
 PANEL = "Panel de LaZoo"
 ID_CUBE, ID_KICK, ID_ACCEPT, ID_REJECT = 1100, 2000, 3000, 4000
 
@@ -78,7 +81,7 @@ def set_autorun(on: bool) -> None:
                 pass
 
 
-def menu_model(listing: list[dict]) -> dict:
+def menu_model(listing: list[dict], pcs: list[dict] | None = None) -> dict:
     """Qué sale en el menú, sin Windows de por medio (se prueba en Linux)."""
     pending = [d for d in listing if d["state"] == "pendiente"]
     approved = [d for d in listing if d["state"] == "aprobado"]
@@ -86,12 +89,20 @@ def menu_model(listing: list[dict]) -> dict:
         "pending": [(ID_ACCEPT + i, ID_REJECT + i, d) for i, d in enumerate(pending[:50])],
         "approved": [(ID_KICK + i, d) for i, d in enumerate(approved[:50])],
         "cubes": [(ID_CUBE + i, cid, name) for i, (cid, name) in enumerate(CUBES)],
+        "pcs": [(ID_PC + i, d) for i, d in enumerate((pcs or [])[:50])],  # 0.70: PCs que este puede controlar
     }
 
 
-def resolve(command: int, listing: list[dict]) -> tuple[str, object]:
+def pc_label(d: dict) -> str:
+    return f"{d.get('nombre') or 'PC'} · {d.get('host', '')}:{d.get('puerto', 8787)}"
+
+
+def resolve(command: int, listing: list[dict], pcs: list[dict] | None = None) -> tuple[str, object]:
     """Traduce un id de menú a (acción, dato)."""
-    model = menu_model(listing)
+    model = menu_model(listing, pcs)
+    for pid, d in model["pcs"]:
+        if command == pid:
+            return "pc", d["id"]
     for cid, cube_id, _name in model["cubes"]:
         if command == cid:
             return "cube", cube_id
@@ -105,15 +116,19 @@ def resolve(command: int, listing: list[dict]) -> tuple[str, object]:
             return "kick", d["id"]
     names = {ID_OPEN: "open", ID_QR: "qr", ID_FOLDER: "folder", ID_BRIDGE: "bridge", ID_PROPS: "props",
              ID_KICKALL: "kickall", ID_AUTORUN: "autorun", ID_DEVICES: "devices", ID_QUIT: "quit",
-             ID_REMEMBER: "remember", ID_FORGET: "forget"}
+             ID_REMEMBER: "remember", ID_FORGET: "forget", ID_PC_SOLTAR: "pc-soltar", ID_PC_ANADIR: "pc-anadir",
+             ID_PC_PERMITIR: "pc-permitir"}
     return names.get(command, ""), None
 
 
-def tray_state(count: int, away: int = 0) -> tuple[str, str]:
+def tray_state(count: int, away: int = 0, controlando: str = "", tecla: str = "Ctrl+Alt+L") -> tuple[str, str]:
     """0.55: icono y texto de la bandeja según los móviles conectados (función pura).
 
     Rojo = ninguno; verde = al menos uno; 0.69: naranja = ninguno aquí, pero un móvil emparejado
-    se fue a otro PC de su lista. Devuelve (archivo .ico en static/, tooltip)."""
+    se fue a otro PC de su lista. Devuelve (archivo .ico en static/, tooltip).
+    0.70: mientras este PC controla otro, naranja y lo dice (el ratón de aquí no se mueve)."""
+    if controlando:
+        return "lazoo.ico", f"LaZoo · controlando «{controlando[:40]}» · {tecla} para volver"[:127]
     if count <= 0 and away > 0:
         return "lazoo.ico", "LaZoo · el móvil está en otro PC"
     if count <= 0:
@@ -228,6 +243,8 @@ class Tray:
         if getattr(sys, "frozen", False):  # .exe: lo recibido, junto al LaZoo.exe y no dentro de _internal
             lazo.control.set_photos_dir(Path(sys.executable).resolve().parent / "Fotos")
         lazo.APPROVALS.on_new.append(self._on_new)
+        lazo.pcapc.CONTROL.escuchas.append(self._on_pcapc)  # 0.70: aviso y icono al controlar otro PC
+        lazo.pcapc.RECEPCION.escuchas.append(self._on_pcapc)
         # La bandeja ya avisa y abre el Panel de LaZoo; el cuadro Sí/No de Windows se queda.
         lazo.maybe_open_mesa = lambda: None
         self.aprobacion = aprobacion
@@ -237,6 +254,23 @@ class Tray:
         self.last_new = row
         if self.hwnd:
             self.user32.PostMessageW(self.hwnd, WM_NEWDEV, 0, 0)
+
+    def _on_pcapc(self, event: str, text: str) -> None:
+        self.last_pcapc = (event, text)
+        if self.hwnd:
+            self.user32.PostMessageW(self.hwnd, WM_PCAPC, 0, 0)
+
+    def pcs(self) -> list[dict]:
+        try:
+            return self.lazo.pcapc.PCS.listar()
+        except Exception:
+            return []
+
+    def _controlando(self) -> str:
+        try:
+            return self.lazo.pcapc.CONTROL.nombre_controlado()
+        except Exception:
+            return ""
 
     def create(self) -> None:
         ct, u = self.ct, self.user32
@@ -284,7 +318,7 @@ class Tray:
 
     def refresh_icon(self) -> None:
         """Cambia icono y tooltip solo si el estado cambió (NIM_MODIFY: sin parpadeo)."""
-        state = tray_state(self._count(), self._away())
+        state = tray_state(self._count(), self._away(), self._controlando(), self.lazo.pcapc.AJUSTES.tecla)
         if state == self.state:
             return
         self.state = state
@@ -324,7 +358,7 @@ class Tray:
 
     def show_menu(self) -> None:
         u = self.user32
-        model = menu_model(self.listing())
+        model = menu_model(self.listing(), self.pcs())
         menu = u.CreatePopupMenu()
         MF_STRING, MF_POPUP, MF_SEP, MF_GRAY, MF_CHECKED = 0x0, 0x10, 0x800, 0x1, 0x8
         u.AppendMenuW(menu, MF_STRING, ID_OPEN, f"Abrir el {PANEL}")
@@ -364,6 +398,20 @@ class Tray:
         u.AppendMenuW(bridge, MF_STRING, ID_FOLDER, "Abrir carpeta «Recibido del móvil»")
         u.AppendMenuW(bridge, MF_STRING, ID_BRIDGE, f"Abrir «Portapapeles Wifi» en el {PANEL}")
         u.AppendMenuW(menu, MF_POPUP, bridge, "Portapapeles Wifi")
+        P = self.lazo.pcapc
+        ctl = P.CONTROL.ver()
+        other = u.CreatePopupMenu()  # 0.70: «Controlar otro PC»
+        if not model["pcs"]:
+            u.AppendMenuW(other, MF_GRAY, 0, "Aún no has añadido ningún PC")
+        for pid, d in model["pcs"]:
+            on = ctl["estado"] != "libre" and ctl["id"] == d["id"]
+            u.AppendMenuW(other, MF_STRING | (MF_CHECKED if on else 0), pid, pc_label(d))
+        u.AppendMenuW(other, MF_SEP, 0, None)
+        u.AppendMenuW(other, MF_STRING if ctl["estado"] != "libre" else MF_GRAY, ID_PC_SOLTAR, f"Dejar de controlar ({P.AJUSTES.tecla})")
+        u.AppendMenuW(other, MF_STRING, ID_PC_ANADIR, "Añadir otro PC…")
+        u.AppendMenuW(other, MF_SEP, 0, None)
+        u.AppendMenuW(other, MF_STRING | (MF_CHECKED if P.AJUSTES.permitir else 0), ID_PC_PERMITIR, "Permitir que otro PC controle este")
+        u.AppendMenuW(menu, MF_POPUP, other, "Controlar otro PC")
         u.AppendMenuW(menu, MF_SEP, 0, None)
         u.AppendMenuW(menu, MF_STRING, ID_PROPS, "Propiedades…")
         u.AppendMenuW(menu, MF_STRING | (MF_CHECKED if autorun_enabled() else 0), ID_AUTORUN, "Iniciar con Windows")
@@ -402,7 +450,7 @@ class Tray:
         return f"http://127.0.0.1:{self.lazo.PORT}{page}"
 
     def run_command(self, command: int) -> str:
-        action, data = resolve(command, self.listing())
+        action, data = resolve(command, self.listing(), self.pcs())
         L, A = self.lazo, self.lazo.APPROVALS
         if action == "open":
             self.open(self.url("/mesa"))
@@ -442,6 +490,27 @@ class Tray:
                 self.balloon("LaZoo", f"Olvidados: {n}. Clave nueva.")
             else:
                 action = "forget-no"
+        elif action == "pc":  # 0.70: controlar ese PC (la conexión, fuera del hilo de la bandeja)
+            def go(pid=str(data)) -> None:
+                try:
+                    L.pcapc.CONTROL.iniciar(pid)
+                except L.pcapc.ErrorPC as exc:
+                    self._on_pcapc("error", str(exc))
+                except Exception:
+                    self._on_pcapc("error", "No pude conectar con ese PC.")
+            if os.environ.get("LAZO_TRAY_DRYRUN") == "1":
+                print(f"bandeja: controlaría {data}", flush=True)
+            else:
+                threading.Thread(target=go, daemon=True).start()
+        elif action == "pc-soltar":
+            L.pcapc.CONTROL.parar("Has vuelto a este PC.")
+        elif action == "pc-anadir":
+            self.open(self.url("/mesa#otro-pc"))
+        elif action == "pc-permitir":
+            on = L.pcapc.AJUSTES.set_permitir(not L.pcapc.AJUSTES.permitir)
+            if not on:
+                L.pcapc.RECEPCION.cortar()
+            self.balloon("LaZoo", "Otro PC " + ("ya puede controlar este (tras aceptarlo aquí)" if on else "ya no puede controlar este"))
         elif action == "props":
             self.info(self.props_text(), "Propiedades de LaZoo")
         elif action == "autorun":
@@ -463,6 +532,7 @@ class Tray:
                 "Solo red local: sí (se rechaza cualquier IP de internet)\n"
                 f"Dispositivos nuevos: {'entran sin aprobación (modo pruebas)' if L.APPROVALS.auto else 'hay que aceptarlos en este PC'}\n"
                 f"Recordar dispositivos: {'sí' if L.STORE.enabled() else 'no'}\n"
+                f"Otro PC puede controlar este: {'sí' if L.pcapc.AJUSTES.permitir else 'no'} · tecla rápida {L.pcapc.AJUSTES.tecla}\n"
                 f"Iniciar con Windows: {'sí' if autorun_enabled() else 'no'} (cámbialo en el menú del icono)")
 
     # ---- bucle ------------------------------------------------------------------
@@ -481,6 +551,14 @@ class Tray:
             if msg == WM_NEWDEV:
                 row = getattr(self, "last_new", {}) or {}
                 self.balloon("LaZoo: dispositivo nuevo", f"{row.get('label', 'Un móvil')} ({row.get('ip', '')}) quiere entrar. Acéptalo o recházalo en el cuadro de Windows o con clic derecho en este icono.")
+                return 0
+            if msg == WM_PCAPC:
+                event, text = getattr(self, "last_pcapc", ("", ""))
+                titles = {"controlando": "LaZoo: controlando otro PC", "libre": "LaZoo: de vuelta en este PC",
+                          "recibiendo": "LaZoo: otro PC controla este", "fin": "LaZoo", "error": "LaZoo: otro PC"}
+                self.refresh_icon()
+                if text:
+                    self.balloon(titles.get(event, "LaZoo"), text)
                 return 0
             if msg == WM_TIMER and wparam == TIMER_ID:
                 self.refresh_icon()
@@ -503,6 +581,10 @@ class Tray:
         if self.quitting:
             return
         self.quitting = True
+        try:
+            self.lazo.pcapc.CONTROL.parar("")  # 0.70: nunca salir con el teclado y el ratón capturados
+        except Exception:
+            pass
         self.user32.KillTimer(self.hwnd, TIMER_ID)
         self.shell32.Shell_NotifyIconW(2, self.ct.byref(self._nid()))  # NIM_DELETE
         if self.server is not None:
