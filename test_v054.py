@@ -422,10 +422,10 @@ console.log(fitWords(el, {json.dumps(title)}));
         self.assertIn("/api/pair/hello", JS)
 
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.69")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.69")
-        self.assertIn("0.69", MESA)
-        self.assertIn("<title>LaZoo 0.69</title>", HTML)
+        self.assertEqual(lazo.VERSION, "0.70")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.70")
+        self.assertIn("0.70", MESA)
+        self.assertIn("<title>LaZoo 0.70</title>", HTML)
         self.assertIn('android:versionName="3"', APK)
         self.assertIn('android:versionCode="66"', APK)
 

@@ -84,7 +84,7 @@ class Web(unittest.TestCase):
         for page in (HTML, MESA):
             self.assertIn('class="lz-logo', page)
             self.assertIn('data-estado="desconectado"', page)
-            self.assertIn("/logo.js?v=0.69", page)
+            self.assertIn("/logo.js?v=0.70", page)
         self.assertIn('rel="manifest"', HTML)
         self.assertIn("data-dinamico", MESA)
 
@@ -106,13 +106,13 @@ class Web(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.69")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.69")
-        self.assertIn("<title>LaZoo 0.69</title>", HTML)
-        self.assertIn("0.69", MESA)
+        self.assertEqual(lazo.VERSION, "0.70")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.70")
+        self.assertIn("<title>LaZoo 0.70</title>", HTML)
+        self.assertIn("0.70", MESA)
         self.assertIn('android:versionName="3"', APK)
         self.assertIn('android:versionCode="66"', APK)
-        self.assertIn("# LaZoo 0.69", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("# LaZoo 0.70", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 

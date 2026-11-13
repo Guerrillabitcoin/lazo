@@ -19,8 +19,8 @@ JS = (ROOT / "static" / "app.js").read_text(encoding="utf-8")
 
 class Version(unittest.TestCase):
     def test_version(self) -> None:
-        self.assertEqual(lazo.VERSION, "0.69")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.69")
+        self.assertEqual(lazo.VERSION, "0.70")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.70")
 
 
 class Interfaz(unittest.TestCase):
