@@ -197,14 +197,14 @@ class PowerShellReal(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.70")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.70")
+        self.assertEqual(lazo.VERSION, "0.71")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.71")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
         self.assertIn('android:versionCode="66"', apk)
         self.assertIn('android:versionName="3"', apk)
-        self.assertIn('const PAGE_VERSION = "0.70"', JS)
-        self.assertIn("<title>LaZoo 0.70</title>", HTML)
-        self.assertIn("# LaZoo 0.70", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn('const PAGE_VERSION = "0.71"', JS)
+        self.assertIn("<title>LaZoo 0.71</title>", HTML)
+        self.assertIn("# LaZoo 0.71", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 

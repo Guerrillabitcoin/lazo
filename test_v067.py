@@ -430,10 +430,10 @@ class Paquete(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_067(self):
-        self.assertEqual(lazo.VERSION, "0.70")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.70")
+        self.assertEqual(lazo.VERSION, "0.71")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.71")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("# LaZoo 0.70", readme)
+        self.assertIn("# LaZoo 0.71", readme)
         self.assertIn("**Novedad 0.67 (Linux):**", readme)
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         for txt in ("linux_yt.py", "bandeja_linux.py", "test_v067.py"):

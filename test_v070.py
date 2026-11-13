@@ -579,11 +579,11 @@ class Bandeja(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.70")
-        self.assertEqual(pcapc.VERSION, "0.70")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.70")
+        self.assertEqual(lazo.VERSION, "0.71")
+        self.assertEqual(pcapc.VERSION, "0.71")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.71")
         mesa = (ROOT / "static" / "mesa.html").read_text(encoding="utf-8")
-        self.assertIn('<p class="ver">0.70', mesa)
+        self.assertIn('<p class="ver">0.71', mesa)
         for ident in ('id="pc-permitir"', 'id="pc-tecla"', 'id="otro-pc"', "/api/pcapc"):
             self.assertIn(ident, mesa)
 
