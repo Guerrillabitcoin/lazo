@@ -138,7 +138,7 @@ jobs:
       - name: Comprobar que arranca
         run: |
           sh -n iniciar.sh && sh -n instalar-linux.sh
-          python3 -m py_compile lazo.py control.py bandeja.py bandeja_linux.py despierto.py historial.py mando.py pcapc.py
+          python3 -m py_compile lazo.py control.py bandeja.py bandeja_linux.py despierto.py historial.py mando.py pcapc.py linux_kvm.py
           python3 bandeja_linux.py --diagnostico || true
       - name: Empaquetar
         run: |
