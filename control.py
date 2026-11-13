@@ -797,8 +797,9 @@ _BASE = {"correccion_pasos": 0, "mezcla_ms": 0, "interpolacion": False, "colchon
          "pred_max_ms": 150, "pred_frenado_ms": 90, "subpixel": False, "cola_max_ms": 150,
          "reciente_primero": False, "alta_resolucion": True, "tasa_envio": 60}
 PRESETS: dict[str, dict[str, Any]] = {
+    # 0.72: el de serie ya no predice (lo pidió el dueño); el resto de la fluidez sigue encendida.
     "equilibrado": {**_BASE, "correccion_pasos": 3, "mezcla_ms": 30, "interpolacion": True,
-                    "colchon_min_ms": 15, "colchon_max_ms": 40, "subpixel": True, "prediccion": True},
+                    "colchon_min_ms": 15, "colchon_max_ms": 40, "subpixel": True, "prediccion": False},
     "fluidez": {**_BASE, "correccion_pasos": 4, "mezcla_ms": 50, "interpolacion": True,
                 "colchon_min_ms": 25, "colchon_max_ms": 60, "frecuencia_hz": 250, "subpixel": True, "cola_max_ms": 200, "prediccion": True},
     "retraso": {**_BASE, "correccion_pasos": 2, "colchon_min_ms": 10, "colchon_max_ms": 20,
