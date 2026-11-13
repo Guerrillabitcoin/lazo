@@ -44,7 +44,7 @@ const deviceId = (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.71";
+const PAGE_VERSION = "0.72";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -277,9 +277,8 @@ function showPin(reason) {
 /* 0.69: varios PC. El botón de arriba enseña el nombre del PC; su hoja deja salir de este PC
    (siempre) y, con la App 3, cambiar a otro PC guardado o añadir uno. Cada PC tiene su propia
    clave (localStorage es por dirección), así que cambiar de PC no empareja de nuevo. */
-const pcTop = document.querySelector("#pc-top");
 const pcsBox = document.querySelector("#pcs");
-let pcInfo = { nombre: "", sistema: "", avisado: 0 };
+let pcInfo = { nombre: "", sistema: "", avisado: 0, apodos: {} };
 function pcBridge(name) {
   const b = window.LaZooApp;
   return b && typeof b[name] === "function" ? b : null;
@@ -287,21 +286,30 @@ function pcBridge(name) {
 function pcSistema(platform) {
   return { Windows: "Windows", Linux: "Linux", Darwin: "Mac" }[platform] || platform || "";
 }
+/* 0.72: nombre que se enseña de cada PC: el puesto con «Renombrar» en el Panel (el propio,
+   pc_nombre, y los de «Controlar otro PC», pcs_apodos por IP:puerto) o, si no, el del sistema. */
+function pcNombreDe(pc) {
+  const host = String(pc.url || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  return (pcInfo.apodos && pcInfo.apodos[host]) || pc.nombre || host;
+}
 function pcSeen(data) {
   if (!data || !data.pc) return;
   const sistema = pcSistema(data.platform);
-  const cambio = pcInfo.nombre !== data.pc || pcInfo.sistema !== sistema;
+  const nombre = String(data.pc_nombre || data.pc);
+  const apodos = data.pcs_apodos && typeof data.pcs_apodos === "object" ? data.pcs_apodos : {};
+  const firma = JSON.stringify(apodos);
+  const cambio = pcInfo.nombre !== nombre || pcInfo.sistema !== sistema || pcInfo.firma !== firma;
   if (cambio) {
-    pcInfo.nombre = data.pc;
+    pcInfo.nombre = nombre;
     pcInfo.sistema = sistema;
-    pcTop.textContent = data.pc;
-    pcTop.title = [data.pc, sistema].filter(Boolean).join(" · ");
+    pcInfo.apodos = apodos;
+    pcInfo.firma = firma;
   }
   if (cambio || !pcBar.childElementCount) pcBarPinta();
   const b = pcBridge("recordarPc");
   if (b && (cambio || Date.now() - pcInfo.avisado > 60000)) {
     pcInfo.avisado = Date.now();
-    try { b.recordarPc(location.origin, data.pc, sistema); } catch (_e) { /* APK sin lista */ }
+    try { b.recordarPc(location.origin, nombre, sistema); } catch (_e) { /* APK sin lista */ }
   }
 }
 const pcBar = document.querySelector("#pc-bar");
@@ -315,33 +323,46 @@ async function pcIrA(url) {
   } catch (_e) { /* un PC viejo no lo conoce: da igual */ }
   if (!b.open(url)) say("No puedo abrir esa dirección");
 }
-function pcBarPinta() {
-  const este = document.createElement("button");
-  este.type = "button";
-  este.className = "pc-chip activo";
-  este.setAttribute("aria-current", "true");
-  este.textContent = pcInfo.nombre || "Este PC";
-  if (pcInfo.sistema) {
+function pcChip(nombre, sistema, activo) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "pc-chip" + (activo ? " activo" : "");
+  const n = document.createElement("span");
+  n.className = "pc-chip-nombre";
+  n.textContent = nombre;
+  b.append(n);
+  if (sistema) {
     const s = document.createElement("small");
-    s.textContent = pcInfo.sistema;
-    este.append(s);
+    s.textContent = sistema;
+    b.append(s);
   }
+  b.title = [nombre, sistema].filter(Boolean).join(" · ");
+  return b;
+}
+function pcBarPinta() {
+  const este = pcChip(pcInfo.nombre || "Este PC", pcInfo.sistema, true);
+  este.setAttribute("aria-current", "true");
+  este.setAttribute("aria-haspopup", "dialog");
+  este.setAttribute("aria-label", `${pcInfo.nombre || "Este PC"}: este PC. Toca para salir o cambiar`);
   este.addEventListener("click", () => { pcsPinta(); pcsBox.hidden = false; });
   const otros = pcGuardados().filter((pc) => pc && pc.url && pc.url !== location.origin).map((pc) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "pc-chip";
-    b.textContent = pc.nombre || pc.url.replace(/^https?:\/\//, "");
-    if (pc.sistema) {
-      const s = document.createElement("small");
-      s.textContent = pc.sistema;
-      b.append(s);
-    }
-    b.title = "Cambiar a " + b.textContent;
+    const b = pcChip(pcNombreDe(pc), pc.sistema, false);
+    b.title = "Cambiar a " + pcNombreDe(pc);
     b.addEventListener("click", () => pcIrA(pc.url));
     return b;
   });
-  pcBar.replaceChildren(este, ...otros);
+  const extra = [];
+  if (pcBridge("anadirPc")) {
+    const mas = document.createElement("button");
+    mas.type = "button";
+    mas.className = "pc-chip pc-mas";
+    mas.textContent = "+";
+    mas.setAttribute("aria-label", "Añadir otro PC (escanear su QR)");
+    mas.addEventListener("click", () => { const b = pcBridge("anadirPc"); if (b) b.anadirPc(); });
+    extra.push(mas);
+  }
+  pcBar.replaceChildren(este, ...otros, ...extra);
+  pcBar.scrollLeft = 0;
 }
 function pcGuardados() {
   const b = pcBridge("pcs");
@@ -363,7 +384,7 @@ function pcsPinta() {
     const ir = document.createElement("button");
     ir.type = "button";
     ir.className = "ir";
-    ir.textContent = pc.nombre || pc.url.replace(/^https?:\/\//, "");
+    ir.textContent = pcNombreDe(pc);
     const sub = document.createElement("small");
     sub.textContent = [pc.sistema, pc.url.replace(/^https?:\/\//, ""),
       pc.visto ? "visto " + seenText(Math.max(0, (Date.now() - pc.visto) / 1000)) : ""].filter(Boolean).join(" · ");
@@ -388,10 +409,6 @@ function pcsPinta() {
   document.querySelector("#pcs-anadir").hidden = !pcBridge("anadirPc");
   document.querySelector("#pcs-solo-app").hidden = Boolean(pcBridge("pcs"));
 }
-pcTop.addEventListener("click", () => {
-  pcsPinta();
-  pcsBox.hidden = false;
-});
 document.querySelector("#pcs-cerrar").addEventListener("click", () => { pcsBox.hidden = true; });
 pcsBox.addEventListener("click", (event) => { if (event.target === pcsBox) pcsBox.hidden = true; });
 document.querySelector("#pcs-anadir").addEventListener("click", () => {
@@ -3791,15 +3808,17 @@ document.querySelectorAll("[data-aim]").forEach((button) => {
     document.querySelectorAll("[data-aim]").forEach((b) => b.classList.toggle("on", b === button));
   });
 });
+/* 0.72: «Suavizado en el PC» encendido de serie. "lazo-smooth" solo se escribe al tocar la
+   casilla, así que un "0" guardado es que alguien lo apagó a mano: se respeta. */
 const smoothBox = document.querySelector("#aim-smooth");
 if (smoothBox) {
-  smoothBox.checked = localStorage.getItem("lazo-smooth") === "1";
+  smoothBox.checked = localStorage.getItem("lazo-smooth") !== "0";
   const pushSmooth = () => api("/api/smooth", { on: smoothBox.checked }).catch(() => {});
   smoothBox.addEventListener("change", () => {
     localStorage.setItem("lazo-smooth", smoothBox.checked ? "1" : "0");
     pushSmooth();
   });
-  PREF_PUSH.push(() => { if (smoothBox.checked) pushSmooth(); });
+  PREF_PUSH.push(pushSmooth);
 }
 
 /* 0.50: «Movimiento continuo» en el PC (activado por defecto). */
@@ -3814,16 +3833,31 @@ if (contBox) {
   PREF_PUSH.push(() => { if (!contBox.checked) pushCont(); });
 }
 
-/* 0.51: «Predicción de movimiento» (activada por defecto) e «Inercia al soltar» (apagada). */
+/* 0.51: «Predicción de movimiento» e «Inercia al soltar» (apagada).
+   0.72: la predicción viene APAGADA de serie. "lazo-pred" también lo escribía el PC al
+   contestar un preset, así que no dice si alguien la tocó: desde 0.72 "lazo-pred-mano" marca
+   que la eligió el usuario (casilla o preset). Sin esa marca, se apaga una vez (migración). */
 const predBox = document.querySelector("#aim-pred");
+function predMano() {
+  try { return localStorage.getItem("lazo-pred-mano") === "1"; } catch (_e) { return false; }
+}
+let pushPredAhora = null;
 if (predBox) {
-  predBox.checked = localStorage.getItem("lazo-pred") !== "0";
+  try {
+    const guardado = JSON.parse(localStorage.getItem("lazo-ajuste") || "null");
+    // «Máxima fluidez» o «Mínimo retraso» guardados: los eligió alguien, y traen predicción.
+    if (!predMano() && guardado && ["fluidez", "retraso"].includes(guardado.preset)) localStorage.setItem("lazo-pred-mano", "1");
+    if (!predMano() && localStorage.getItem("lazo-pred") !== "0") localStorage.setItem("lazo-pred", "0");
+  } catch (_e) { /* sin almacenamiento: vale lo de serie */ }
+  predBox.checked = localStorage.getItem("lazo-pred") === "1";
   const pushPred = () => api("/api/prediccion", { on: predBox.checked }).catch(() => {});
   predBox.addEventListener("change", () => {
     localStorage.setItem("lazo-pred", predBox.checked ? "1" : "0");
+    localStorage.setItem("lazo-pred-mano", "1");
     pushPred();
   });
-  PREF_PUSH.push(pushPred);
+  pushPredAhora = pushPred;
+  if (!document.querySelector("#fino")) PREF_PUSH.push(pushPred);  // con ajuste fino va tras el preset
 }
 const inerBox = document.querySelector("#aim-inercia");
 const inerLvl = document.querySelector("#aim-inercia-nivel");
@@ -3896,15 +3930,28 @@ function fineCollect() {
   return o;
 }
 if (document.querySelector("#fino")) {
-  document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => fineSend({ preset: b.dataset.preset })));
+  document.querySelectorAll("[data-preset]").forEach((b) => b.addEventListener("click", () => {
+    try { localStorage.setItem("lazo-pred-mano", "1"); } catch (_e) { /* nada */ }  // 0.72: elegido a mano
+    fineSend({ preset: b.dataset.preset });
+  }));
   document.querySelectorAll("[data-op]").forEach((el) => el.addEventListener("change", () => fineSend({ opciones: fineCollect() })));
   document.querySelector("#fino-reset").addEventListener("click", () => fineSend({ preset: "equilibrado" }));
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem("lazo-ajuste") || "null"); } catch (_e) { saved = null; }
   PREF_PUSH.push(() => {
-    if (saved && saved.preset && saved.preset !== "personalizado") fineSend({ preset: saved.preset });
-    else if (saved && saved.opciones) fineSend({ opciones: saved.opciones });
-    else fineSend({});
+    // 0.72: primero el preset y luego la predicción que quiere este móvil (antes iban a la vez
+    // y ganaba el que llegara último; el preset pisaba la casilla).
+    const quiere = predBox ? predBox.checked : null;
+    let ida;
+    if (saved && saved.preset && saved.preset !== "personalizado") ida = fineSend({ preset: saved.preset });
+    else if (saved && saved.opciones) ida = fineSend({ opciones: saved.opciones });
+    else ida = fineSend({});
+    Promise.resolve(ida).then(() => {
+      if (quiere === null || !pushPredAhora) return;
+      predBox.checked = quiere;
+      try { localStorage.setItem("lazo-pred", quiere ? "1" : "0"); } catch (_e) { /* nada */ }
+      pushPredAhora();
+    });
   });
 }
 

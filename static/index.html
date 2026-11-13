@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.71</title>
-    <link rel="stylesheet" href="/app.css?v=0.71" />
+    <title>LaZoo 0.72</title>
+    <link rel="stylesheet" href="/app.css?v=0.72" />
     <link rel="icon" type="image/svg+xml" href="/img/infinito-naranja.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/img/icono-192.png" />
     <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
@@ -20,16 +20,17 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.71</p>
+          <p class="ver">0.72</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
           <p id="visor" class="visor"></p>
         </div>
         <button id="qr-top" type="button" class="qr-top" aria-label="Escanear el QR del PC">QR</button>
-        <button id="pc-top" type="button" class="pc-top" aria-haspopup="dialog" aria-label="Este PC: cambiar de PC o salir">PC</button>
       </header>
-      <nav id="pc-bar" class="pc-bar" aria-label="PC"></nav>
+      <!-- 0.72: una sola forma de elegir PC: esta fila de pastillas (se desliza de lado). La del
+           PC actual abre la hoja «Este PC» (salir, quitar, añadir). -->
+      <nav id="pc-bar" class="pc-bar" aria-label="Elegir PC"></nav>
 
       <section id="pin" class="panel pin" hidden>
         <span class="lz-logo grande" data-estado="desconectado" title="LaZoo"></span>
@@ -85,10 +86,10 @@
             <div id="diag-extra" hidden>
               <label class="diag-smooth"><input id="diag-autofreeze" type="checkbox" /> Congelar al soltar el dedo</label>
               <label class="diag-smooth"><input id="aim-continuo" type="checkbox" checked /> Movimiento continuo (el PC reparte las ráfagas de la red en pasos suaves)</label>
-              <label class="diag-smooth"><input id="aim-pred" type="checkbox" checked /> Predicción de movimiento (si la red se retrasa, el PC sigue el gesto un instante y luego corrige, sin desviarse)</label>
+              <label class="diag-smooth"><input id="aim-pred" type="checkbox" /> Predicción de movimiento (apagada de serie; si la red se retrasa, el PC sigue el gesto un instante y luego corrige)</label>
               <label class="diag-smooth"><input id="aim-inercia" type="checkbox" /> Inercia al soltar (desliza un poco como el touchpad de un portátil)
                 <select id="aim-inercia-nivel" aria-label="Intensidad de la inercia"><option value="poca">poca</option><option value="media" selected>media</option><option value="mucha">mucha</option></select></label>
-              <label class="diag-smooth"><input id="aim-smooth" type="checkbox" /> Suavizado en el PC (reparte cada movimiento en pasos pequeños)</label>
+              <label class="diag-smooth"><input id="aim-smooth" type="checkbox" checked /> Suavizado en el PC (reparte cada movimiento en pasos pequeños)</label>
               <section id="fino" class="fino" aria-label="Ajuste fino del ratón">
                 <p class="mini-label">Ajuste fino (se guarda en este móvil y se aplica en el PC)</p>
                 <div class="cursor-row fino-presets" role="group" aria-label="Presets">
@@ -391,7 +392,7 @@
             <div class="about-head">
               <span class="lz-logo about-logo" data-estado="conectado" data-fijo="conectado" title="LaZoo"></span>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.71</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.72</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -472,8 +473,8 @@
         </div>
       </section>
     </main>
-    <script src="/logo.js?v=0.71"></script>
-    <script src="/seal.js?v=0.71"></script>
-    <script src="/app.js?v=0.71"></script>
+    <script src="/logo.js?v=0.72"></script>
+    <script src="/seal.js?v=0.72"></script>
+    <script src="/app.js?v=0.72"></script>
   </body>
 </html>

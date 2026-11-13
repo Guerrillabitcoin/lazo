@@ -39,7 +39,7 @@ import pcapc
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.71"
+VERSION = "0.72"
 pcapc.VERSION = VERSION  # 0.70: el User-Agent de «Controlar otro PC» lleva la versión
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
@@ -831,7 +831,7 @@ class Handler(BaseHTTPRequestHandler):
             self._guard(lambda _body: despierto.DESPIERTO.status())
             return
         if path == "/api/status":
-            self._guard(lambda _body: {**control.status(), "version": VERSION})
+            self._guard(lambda _body: {**control.status(), **pcapc.para_movil(), "version": VERSION})
             return
         if path == "/api/about":
             self._guard(lambda _body: sobre.about(ROOT, VERSION, qr_svg))
@@ -987,6 +987,8 @@ class Handler(BaseHTTPRequestHandler):
             elif step == "renombrar":  # 0.71: nombre propio de un PC de la lista
                 pcapc.PCS.renombrar(str(body.get("id", ""))[:40], str(body.get("nombre", ""))[:200])
                 pcapc.CONTROL.armar()
+            elif step == "nombre":  # 0.72: nombre de este PC para los móviles
+                pcapc.AJUSTES.set_nombre(str(body.get("nombre", ""))[:200])
             elif step == "portapapeles":  # 0.71: «Compartir portapapeles al cambiar de PC»
                 pcapc.AJUSTES.set_portapapeles(body.get("on") is True)
             elif step == "arreglar":  # 0.71: Linux: permisos en un paso (pkexec)

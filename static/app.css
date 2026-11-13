@@ -684,9 +684,7 @@ button[data-cursor] { min-height: 44px; }
 .yt-preview { text-align: center; font-size: 22px; font-weight: 700; color: #e07a3d; margin: 8px 0 0; font-variant-numeric: tabular-nums; }
 .yt-movil-link { display: block; text-align: center; margin-top: 8px; color: #e07a3d; font-weight: 600; }
 
-/* 0.69: varios PC. Botón con el nombre del PC (solo conectado) y su hoja. */
-.pc-top { display: none; margin-left: auto; min-height: 36px; max-width: 42vw; padding: 0 12px; border-radius: 999px; background: #3a332b; color: var(--texto, #f3eee6); font-weight: 650; border: 1px solid #5a4a3a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.top[data-link="on"] .pc-top { display: inline-block; }
+/* 0.69: varios PC: la hoja «Este PC». (0.72: sin botón arriba; se abre desde la pastilla.) */
 .pcs .confirm-box { border-color: #5a4a3a; display: grid; gap: 10px; }
 .pcs .confirm-box > button { width: 100%; min-height: 46px; }
 .pcs-sub { margin: 4px 0 0; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #e07a3d; }
@@ -706,6 +704,31 @@ button[data-cursor] { min-height: 44px; }
 .pc-bar { display: none; gap: 6px; margin-top: 6px; overflow-x: auto; scrollbar-width: none; }
 .pc-bar::-webkit-scrollbar { display: none; }
 .top[data-link="on"] + .pc-bar:not(:empty) { display: flex; }
-.pc-chip { flex: 1 0 auto; min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid #5a4a3a; background: #241f1a; color: #c4b8aa; font-size: 13px; white-space: nowrap; }
+.pc-chip { flex: none; min-height: 34px; padding: 0 12px; border-radius: 999px; border: 1px solid #5a4a3a; background: #241f1a; color: #c4b8aa; font-size: 13px; white-space: nowrap; }
 .pc-chip.activo { border-color: #e07a3d; color: #f3eee6; font-weight: 650; }
 .pc-chip small { color: #c4b8aa; font-weight: 400; margin-left: 4px; }
+
+/* 0.72: cabecera del móvil sin apreturas. Logo y versión | estado en UNA línea (y debajo el
+   último aviso) | QR solo sin conexión. El nombre del PC ya no va arriba: va entero en su
+   pastilla de la fila de debajo, que se desliza de lado si no caben todos. */
+.top { gap: 10px; min-height: 52px; }
+.brand-col { flex: none; }
+.status-copy { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+#link-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.3; }
+.qr-top { flex: none; }
+.pc-bar { scroll-snap-type: x proximity; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent); padding-right: 18px; }
+.pc-chip { scroll-snap-align: start; display: inline-flex; align-items: center; max-width: none; }
+.pc-chip.pc-mas { min-width: 40px; justify-content: center; font-size: 18px; font-weight: 700; color: #e07a3d; }
+
+/* 0.72: cada tarjeta crece con lo que lleva dentro (antes medía lo que la pantalla y en
+   YouTube «Vista», los subtítulos y las casillas quedaban fuera del borde). La vista hace scroll. */
+.view > .deck { flex: 1 0 auto; min-height: auto; }
+.view > .deck:not(:only-child) { flex: none; }
+.phrase input, .phrase textarea { min-width: 0; }
+.list { flex: none; overflow: visible; }
+.win-deck .list.win-list { flex: 1; overflow: auto; }
+/* La barra de pestañas de abajo se desliza: el borde derecho se difumina para que se vea que hay más. */
+.dock-scroll { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent); padding-right: 22px; }
+.view > .win-deck { flex: 1 1 0; min-height: 0; }
+/* 0.72: el último aviso cabe en dos líneas en vez de cortarse en «En el P…». */
+.visor { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; font-size: 12px; line-height: 1.25; }

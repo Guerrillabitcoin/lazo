@@ -83,7 +83,7 @@ EMERGENCIA = "Ctrl+Alt+Esc"
 UA_PREFIJO = "LaZoo-PC/"
 ARCHIVO_PCS = "otros-pcs.json"
 MAX_PCS = 20
-VERSION = "0.71"
+VERSION = "0.72"
 
 MOVER, BOTON, RUEDA, TECLA, SOLTAR, LATIDO_EV, RESPUESTA, PIDE_PORTA = 1, 2, 3, 4, 5, 6, 7, 8
 PORTA = 9  # solo en tramas P1
@@ -276,6 +276,7 @@ class Ajustes:
         self.permitir = False
         self.tecla = TECLA_DEFECTO
         self.portapapeles = True
+        self.nombre = ""  # 0.72: nombre de este PC para los móviles («Renombrar» en el Panel)
         self._lock = threading.Lock()
 
     def archivo(self) -> Path:
@@ -290,6 +291,12 @@ class Ajustes:
             data = {}
         self.permitir = data.get("otro_pc_permitir") is True
         self.portapapeles = data.get("otro_pc_portapapeles") is not False
+        try:
+            import aprobacion
+
+            self.nombre = aprobacion.limpiar_apodo(data.get("nombre_este_pc") or "")
+        except (ValueError, TypeError):
+            self.nombre = ""
         try:
             self.tecla = leer_tecla(str(data.get("otro_pc_tecla") or TECLA_DEFECTO))[2]
         except ErrorPC:
@@ -323,6 +330,18 @@ class Ajustes:
         self.portapapeles = on is True
         self._guardar(otro_pc_portapapeles=self.portapapeles)
         return self.portapapeles
+
+    def set_nombre(self, texto: Any) -> str:
+        """0.72: nombre corto de este PC para la fila de PCs del móvil (vacío = el del sistema).
+        Mismas reglas que «Renombrar»: 40 como mucho, sin HTML."""
+        import aprobacion
+
+        try:
+            self.nombre = aprobacion.limpiar_apodo(texto)
+        except ValueError as exc:
+            raise ErrorPC(str(exc)) from exc
+        self._guardar(nombre_este_pc=self.nombre)
+        return self.nombre
 
     def set_tecla(self, texto: str) -> str:
         mods, vk, limpio = leer_tecla(texto)
@@ -1843,12 +1862,35 @@ def _tras_emparejar() -> None:
 EMPAREJAR = Emparejar(PCS, al_terminar=_tras_emparejar)
 
 
+def _nombre_sistema() -> str:
+    try:
+        import control
+
+        return control.pc_name()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def para_movil() -> dict:
+    """0.72: lo que el móvil (aprobado, por /api/status sellado) necesita para nombrar los PCs:
+    el nombre propio de este y los puestos con «Renombrar» a los de «Controlar otro PC», por
+    IP:puerto (la misma dirección con la que la App los guarda)."""
+    apodos = {}
+    try:
+        for pc in PCS.listar():
+            if pc.get("apodo") and pc.get("host"):
+                apodos[f"{pc['host']}:{pc['puerto']}"] = pc["apodo"]
+    except Exception:  # noqa: BLE001
+        apodos = {}
+    return {"pc_nombre": AJUSTES.nombre, "pcs_apodos": dict(list(apodos.items())[:50])}
+
+
 def estado() -> dict:
     """Para el Panel (solo local)."""
     ok, motivo = CONTROL.puede_mandar()
     cap = CONTROL.captura
     data = {"permitir": AJUSTES.permitir, "tecla": AJUSTES.tecla, "emergencia": EMERGENCIA,
-            "portapapeles": AJUSTES.portapapeles,
+            "portapapeles": AJUSTES.portapapeles, "nombre_este": AJUSTES.nombre, "nombre_sistema": _nombre_sistema(),
             "puede_mandar": ok, "motivo": motivo, "pcs": PCS.listar(), "control": CONTROL.ver(),
             "emparejar": EMPAREJAR.ver(), "recibiendo": RECEPCION.nombre_actual(),
             "tecla_ok": bool(getattr(cap, "tecla_ok", False)), "diagnostico": "", "falta": "", "arreglable": False}
