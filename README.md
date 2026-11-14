@@ -1,4 +1,4 @@
-# LaZoo 0.73
+# LaZoo 0.74
 
 Beta de las fases 2 y 4: icono en la bandeja de Windows (`LaZoo.pyw`) y primera APK de Android (`android/`). Protocolo en `protocol.py`. La última versión estable y de referencia es la [0.31](https://github.com/Guerrillabitcoin/lazo/tree/v0.31.0).
 
@@ -23,6 +23,8 @@ Hace falta Python 3.10 o más nuevo. En Windows, al instalarlo, marca **Add pyth
 **Windows:** descomprime el ZIP y haz doble clic en `iniciar.bat`. La ventana no se cierra si algo falla: deja el texto a la vista.
 
 **Windows sin consola (nuevo en 0.43):** doble clic en `LaZoo.pyw`. LaZoo queda como icono en la bandeja, junto al sonido y la Wi-Fi, sin ventana negra. Clic derecho en el icono: abrir el Panel de LaZoo, mostrar el QR, Pastillas, Solicitudes pendientes (aceptar o rechazar), Dispositivos conectados (expulsar uno o a todos), Puente Wi-Fi, Propiedades, Iniciar con Windows (apagado de serie) y Salir. Doble clic abre la ventana del PC. Si ya está en marcha, abrirlo otra vez solo trae su ventana. El registro va a `%LOCALAPPDATA%\LaZoo\lazoo.log`. Para hacer un `.exe`, mira `empaquetar-exe.md`. En Linux, desde 0.67, también hay bandeja (mira «Novedad 0.67»); en macOS llegará más adelante.
+
+**Novedad 0.74:** el ratón entre PCs ya no va a tirones. El PC controlado **suaviza** el movimiento: lo reparte en pasos de 4 ms en el tiempo en que lo hiciste en el otro PC, con un colchón de unos ms que se adapta a la red. No adivina nada (la predicción sigue apagada). Se puede quitar en Configuración → Otro PC → «Suavizar ratón entre PCs». El PC que manda lo hace a ritmo fijo (250 veces por segundo) y Windows ya no mete a LaZoo en «modo eficiencia» (en Windows 11, un programa sin ventana podía quedar frenado y su reloj iba a saltos: eso también afectaba al ratón del móvil). Nuevo botón **Probar fluidez** en «Controlar otro PC»: mide el reloj de este PC y, si pasas al otro PC con la tecla rápida y mueves el ratón 5 s, también el ratón, la red y el otro PC, y te dice en una frase dónde está el problema. Los dos PCs tienen que tener la 0.74 para el suavizado. APK sin cambios (App 3).
 
 **Novedad 0.73:** el salto de SponsorBlock ya no es solo para los patrocinios. De serie salta también el **autobombo / promo del canal** y los **recordatorios de suscribirse y dar like**; con una casilla cada una puedes añadir intros, outros/créditos, avances/resúmenes, relleno/desvíos y partes sin música en vídeos musicales (Panel: Configuración → YouTube; móvil: pestaña YouTube → «Qué saltar»). Si ya lo tenías encendido, pasa a saltar esas tres. El aviso y el historial dicen qué se saltó, y cada casilla lleva su contador. Los «momentos destacados» nunca se saltan, y si un vídeo entero está marcado como patrocinado no se salta nada: solo se avisa. La consulta sigue siendo con 4 letras del hash del vídeo y pide siempre todas las categorías, así SponsorBlock tampoco sabe cuáles saltas. APK sin cambios (App 3).
 

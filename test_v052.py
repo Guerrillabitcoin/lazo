@@ -126,8 +126,8 @@ class Post(Base):
 
 class Ui(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.73")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.73")
+        self.assertEqual(lazo.VERSION, "0.74")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.74")
         self.assertIn('android:versionName="3"', APK)
         self.assertIn('android:versionCode="66"', APK)
 

@@ -41,6 +41,17 @@ Portapapeles (0.71)
         b"P1" + número_u32 + id_u32 + total_u32 + desde_u32 + trozo   un trozo del texto (UTF-8)
     Un P1 con total 0 = «no hay nada (o no se comparte)».
 
+Fluidez (0.74, fluidez.py)
+    El receptor 0.74 contesta al /kvm con la cabecera `X-LaZoo-KVM: 2`; solo entonces el emisor usa
+        10 MOVER_T    <hhH>   dx dy + ms del emisor (16 bits): el receptor reparte el movimiento
+                              en el tiempo en que se hizo (Suavizador, sin predicción)
+        11 PIDE_MEDIDA <IB>   id, fase (0 empieza a medir, 1 da el resultado)
+        12 MEDIDA  <IHHHHB>   id, tandas/s, hueco máx ×10 ms, jitter ×10 ms, hueco máx aplicado ×10 ms, suavizado
+    Con un receptor anterior (sin la cabecera) se sigue mandando MOVER, como en la 0.73.
+    El emisor manda a ritmo fijo (LOTE = 4 ms, por plazos: sin derivar), con TCP_NODELAY, el
+    hilo del gancho y el que manda con más prioridad, Windows sin «modo eficiencia» y Python
+    cambiando de hilo cada 1 ms mientras se controla.
+
 Linux (0.71, linux_kvm.py)
     Receptor: ratón y teclado virtuales en /dev/uinput; si no, XTest (Xorg) o ydotool con la
     sintaxis de su versión (Wayland). Emisor: evdev con EVIOCGRAB; si no, XGrabKeyboard (Xorg).
@@ -67,6 +78,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+import fluidez
 import protocol
 
 RUTA = "/kvm"
@@ -74,7 +86,7 @@ MAX_TRAMA = 40000      # 0.71: cabe un trozo del portapapeles
 TROZO_PORTA = 32000
 MAX_PORTA = 1_000_000  # bytes de texto (UTF-8) como mucho
 ESPERA_PORTA = 1.5     # s que se espera el portapapeles del otro PC al volver
-LOTE = 0.006           # s: los movimientos se juntan en tandas de ~6 ms
+LOTE = 0.004           # s: 0.74: tandas cada 4 ms (250 Hz), por plazos fijos
 LATIDO = 0.5           # s entre latidos del emisor
 SIN_RESPUESTA = 3.0    # s sin respuesta (emisor) o sin tramas (receptor): se suelta todo
 ESPERA_APROBAR = 130   # s que el emisor espera a que el otro PC acepte
@@ -83,13 +95,18 @@ EMERGENCIA = "Ctrl+Alt+Esc"
 UA_PREFIJO = "LaZoo-PC/"
 ARCHIVO_PCS = "otros-pcs.json"
 MAX_PCS = 20
-VERSION = "0.73"
+VERSION = "0.74"
 
 MOVER, BOTON, RUEDA, TECLA, SOLTAR, LATIDO_EV, RESPUESTA, PIDE_PORTA = 1, 2, 3, 4, 5, 6, 7, 8
 PORTA = 9  # solo en tramas P1
+MOVER_T, PIDE_MEDIDA, MEDIDA = 10, 11, 12  # 0.74: solo si el receptor dice X-LaZoo-KVM: 2
+KVM_VERSION = 2
+LATIDO_MEDIR = 0.1     # s entre latidos mientras se mide la fluidez (ida y vuelta)
 _FORMATOS = {MOVER: struct.Struct("<hh"), BOTON: struct.Struct("<BB"), RUEDA: struct.Struct("<Bh"),
              TECLA: struct.Struct("<HHB"), SOLTAR: struct.Struct(""), LATIDO_EV: struct.Struct("<I"),
-             RESPUESTA: struct.Struct("<I"), PIDE_PORTA: struct.Struct("<I")}
+             RESPUESTA: struct.Struct("<I"), PIDE_PORTA: struct.Struct("<I"),
+             MOVER_T: struct.Struct("<hhH"), PIDE_MEDIDA: struct.Struct("<IB"), MEDIDA: struct.Struct("<IHHHHB")}
+_VERSIONES: dict[str, int] = {}  # id del PC → versión del canal que dijo al conectar
 CABECERA = b"K1"
 CABECERA_PORTA = b"P1"
 _PORTA = struct.Struct("<IIII")
@@ -115,12 +132,16 @@ def codificar(numero: int, eventos: list[tuple]) -> bytes:
         fmt = _FORMATOS.get(tipo)
         if fmt is None:
             raise protocol.ProtocolError("evento no válido")
-        if tipo == MOVER:
+        if tipo in (MOVER, MOVER_T):
             dx, dy = int(ev[1]), int(ev[2])
             while dx or dy:
                 a, b = _i16(dx), _i16(dy)
-                partes.append(bytes([MOVER]) + fmt.pack(a, b))
+                partes.append(bytes([tipo]) + (fmt.pack(a, b) if tipo == MOVER else fmt.pack(a, b, int(ev[3]) & 0xFFFF)))
                 dx, dy = dx - a, dy - b
+            continue
+        if tipo == MEDIDA:
+            partes.append(bytes([MEDIDA]) + fmt.pack(int(ev[1]) & 0xFFFFFFFF, *[max(0, min(65535, int(x))) for x in ev[2:6]],
+                                                     1 if ev[6] else 0))
             continue
         if tipo == RUEDA:
             partes.append(bytes([RUEDA]) + fmt.pack(int(ev[1]) & 1, _i16(ev[2])))
@@ -197,6 +218,8 @@ def decodificar(datos: bytes) -> tuple[int, list[tuple]]:
             raise protocol.ProtocolError("rueda no válida")
         if ev[0] == TECLA and (ev[1] > 0xFF or ev[3] > 3):
             raise protocol.ProtocolError("tecla no válida")
+        if ev[0] == PIDE_MEDIDA and ev[2] not in (0, 1):
+            raise protocol.ProtocolError("medida no válida")
     return numero, eventos
 
 
@@ -277,6 +300,7 @@ class Ajustes:
         self.tecla = TECLA_DEFECTO
         self.portapapeles = True
         self.nombre = ""  # 0.72: nombre de este PC para los móviles («Renombrar» en el Panel)
+        self.suavizar = True  # 0.74: «Suavizar ratón entre PCs» (lo aplica el PC controlado)
         self._lock = threading.Lock()
 
     def archivo(self) -> Path:
@@ -291,6 +315,7 @@ class Ajustes:
             data = {}
         self.permitir = data.get("otro_pc_permitir") is True
         self.portapapeles = data.get("otro_pc_portapapeles") is not False
+        self.suavizar = data.get("otro_pc_suavizar") is not False
         try:
             import aprobacion
 
@@ -330,6 +355,11 @@ class Ajustes:
         self.portapapeles = on is True
         self._guardar(otro_pc_portapapeles=self.portapapeles)
         return self.portapapeles
+
+    def set_suavizar(self, on: Any) -> bool:
+        self.suavizar = on is True
+        self._guardar(otro_pc_suavizar=self.suavizar)
+        return self.suavizar
 
     def set_nombre(self, texto: Any) -> str:
         """0.72: nombre corto de este PC para la fila de PCs del móvil (vacío = el del sistema).
@@ -591,7 +621,8 @@ class Receptor:
     """Aplica los eventos de UNA conexión y recuerda qué dejó pulsado para soltarlo al final."""
 
     def __init__(self, inyector: Any, marcar: Callable[[], None] | None = None,
-                 porta_poner: Callable[[str], Any] | None = None) -> None:
+                 porta_poner: Callable[[str], Any] | None = None, suavizar: bool = False,
+                 hilo_suave: bool = True) -> None:
         self.iny = inyector
         self.marcar = marcar or (lambda: None)
         self.porta_poner = porta_poner  # None = este PC no comparte el portapapeles
@@ -603,9 +634,17 @@ class Receptor:
         self._mcond = threading.Condition(threading.Lock())
         self._hilo: threading.Thread | None = None
         self._fin = False
-        if getattr(inyector, "lento", False):
+        # 0.74: un solo hilo a la vez dentro del inyector (Xlib no es seguro entre hilos).
+        self._ilock = threading.Lock()
+        self.llegadas = fluidez.Ritmo()
+        self.aplicados = fluidez.Ritmo()
+        self.midiendo = False
+        self.suave: fluidez.Suavizador | None = None
+        if getattr(inyector, "lento", False):  # ydotool: un proceso por movimiento, se junta (sin suavizar)
             self._hilo = threading.Thread(target=self._mover_lento, name="lazo-kvm-mover", daemon=True)
             self._hilo.start()
+        elif suavizar:  # 0.74: Recepcion.atender pasa AJUSTES.suavizar (encendido de serie)
+            self.suave = fluidez.Suavizador(self._aplicar, hilo=hilo_suave)
 
     def _mover_lento(self) -> None:
         while True:
@@ -621,25 +660,46 @@ class Receptor:
             except Exception:  # noqa: BLE001
                 pass
 
-    def _mover(self, dx: int, dy: int) -> None:
+    def _aplicar(self, dx: int, dy: int) -> None:
+        with self._ilock:
+            self.iny.mover(dx, dy)
+        if self.midiendo:
+            self.aplicados.apunta()
+
+    def _mover(self, dx: int, dy: int, t_emisor: int | None = None) -> None:
         self.marcar()
+        if self.midiendo:
+            self.llegadas.apunta()
         if self._hilo is not None:
             with self._mcond:
                 self._mov[0] += dx
                 self._mov[1] += dy
                 self._mcond.notify()
             return
-        self.iny.mover(dx, dy)
+        if self.suave is not None:
+            self.suave.meter(dx, dy, t_emisor)
+            return
+        self._aplicar(dx, dy)
+
+    def medida(self, ident: int) -> tuple:
+        """0.74: lo que vio este PC desde PIDE_MEDIDA fase 0 (para la prueba de fluidez del emisor)."""
+        lle, apl = self.llegadas.resumen(), self.aplicados.resumen()
+        return (MEDIDA, ident, lle["hz"], lle["hueco_max_ms"] * 10, lle["jitter_ms"] * 10, apl["hueco_max_ms"] * 10,
+                self.suave is not None)
 
     def _vaciar_mov(self) -> None:
-        """Antes de un clic o una tecla, el movimiento pendiente (Wayland) se hace primero."""
+        """Antes de un clic o una tecla, el movimiento pendiente (suavizado o Wayland) se hace primero."""
+        if self.suave is not None:
+            self.suave.vaciar()
+            return
         if self._hilo is None:
             return
         with self._mcond:
             dx, dy = self._mov
             self._mov = [0, 0]
         if dx or dy:
-            self.iny.mover(dx, dy)
+            with self._ilock:
+                self.iny.mover(dx, dy)
 
     def tratar(self, datos: bytes) -> list[tuple]:
         """Una trama ya abierta. Devuelve las respuestas (a los latidos)."""
@@ -658,6 +718,20 @@ class Receptor:
             if mx or my:
                 self._mover(mx, my)
                 mx = my = 0
+            if tipo == MOVER_T:  # 0.74: con la hora del emisor, para repartirlo en su tiempo
+                self._mover(ev[1], ev[2], ev[3])
+                continue
+            if tipo == PIDE_MEDIDA:
+                if ev[2] == 0:
+                    self.llegadas.vaciar()
+                    self.aplicados.vaciar()
+                    self.midiendo = True
+                else:
+                    respuestas.append(self.medida(ev[1]))
+                    self.midiendo = False
+                continue
+            if tipo == MEDIDA:
+                continue
             if tipo == LATIDO_EV:
                 respuestas.append((RESPUESTA, ev[1]))
                 continue
@@ -674,26 +748,28 @@ class Receptor:
             self._vaciar_mov()
             if tipo == SOLTAR:
                 self.soltar_todo()
-            elif tipo == BOTON:
-                b, abajo = ev[1], bool(ev[2])
-                if abajo:
-                    self.botones.add(b)
-                    self.iny.boton(b, True)
-                elif b in self.botones:
-                    self.botones.discard(b)
-                    self.iny.boton(b, False)
-            elif tipo == RUEDA:
-                self.iny.rueda(ev[1], ev[2])
-            elif tipo == TECLA:
-                vk, scan, bits = ev[1], ev[2], ev[3]
-                ext, abajo = bool(bits & 1), bool(bits & 2)
-                clave = (vk, scan, int(ext))  # 0.71: con el scan (Linux manda vk 0 en muchas teclas)
-                if abajo:
-                    self.teclas[clave] = (vk, scan, ext)
-                    self.iny.tecla(vk, scan, ext, True)
-                elif clave in self.teclas:
-                    del self.teclas[clave]
-                    self.iny.tecla(vk, scan, ext, False)
+                continue
+            with self._ilock:
+                if tipo == BOTON:
+                    b, abajo = ev[1], bool(ev[2])
+                    if abajo:
+                        self.botones.add(b)
+                        self.iny.boton(b, True)
+                    elif b in self.botones:
+                        self.botones.discard(b)
+                        self.iny.boton(b, False)
+                elif tipo == RUEDA:
+                    self.iny.rueda(ev[1], ev[2])
+                elif tipo == TECLA:
+                    vk, scan, bits = ev[1], ev[2], ev[3]
+                    ext, abajo = bool(bits & 1), bool(bits & 2)
+                    clave = (vk, scan, int(ext))  # 0.71: con el scan (Linux manda vk 0 en muchas teclas)
+                    if abajo:
+                        self.teclas[clave] = (vk, scan, ext)
+                        self.iny.tecla(vk, scan, ext, True)
+                    elif clave in self.teclas:
+                        del self.teclas[clave]
+                        self.iny.tecla(vk, scan, ext, False)
         if mx or my:
             self._mover(mx, my)
         return respuestas
@@ -701,23 +777,26 @@ class Receptor:
     def soltar_todo(self) -> int:
         """Suelta todo lo que esta conexión dejó pulsado. Devuelve cuántas cosas."""
         n = 0
-        for vk, scan, ext in list(self.teclas.values())[::-1]:
-            try:
-                self.iny.tecla(vk, scan, ext, False)
-            except Exception:  # noqa: BLE001
-                pass
-            n += 1
-        self.teclas.clear()
-        for b in sorted(self.botones):
-            try:
-                self.iny.boton(b, False)
-            except Exception:  # noqa: BLE001
-                pass
-            n += 1
-        self.botones.clear()
+        with self._ilock:
+            for vk, scan, ext in list(self.teclas.values())[::-1]:
+                try:
+                    self.iny.tecla(vk, scan, ext, False)
+                except Exception:  # noqa: BLE001
+                    pass
+                n += 1
+            self.teclas.clear()
+            for b in sorted(self.botones):
+                try:
+                    self.iny.boton(b, False)
+                except Exception:  # noqa: BLE001
+                    pass
+                n += 1
+            self.botones.clear()
         return n
 
     def cerrar(self) -> None:
+        if self.suave is not None:
+            self.suave.cerrar()
         self.soltar_todo()
         with self._mcond:
             self._fin = True
@@ -817,7 +896,8 @@ class Recepcion:
                 sellar: Callable[[bytes], bytes], vivo: Callable[[], bool], tocar: Callable[[], None] | None = None,
                 marcar: Callable[[], None] | None = None) -> str:
         comparte = AJUSTES.portapapeles
-        receptor = Receptor(self.inyector(), marcar, porta_poner=self.porta_poner if comparte else None)
+        receptor = Receptor(self.inyector(), marcar, porta_poner=self.porta_poner if comparte else None,
+                            suavizar=AJUSTES.suavizar)
         yo = {"sock": sock, "who": who, "nombre": nombre}
         with self.lock:
             viejo, self.actual = self.actual, yo
@@ -828,10 +908,12 @@ class Recepcion:
                 pass
         self._avisar("recibiendo", f"«{nombre}» está usando el ratón y el teclado de este PC.")
         motivo = "cerrado"
+        fluidez.acelerar(True)  # 0.74: Python cambia de hilo cada 1 ms mientras te controlan
         try:
             motivo = bucle_receptor(sock, receptor, abrir, sellar, vivo, tocar,
                                     porta_leer=(lambda: self.porta_leer() if AJUSTES.portapapeles else ""))
         finally:
+            fluidez.acelerar(False)
             receptor.cerrar()
             with self.lock:
                 mio = self.actual is yo
@@ -1179,6 +1261,8 @@ def conectar(host: str, puerto: int, who: str, kd: bytes, timeout: float = 3.0) 
         if codigo == 101:
             if heads.get("sec-websocket-accept") != protocol.ws_accept(clave_ws) or cuerpo:
                 raise ErrorPC("Respuesta rara del otro PC")
+            v = heads.get("x-lazoo-kvm", "1")
+            _VERSIONES[who] = int(v) if v.isdigit() and len(v) < 4 else 1  # 0.74: ¿entiende MOVER_T?
             sock.settimeout(None)
             return sock
         largo = min(int(heads.get("content-length") or 0), 65536)
@@ -1235,24 +1319,48 @@ class Control:
         self._porta_id = 0
         self._porta_espera: tuple[int, threading.Event, list] | None = None
         self._juntar = Juntar()
+        # 0.74: fluidez. v2 = el receptor entiende MOVER_T (con la hora); medida = prueba en curso.
+        self.v2 = False
+        self._t_mov = 0.0
+        self.medida: fluidez.Medida | None = None
+        self._acelerado = False
 
     # Lo llama el gancho (nada pesado) ------------------------------------------------------
     def vivo(self) -> bool:
         return self._sesion is not None and self.reloj() - self.ultimo_pong < SIN_RESPUESTA + 1.5
 
     def mover(self, dx: int, dy: int) -> None:
+        m = self.medida
+        if m is not None:
+            m.gancho.apunta()
         with self._buf:
             self._dx += dx
             self._dy += dy
+            self._t_mov = self.reloj()  # 0.74: cuándo se hizo (va en MOVER_T)
         self._despertar.set()
+
+    def _mov_pendiente(self) -> tuple | None:
+        """El movimiento juntado como evento (con self._buf cogido)."""
+        if not (self._dx or self._dy):
+            return None
+        ev = (MOVER_T, self._dx, self._dy, int(self._t_mov * 1000) & 0xFFFF) if self.v2 else (MOVER, self._dx, self._dy)
+        self._dx = self._dy = 0
+        return ev
 
     def _evento(self, ev: tuple) -> None:
         with self._buf:
-            if self._dx or self._dy:
-                self._cola.append((MOVER, self._dx, self._dy))
-                self._dx = self._dy = 0
+            mov = self._mov_pendiente()
+            if mov is not None:
+                self._cola.append(mov)
             self._cola.append(ev)
         self._despertar.set()
+
+    def pedir_medida(self, ident: int, fase: int) -> bool:
+        """0.74: pide al otro PC que empiece a medir (0) o que diga lo que midió (1)."""
+        if not self.v2 or self._sesion is None:
+            return False
+        self._evento((PIDE_MEDIDA, ident, fase))
+        return True
 
     def boton(self, b: int, abajo: bool) -> None:
         self._evento((BOTON, b, 1 if abajo else 0))
@@ -1382,6 +1490,10 @@ class Control:
                 return self.ver()
             sesion = object()
             self._sock, self._sello, self._sesion = sock, sello, sesion
+            self.v2 = _VERSIONES.get(fila["id"], 1) >= KVM_VERSION
+            if not self._acelerado:
+                fluidez.acelerar(True)  # 0.74: el gancho no espera a que otro hilo suelte Python
+                self._acelerado = True
             with self._buf:
                 self._dx = self._dy = 0
                 self._cola = []
@@ -1437,6 +1549,9 @@ class Control:
             self._sock, self._sesion = None, None
             self.estado, self.destino = "libre", None
             self._despertar.set()
+            if self._acelerado:
+                fluidez.acelerar(False)
+                self._acelerado = False
         if sock is not None:
             try:  # el otro PC suelta lo pulsado (también lo hace solo al cerrarse la conexión)
                 sock.sendall(trama_cliente(0x2, protocol.seal(codificar(0xFFFFFFFF, [(SOLTAR,)]), sello)))
@@ -1453,45 +1568,57 @@ class Control:
 
     # Hilos de la conexión ---------------------------------------------------------------------
     def _enviar(self, sesion: object, sock: socket.socket, sello: bytes) -> None:
+        """0.74: a ritmo fijo. Mientras hay movimiento, una tanda cada LOTE por plazos (el siguiente
+        plazo sale del anterior, no de cuándo se despertó: no deriva ni se amontona). Quieto, duerme
+        hasta que llega algo o toca latido."""
         numero = 0
-        ultimo_envio = 0.0
+        plazo = 0.0
         ultimo_latido = -LATIDO
         latido_n = 0
+        fluidez.prioridad_hilo(1)
         try:
             while self._sesion is sesion:
-                self._despertar.wait(LATIDO / 2)
+                self._despertar.wait(LATIDO_MEDIR if self.medida is not None else LATIDO / 2)
                 if self._sesion is not sesion:
                     return
-                falta = ultimo_envio + LOTE - self.reloj()
-                if falta > 0:
-                    time.sleep(falta)  # junta lo que llegue en estos ms
+                ahora = self.reloj()
+                if plazo > ahora:
+                    time.sleep(plazo - ahora)  # junta lo que llegue hasta el plazo
+                    ahora = self.reloj()
+                plazo = plazo + LOTE if ahora - plazo < LOTE else ahora + LOTE
                 self._despertar.clear()
                 with self._buf:
                     eventos, self._cola = self._cola, []
-                    if self._dx or self._dy:
-                        eventos.append((MOVER, self._dx, self._dy))
-                        self._dx = self._dy = 0
+                    mov = self._mov_pendiente()
+                    if mov is not None:
+                        eventos.append(mov)
                     porta, self._porta_salida = self._porta_salida[:4], self._porta_salida[4:]
                 if self._porta_salida:
                     self._despertar.set()  # quedan trozos: en la siguiente vuelta, sin esperar
                 for trozo in porta:
                     numero += 1
                     sock.sendall(trama_cliente(0x2, protocol.seal(codificar_porta(numero, *trozo), sello)))
-                ahora = self.reloj()
                 if ahora - self.ultimo_pong > SIN_RESPUESTA:
                     self.parar("El otro PC no responde: has vuelto a este PC.")
                     return
-                if ahora - ultimo_latido >= LATIDO:
+                m = self.medida
+                if ahora - ultimo_latido >= (LATIDO_MEDIR if m is not None else LATIDO):
                     latido_n += 1
                     eventos.append((LATIDO_EV, latido_n))
                     ultimo_latido = ahora
+                    if m is not None:
+                        m.latido(latido_n)
                 if not eventos:
+                    plazo = 0.0  # quieto: el próximo movimiento sale sin esperar
                     continue
                 for tanda in trocear(eventos):
                     numero += 1
                     sock.sendall(trama_cliente(0x2, protocol.seal(codificar(numero, tanda), sello)))
                     self.enviadas += 1
-                ultimo_envio = self.reloj()
+                if m is not None and mov is not None:
+                    m.envio.apunta()
+                if mov is None and not self._cola:
+                    plazo = 0.0
         except (OSError, protocol.ProtocolError):
             if self._sesion is sesion:
                 self.parar("Se cortó la conexión con el otro PC: has vuelto a este PC.")
@@ -1512,7 +1639,12 @@ class Control:
                 ultimo = numero
                 if any(ev[0] == RESPUESTA for ev in eventos):
                     self.ultimo_pong = self.reloj()
+                m = self.medida
                 for ev in eventos:
+                    if m is not None and ev[0] == RESPUESTA:
+                        m.respuesta(ev[1])
+                    if ev[0] == MEDIDA and m is not None:
+                        m.del_receptor(ev)
                     if ev[0] == PORTA:
                         self.ultimo_pong = self.reloj()
                         texto = juntar.trozo(*ev[1:])
@@ -1671,6 +1803,8 @@ class CapturaWindows:  # pragma: no cover - solo Windows
 
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        fluidez.prioridad_hilo(2)  # 0.74: el gancho, antes que los demás hilos de LaZoo
+        kernel32.GetTickCount.restype = wt.DWORD
         try:
             winmm = ctypes.WinDLL("winmm")
         except OSError:
@@ -1735,6 +1869,9 @@ class CapturaWindows:  # pragma: no cover - solo Windows
                         f.sink, sink = None, f.sink
                         sink.pedir("parar")
                     elif wparam == 0x200:  # WM_MOUSEMOVE: delta respecto al centro; el puntero no se mueve
+                        m = getattr(f.sink, "medida", None)
+                        if m is not None:  # 0.74: cuánto tardó Windows en darnos el evento (ms)
+                            m.tarde((kernel32.GetTickCount() - u32(lparam + 16).value) & 0xFFFFFFFF)
                         dx, dy = i32(lparam).value - centro[0], i32(lparam + 4).value - centro[1]
                         if dx or dy:
                             f.sink.mover(dx, dy)
@@ -1855,6 +1992,87 @@ def captura_para_este_pc(control: Control) -> Any:
 CONTROL = Control()
 
 
+class Prueba:
+    """0.74: «Probar fluidez» del Panel. Mide el reloj de este PC (2 s) y espera hasta ESPERA s a
+    que pases al otro PC con la tecla rápida; entonces mide SEGUNDOS s el ratón de aquí (gancho),
+    lo que se manda, la ida y vuelta por /kvm y lo que llega y se aplica en el otro PC. Si no
+    pasas, el resultado es solo de este PC (el reloj: sirve también para el ratón del móvil)."""
+
+    ESPERA = 15.0
+    SEGUNDOS = 5.0
+
+    def __init__(self, control: Control, dormir: Callable[[float], None] = time.sleep,
+                 medir_reloj: Callable[[], dict] = lambda: fluidez.reloj(2.0)) -> None:
+        self.control = control
+        self.dormir = dormir
+        self.medir_reloj = medir_reloj
+        self.lock = threading.Lock()
+        self.n = 0
+        self.estado: dict[str, Any] = {"estado": "nada"}
+
+    def ver(self) -> dict:
+        return dict(self.estado)
+
+    def empezar(self, hilo: bool = True) -> dict:
+        with self.lock:
+            if self.estado.get("estado") in ("reloj", "esperando", "midiendo"):
+                return self.ver()
+            self.n += 1
+            self.estado = {"estado": "reloj", "texto": "Midiendo el reloj de este PC…"}
+        if hilo:
+            threading.Thread(target=self._correr, name="lazo-fluidez", daemon=True).start()
+        else:
+            self._correr()
+        return self.ver()
+
+    def _poner(self, **kw: Any) -> None:
+        self.estado = kw
+
+    def _correr(self) -> None:
+        try:
+            rel = self.medir_reloj()
+            c = self.control
+            tecla = AJUSTES.tecla
+            if c.estado != "controlando":
+                if not PCS.listar() and c.fabrica is None:
+                    self._fin({"modo": "local", "reloj": rel}, tecla)
+                    return
+                self._poner(estado="esperando", texto=f"Pulsa {tecla} para pasar al otro PC y mueve el ratón en círculos "
+                            f"{self.SEGUNDOS:g} s sin parar. Después vuelve con {tecla} y aquí verás el resultado.")
+                fin = time.monotonic() + self.ESPERA
+                while c.estado != "controlando" and time.monotonic() < fin:
+                    self.dormir(0.1)
+            if c.estado != "controlando":
+                self._fin({"modo": "local", "reloj": rel}, tecla)
+                return
+            m = fluidez.Medida(self.n)
+            c.medida = m
+            pide = c.pedir_medida(m.id, 0)
+            self._poner(estado="midiendo", texto=f"Midiendo… mueve el ratón en círculos {self.SEGUNDOS:g} s.")
+            self.dormir(self.SEGUNDOS)
+            if pide and c.pedir_medida(m.id, 1):
+                m.listo.wait(1.5)
+            c.medida = None
+            r = m.resultado()
+            r["reloj"] = rel
+            if not c.v2:
+                r["receptor_viejo"] = True
+            self._fin(r, tecla)
+        except Exception as exc:  # noqa: BLE001
+            self.control.medida = None
+            self._poner(estado="hecho", nivel="aviso", texto=f"La prueba falló ({exc.__class__.__name__}).", consejos=[], datos=[])
+
+    def _fin(self, r: dict, tecla: str) -> None:
+        v = fluidez.veredicto(r, tecla=tecla)
+        if r.get("receptor_viejo"):
+            v["datos"].append("El otro PC tiene una versión anterior: actualízalo para medir también su lado y suavizar.")
+        self._poner(estado="hecho", nivel=v["nivel"], texto=v["texto"], consejos=v["consejos"], datos=v["datos"],
+                    medidas=r, hora=time.strftime("%H:%M"))
+
+
+PRUEBA = Prueba(CONTROL)
+
+
 def _tras_emparejar() -> None:
     CONTROL.armar()
 
@@ -1891,6 +2109,7 @@ def estado() -> dict:
     cap = CONTROL.captura
     data = {"permitir": AJUSTES.permitir, "tecla": AJUSTES.tecla, "emergencia": EMERGENCIA,
             "portapapeles": AJUSTES.portapapeles, "nombre_este": AJUSTES.nombre, "nombre_sistema": _nombre_sistema(),
+            "suavizar": AJUSTES.suavizar, "fluidez": PRUEBA.ver(),
             "puede_mandar": ok, "motivo": motivo, "pcs": PCS.listar(), "control": CONTROL.ver(),
             "emparejar": EMPAREJAR.ver(), "recibiendo": RECEPCION.nombre_actual(),
             "tecla_ok": bool(getattr(cap, "tecla_ok", False)), "diagnostico": "", "falta": "", "arreglable": False}

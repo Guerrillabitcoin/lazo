@@ -34,12 +34,13 @@ import anuncios
 import patrocinios
 import despierto
 import sobre
+import fluidez
 import pcapc
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.73"
+VERSION = "0.74"
 pcapc.VERSION = VERSION  # 0.70: el User-Agent de «Controlar otro PC» lleva la versión
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
@@ -919,6 +920,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", protocol.ws_accept(self.headers.get("Sec-WebSocket-Key", "")))
+        self.send_header("X-LaZoo-KVM", str(pcapc.KVM_VERSION))  # 0.74: entiende MOVER_T y la medida de fluidez
         self.end_headers()
         sock = self.connection
         try:
@@ -992,6 +994,10 @@ class Handler(BaseHTTPRequestHandler):
                 pcapc.AJUSTES.set_nombre(str(body.get("nombre", ""))[:200])
             elif step == "portapapeles":  # 0.71: «Compartir portapapeles al cambiar de PC»
                 pcapc.AJUSTES.set_portapapeles(body.get("on") is True)
+            elif step == "suavizar":  # 0.74: «Suavizar ratón entre PCs» (desde la próxima conexión)
+                pcapc.AJUSTES.set_suavizar(body.get("on") is True)
+            elif step == "fluidez":  # 0.74: «Probar fluidez» (el resultado sale en /api/pcapc)
+                pcapc.PRUEBA.empezar()
             elif step == "arreglar":  # 0.71: Linux: permisos en un paso (pkexec)
                 if not sys.platform.startswith("linux"):
                     raise control.ControlError("Solo en Linux")
@@ -1683,6 +1689,7 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     PAIRING.pin = protocol.Pairing(args.pin).pin
     pcapc.AJUSTES.cargar()  # 0.70: «Permitir que otro PC me controle» y la tecla rápida
+    fluidez.no_frenar_proceso()  # 0.74: Windows 11 no mete a LaZoo en «modo eficiencia» (ratón a tirones)
     remembered = load_remembered()
     if "unittest" not in sys.modules and "pytest" not in sys.modules:
         try:

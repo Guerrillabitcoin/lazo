@@ -111,6 +111,13 @@
       .hist-lista li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--hondo); font-size: 13px; }
       .hist-lista .tipo { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #3a332b; color: var(--suave); text-align: center; }
       /* 0.73: qué tramos de SponsorBlock se saltan */
+      /* 0.74: prueba de fluidez */
+      .pc-fluidez { margin: 4px 0 8px; padding: 10px 12px; border-radius: 12px; background: var(--hondo); border: 1px solid var(--borde); }
+      .pc-fluidez.bien { border-color: rgba(87,180,120,0.6); }
+      .pc-fluidez.mal { border-color: var(--naranja); }
+      .pc-fluidez-txt { margin: 0 0 6px; font-weight: 600; }
+      .pc-fluidez-lista { margin: 4px 0 0 18px; padding: 0; font-size: 13px; color: var(--suave); }
+      .pc-fluidez details summary { cursor: pointer; font-size: 13px; color: var(--suave); margin-top: 6px; }
       .cfg-nota { margin: 0 0 6px 18px; font-size: 12px; color: var(--suave); }
       .cfg .cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 8px; margin: 0 0 6px 18px; }
       .cfg .cats .chip { margin: 0 0 6px; }
@@ -143,6 +150,7 @@
       .tarjetas li .t-acciones button { flex: none; grid-row: auto; grid-column: auto; min-height: 32px; padding: 0 10px; font-size: 13px; }
       .pc-falta { margin: 0 0 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--naranja); color: var(--texto); font-size: 13px; }
       .pc-falta[hidden] { display: none; }
+      .cfg .chip[hidden] { display: none; }  /* 0.74: el chip vacío del último salto (0.73) se veía */
       /* 0.72: lo que se copia (IP, PIN, huella) se puede seleccionar y tiene su botón «Copiar». */
       .sel { user-select: text; -webkit-user-select: text; font-family: ui-monospace, Consolas, monospace; color: var(--texto); }
       .tarjetas li .t-linea, .tarjetas li .t-nombre, .conn .url { user-select: text; -webkit-user-select: text; }
@@ -157,7 +165,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.73</p>
+          <p class="ver">0.74</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -232,6 +240,9 @@
           <label class="chip" title="Al pulsar la tecla rápida, el texto copiado pasa al otro PC; al volver, el del otro PC vuelve a este. Solo con «Controlar otro PC».">
           <input id="pc-porta" type="checkbox" /> Compartir portapapeles al cambiar de PC
           </label>
+          <label class="chip" title="Cuando otro PC controla este: reparte cada movimiento en pasos de 4 ms en el tiempo en que se hizo allí, con un colchón pequeño que se adapta a la red. No predice nada. Vale desde la próxima vez que te controlen.">
+          <input id="pc-suave" type="checkbox" checked /> Suavizar ratón entre PCs
+          </label>
         </section>
         <section id="otro-pc" class="box cfg">
           <h2>Controlar otro PC</h2>
@@ -248,6 +259,16 @@
           <p class="pc-nota">En el otro PC: Configuración → «Permitir que otro PC me controle». Allí verás su IP y su PIN, y allí lo aceptas.
             Se mandan Win y Alt+Tab; Ctrl+Alt+Supr y la pantalla de bloqueo o de administrador (UAC) no.</p>
           <p id="pc-diag" class="pc-nota" hidden></p>
+          <p class="cfg-sub">Fluidez del ratón</p>
+          <div class="row">
+            <button id="pc-fluidez-ok" type="button" title="Mide el reloj de este PC y, si pasas al otro PC con la tecla rápida, el ratón, la red y el otro PC durante 5 s">Probar fluidez</button>
+          </div>
+          <div id="pc-fluidez" class="pc-fluidez" hidden>
+            <p id="pc-fluidez-txt" class="pc-fluidez-txt"></p>
+            <ul id="pc-fluidez-consejos" class="pc-fluidez-lista"></ul>
+            <details id="pc-fluidez-mas"><summary>Medidas</summary><ul id="pc-fluidez-datos" class="pc-fluidez-lista"></ul></details>
+          </div>
+          <p class="pc-nota">Si va a tirones también el ratón del móvil en este PC, la prueba sin pasar al otro PC ya dice si es el reloj de este PC.</p>
         </section>
         <section id="historial" class="box hist">
             <h2>Anuncios y patrocinios saltados</h2>
@@ -860,6 +881,8 @@
           ]);
         }));
         if (document.activeElement !== $("#pc-porta")) $("#pc-porta").checked = d.portapapeles !== false;
+        if (document.activeElement !== $("#pc-suave")) $("#pc-suave").checked = d.suavizar !== false;
+        pintaFluidez(d.fluidez || {});
         $("#pc-falta").hidden = !d.falta;
         ponTexto($("#pc-falta-txt"), d.falta || "");
         $("#pc-arreglar").hidden = !d.arreglable;
@@ -874,6 +897,25 @@
           return out;
         });
       }
+      /* 0.74: «Probar fluidez»: estado y veredicto vienen en /api/pcapc (se repinta cada 1,5 s). */
+      function fluidezTexto(f) {
+        if (!f || !f.estado || f.estado === "nada") return "";
+        return f.texto || "";
+      }
+      function pintaFluidez(f) {
+        const caja = $("#pc-fluidez");
+        const txt = fluidezTexto(f);
+        caja.hidden = !txt;
+        caja.classList.toggle("bien", f.nivel === "bien");
+        caja.classList.toggle("mal", f.nivel === "mal");
+        ponTexto($("#pc-fluidez-txt"), txt + (f.estado === "hecho" && f.hora ? ` (${f.hora})` : ""));
+        const enCurso = ["reloj", "esperando", "midiendo"].includes(f.estado);
+        $("#pc-fluidez-ok").disabled = enCurso;
+        $("#pc-fluidez-ok").textContent = enCurso ? "Midiendo…" : "Probar fluidez";
+        pintaLista($("#pc-fluidez-consejos"), f.consejos || [], () => (f.consejos || []).map((c) => { const li = document.createElement("li"); li.textContent = c; return li; }));
+        pintaLista($("#pc-fluidez-datos"), f.datos || [], () => (f.datos || []).map((c) => { const li = document.createElement("li"); li.textContent = c; return li; }));
+        $("#pc-fluidez-mas").hidden = !(f.datos || []).length;
+      }
       async function pcCall(paso, body) {
         try { pcPinta(await devCall("/api/pcapc/" + paso, body || {})); }
         catch (err) { $("#pc-par").textContent = err.message; $("#pc-par").dataset.firma = ""; }
@@ -884,6 +926,8 @@
       $("#pc-permitir").addEventListener("change", (event) => pcCall("permitir", { on: event.target.checked }));
       $("#pc-tecla-ok").addEventListener("click", () => pcCall("tecla", { tecla: $("#pc-tecla").value }));
       $("#pc-porta").addEventListener("change", (event) => pcCall("portapapeles", { on: event.target.checked }));
+      $("#pc-suave").addEventListener("change", (event) => pcCall("suavizar", { on: event.target.checked }));
+      $("#pc-fluidez-ok").addEventListener("click", () => pcCall("fluidez", {}));
       $("#pc-arreglar").addEventListener("click", async () => {
         try {
           const r = await devCall("/api/pcapc/arreglar", {});
@@ -1003,6 +1047,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.73"></script>
+    <script src="/logo.js?v=0.74"></script>
   </body>
 </html>
