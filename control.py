@@ -3545,7 +3545,13 @@ def _save_history() -> None:
         return
 
 
-def _read_clipboard_text() -> str:
+def _read_clipboard_text(sondeo: bool = False) -> str:
+    """Texto del portapapeles. `sondeo=True` es la lectura periódica del vigilante de notas: en
+    Linux NUNCA lanza procesos (wl-paste, xclip, xsel). 0.75: en GNOME Wayland, wl-paste no tiene
+    otra forma de leer que abrir una ventanita para coger el foco; GNOME la pone en el dock con el
+    icono genérico (parece el de Configuración) y, leyendo cada 1,5 s, los iconos «bailaban» sin
+    parar mientras LaZoo estaba abierto. Ahora wl-paste/xclip solo se usan bajo demanda (al
+    cambiar de PC con el portapapeles compartido, o desde el móvil)."""
     try:
         if SYSTEM == "Windows":
             return _windows_clipboard()
@@ -3554,6 +3560,11 @@ def _read_clipboard_text() -> str:
             return result.stdout if result.returncode == 0 else ""
         import os
 
+        if sondeo:  # 0.75: sin procesos; solo GTK en Xorg (dentro de LaZoo, sin ventana)
+            if GTK_CLIP is not None and not os.environ.get("WAYLAND_DISPLAY"):
+                got = GTK_CLIP.leer()
+                return got if isinstance(got, str) else ""
+            return ""
         if os.environ.get("WAYLAND_DISPLAY") and _which("wl-paste"):
             result = _run(["wl-paste", "-n"])
             if result.returncode == 0:
@@ -3612,7 +3623,7 @@ def _read_clipboard_for_history() -> str:
             return _windows_clipboard(skip_private=True)
         except Exception:  # noqa: BLE001
             return ""
-    return _read_clipboard_text()
+    return _read_clipboard_text(sondeo=True)
 
 
 def _windows_clipboard(skip_private: bool = False) -> str:
@@ -3789,8 +3800,30 @@ class ClipWatch:
     def seen(self, text: str) -> None:
         self._last = _clip_digest(text)
 
+    @staticmethod
+    def puede_sondear() -> bool:
+        """0.75: ¿se puede mirar el portapapeles cada INTERVAL sin lanzar procesos ni ventanas?
+        Windows y macOS sí. Linux solo en Xorg con la bandeja GTK (lee dentro de LaZoo). En
+        Wayland no: el historial automático se apaga (lo pegado desde el móvil sigue entrando)."""
+        if SYSTEM != "Linux":
+            return True
+        return GTK_CLIP is not None and not os.environ.get("WAYLAND_DISPLAY")
+
+    def estado(self) -> dict[str, Any]:
+        vivo = bool(self._thread and self._thread.is_alive())
+        motivo = ""
+        if not self.enabled:
+            motivo = "apagado (--sin-portapapeles)"
+        elif SYSTEM == "Linux" and os.environ.get("WAYLAND_DISPLAY"):
+            motivo = "apagado en Wayland: leerlo cada poco abriría una ventanita (wl-paste) en el dock"
+        elif not self.puede_sondear():
+            motivo = "esperando a la bandeja GTK (sin procesos)"
+        return {"activo": vivo and self.puede_sondear(), "motivo": motivo, "intervalo": self.INTERVAL}
+
     def poll(self, now: float | None = None) -> bool:
         """Una pasada. Devuelve True si añadió algo al historial."""
+        if self._read is None and not self.puede_sondear():
+            return False  # 0.75: nunca wl-paste/xclip en bucle
         read = self._read or _read_clipboard_for_history
         try:
             text = read() or ""
@@ -3825,6 +3858,8 @@ class ClipWatch:
 
     def _loop(self) -> None:
         while not self._stop.wait(self.INTERVAL):
+            if self._read is None and SYSTEM == "Linux" and os.environ.get("WAYLAND_DISPLAY"):
+                return  # 0.75: en Wayland no hay forma de mirar sin ventana: el hilo se acaba
             self.poll()
 
 

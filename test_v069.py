@@ -146,7 +146,7 @@ class ArreglosTrasPrueba(unittest.TestCase):
         self.assertIn(".view > .deck:not(:only-child) { flex: none; }", css)
 
     def test_barra_de_pc_bajo_la_de_arriba(self):
-        self.assertIn('</header>\n      <nav id="pc-bar" class="pc-bar"', HTML)
+        self.assertRegex(HTML, r'(?s)</header>\n(\s*<!--(?:(?!-->).)*-->\n)?\s*<nav id="pc-bar" class="pc-bar"')  # 0.72 puso un comentario entre medias
         css = (ROOT / "static" / "app.css").read_text(encoding="utf-8")
         self.assertIn('.top[data-link="on"] + .pc-bar:not(:empty) { display: flex; }', css)
         i = JS.index("function pcBarPinta()")

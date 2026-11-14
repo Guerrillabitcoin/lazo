@@ -481,10 +481,10 @@ class AjusteYPanel(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.74")
-        self.assertEqual(pcapc.VERSION, "0.74")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.74")
-        self.assertIn('<p class="ver">0.74', MESA)
+        self.assertEqual(lazo.VERSION, "0.75")
+        self.assertEqual(pcapc.VERSION, "0.75")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.75")
+        self.assertIn('<p class="ver">0.75', MESA)
 
     def test_apk_sin_cambios(self):
         texto = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")

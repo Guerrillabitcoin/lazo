@@ -839,10 +839,10 @@ class BandejaLinux(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.74")
-        self.assertEqual(pcapc.VERSION, "0.74")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.74")
-        self.assertIn('<p class="ver">0.74', MESA)
+        self.assertEqual(lazo.VERSION, "0.75")
+        self.assertEqual(pcapc.VERSION, "0.75")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.75")
+        self.assertIn('<p class="ver">0.75', MESA)
         for ident in ('id="pc-porta"', 'id="pc-arreglar"', 'id="pc-diag"', "/api/dispositivos/renombrar"):
             self.assertIn(ident, MESA)
 
@@ -853,7 +853,7 @@ class Entrega(unittest.TestCase):
     def test_solo_biblioteca_estandar(self):
         import ast
 
-        permitidos = set(sys.stdlib_module_names) | {"pcapc", "linux_kvm", "control", "ydo", "aprobacion", "recordar", "protocol",
+        permitidos = set(sys.stdlib_module_names) | {"pcapc", "sinventana", "linux_kvm", "control", "ydo", "aprobacion", "recordar", "protocol",
                                                     "fluidez"}  # 0.74: fluidez.py (también solo stdlib)
         for nombre in ("linux_kvm.py", "pcapc.py"):
             arbol = ast.parse((ROOT / nombre).read_text(encoding="utf-8"))

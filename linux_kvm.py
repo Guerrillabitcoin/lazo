@@ -1211,9 +1211,76 @@ def captura_linux(control: Any) -> Any:
     return None
 
 
+# 0.75: programas que, lanzados en GNOME, pueden asomar un icono en el dock (wl-paste/wl-copy abren
+# una ventanita para coger el foco; zenity/pkexec/xdg-open abren ventanas de verdad).
+CON_VENTANA = ("wl-paste", "wl-copy", "zenity", "kdialog", "pkexec", "xdg-open", "gio", "notify-send",
+               "gnome-control-center", "yad", "xmessage")
+
+
+def procesos_recientes(ruta: str | None = None, segundos: float = 60.0, ahora: float | None = None) -> dict:
+    """Lo que LaZoo lanzó en el último minuto, leído del registro que deja sinventana.py.
+    Devuelve {"hay_registro", "pid", "por_programa": {programa: {"veces", "hilos"}}, "sospechosos"}."""
+    import time
+
+    import sinventana
+
+    ruta = ruta or sinventana.ruta_registro()
+    ahora = time.time() if ahora is None else ahora
+    por: dict[str, dict] = {}
+    pid = ""
+    try:
+        with open(ruta, encoding="utf-8") as f:
+            lineas = f.read().splitlines()
+    except OSError:
+        return {"hay_registro": False, "ruta": ruta, "pid": "", "por_programa": {}, "sospechosos": []}
+    for linea in lineas:
+        if linea.startswith("# LaZoo pid "):
+            pid = linea[len("# LaZoo pid "):].strip()
+            continue
+        partes = linea.split("\t")
+        if len(partes) < 3:
+            continue
+        try:
+            t = float(partes[0])
+        except ValueError:
+            continue
+        if ahora - t > segundos:
+            continue
+        fila = por.setdefault(partes[1], {"veces": 0, "hilos": set()})
+        fila["veces"] += 1
+        fila["hilos"].add(partes[2])
+    sospechosos = sorted(p for p in por if p in CON_VENTANA and por[p]["veces"] >= 3)
+    return {"hay_registro": True, "ruta": ruta, "pid": pid,
+            "por_programa": {p: {"veces": v["veces"], "hilos": sorted(v["hilos"])} for p, v in por.items()},
+            "sospechosos": sospechosos}
+
+
+def texto_procesos(r: dict) -> str:
+    if not r["hay_registro"]:
+        return "Procesos lanzados por LaZoo (último minuto): sin registro (¿LaZoo está abierto?)."
+    if not r["por_programa"]:
+        return "Procesos lanzados por LaZoo (último minuto): ninguno."
+    lineas = ["Procesos lanzados por LaZoo (último minuto):"]
+    for prog, v in sorted(r["por_programa"].items(), key=lambda kv: -kv[1]["veces"]):
+        lineas.append(f"  {prog}: {v['veces']} veces (hilos: {', '.join(v['hilos'])})")
+    if r["sospechosos"]:
+        lineas.append("  ¡Ojo! " + ", ".join(r["sospechosos"]) + " se lanza en bucle y puede hacer bailar los iconos del dock.")
+    return "\n".join(lineas)
+
+
+def texto_portapapeles(env: dict | None = None) -> str:
+    env = os.environ if env is None else env
+    if sesion(env) == "wayland":
+        return ("Historial automático del portapapeles: apagado en Wayland (0.75; leerlo cada poco abría "
+                "una ventanita de wl-paste en el dock). Al cambiar de PC sí se pasa lo copiado.")
+    return "Historial automático del portapapeles: en Xorg se lee dentro de LaZoo (GTK), sin lanzar programas."
+
+
 def main(argv: list[str]) -> int:
     if "--diagnostico" in argv or "-d" in argv:
         print(texto_diagnostico(diagnostico()))
+        print(texto_portapapeles())
+        print(texto_procesos(procesos_recientes()))
         return 0
     print("Uso: python3 linux_kvm.py --diagnostico")
     return 2
