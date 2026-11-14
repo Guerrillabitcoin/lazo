@@ -41,6 +41,15 @@ Portapapeles (0.71)
         b"P1" + número_u32 + id_u32 + total_u32 + desde_u32 + trozo   un trozo del texto (UTF-8)
     Un P1 con total 0 = «no hay nada (o no se comparte)».
 
+Imágenes (0.76, imagenes.py)
+    El receptor 0.76 contesta `X-LaZoo-KVM: 3`; solo con él el emisor manda o pide imágenes:
+        b"I1" + número_u32 + id_u32 + total_u32 + desde_u32 + trozo   un trozo de una imagen PNG
+        13 PIDE_TODO <I   como PIDE_PORTA, pero el receptor contesta con su texto (P1) o, si no
+                          tiene texto y sí una imagen, con la imagen (I1)
+    Hasta 20 MB de PNG. Al pasar, si no hay texto copiado y sí una imagen (una captura), va la
+    imagen; al volver, igual. Nunca se guarda en disco. Con un PC 0.75 (sin la cabecera 3), solo
+    texto, como antes.
+
 Fluidez (0.74, fluidez.py)
     El receptor 0.74 contesta al /kvm con la cabecera `X-LaZoo-KVM: 2`; solo entonces el emisor usa
         10 MOVER_T    <hhH>   dx dy + ms del emisor (16 bits): el receptor reparte el movimiento
@@ -85,6 +94,8 @@ RUTA = "/kvm"
 MAX_TRAMA = 40000      # 0.71: cabe un trozo del portapapeles
 TROZO_PORTA = 32000
 MAX_PORTA = 1_000_000  # bytes de texto (UTF-8) como mucho
+MAX_IMAGEN = 20_000_000  # 0.76: bytes de PNG como mucho (imagenes.MAX_IMAGEN)
+ESPERA_IMAGEN = 12.0   # 0.76: s como mucho trayendo una imagen al volver (mientras llegan trozos)
 ESPERA_PORTA = 1.5     # s que se espera el portapapeles del otro PC al volver
 LOTE = 0.004           # s: 0.74: tandas cada 4 ms (250 Hz), por plazos fijos
 LATIDO = 0.5           # s entre latidos del emisor
@@ -95,20 +106,23 @@ EMERGENCIA = "Ctrl+Alt+Esc"
 UA_PREFIJO = "LaZoo-PC/"
 ARCHIVO_PCS = "otros-pcs.json"
 MAX_PCS = 20
-VERSION = "0.75"
+VERSION = "0.76"
 
 MOVER, BOTON, RUEDA, TECLA, SOLTAR, LATIDO_EV, RESPUESTA, PIDE_PORTA = 1, 2, 3, 4, 5, 6, 7, 8
 PORTA = 9  # solo en tramas P1
+PIDE_TODO = 13  # 0.76: solo si el receptor dice X-LaZoo-KVM: 3
+IMAGEN = 14     # 0.76: solo en tramas I1
 MOVER_T, PIDE_MEDIDA, MEDIDA = 10, 11, 12  # 0.74: solo si el receptor dice X-LaZoo-KVM: 2
-KVM_VERSION = 2
+KVM_VERSION = 3  # 2 = 0.74 (MOVER_T, medida); 3 = 0.76 (imágenes)
 LATIDO_MEDIR = 0.1     # s entre latidos mientras se mide la fluidez (ida y vuelta)
 _FORMATOS = {MOVER: struct.Struct("<hh"), BOTON: struct.Struct("<BB"), RUEDA: struct.Struct("<Bh"),
              TECLA: struct.Struct("<HHB"), SOLTAR: struct.Struct(""), LATIDO_EV: struct.Struct("<I"),
-             RESPUESTA: struct.Struct("<I"), PIDE_PORTA: struct.Struct("<I"),
+             RESPUESTA: struct.Struct("<I"), PIDE_PORTA: struct.Struct("<I"), PIDE_TODO: struct.Struct("<I"),
              MOVER_T: struct.Struct("<hhH"), PIDE_MEDIDA: struct.Struct("<IB"), MEDIDA: struct.Struct("<IHHHHB")}
 _VERSIONES: dict[str, int] = {}  # id del PC → versión del canal que dijo al conectar
 CABECERA = b"K1"
 CABECERA_PORTA = b"P1"
+CABECERA_IMAGEN = b"I1"
 _PORTA = struct.Struct("<IIII")
 MAX_EVENTOS = 200
 
@@ -150,9 +164,16 @@ def codificar(numero: int, eventos: list[tuple]) -> bytes:
     return b"".join(partes)
 
 
-def codificar_porta(numero: int, ident: int, total: int, desde: int, trozo: bytes) -> bytes:
-    """Un trozo del portapapeles (texto UTF-8)."""
-    return CABECERA_PORTA + _PORTA.pack(numero & 0xFFFFFFFF, ident & 0xFFFFFFFF, total, desde) + bytes(trozo)
+def codificar_porta(numero: int, ident: int, total: int, desde: int, trozo: bytes, cabecera: bytes = CABECERA_PORTA) -> bytes:
+    """Un trozo del portapapeles (texto UTF-8, o 0.76 con CABECERA_IMAGEN, PNG)."""
+    return cabecera + _PORTA.pack(numero & 0xFFFFFFFF, ident & 0xFFFFFFFF, total, desde) + bytes(trozo)
+
+
+def trozos_imagen(ident: int, png: bytes | None) -> list[tuple]:
+    """0.76: (id, total, desde, trozo, CABECERA_IMAGEN) de una imagen PNG. Vacía o grande: []."""
+    if not png or len(png) > MAX_IMAGEN:
+        return []
+    return [(ident, len(png), i, png[i:i + TROZO_PORTA], CABECERA_IMAGEN) for i in range(0, len(png), TROZO_PORTA)]
 
 
 def trozos_porta(ident: int, texto: str | None) -> list[tuple[int, int, int, bytes]]:
@@ -188,7 +209,37 @@ class Juntar:
         return texto
 
 
+class JuntarImagen:
+    """0.76: junta los trozos I1 de una imagen (en memoria, nunca en disco). Devuelve los bytes al completarse."""
+
+    def __init__(self) -> None:
+        self.ident = -1
+        self.buf = bytearray()
+        self.total = 0
+
+    def trozo(self, ident: int, total: int, desde: int, datos: bytes) -> bytes | None:
+        if desde == 0:
+            self.ident, self.buf, self.total = ident, bytearray(), total
+        if ident != self.ident or total != self.total or desde != len(self.buf):
+            self.ident, self.buf, self.total = -1, bytearray(), 0
+            return None
+        self.buf += datos
+        if len(self.buf) < self.total:
+            return None
+        png = bytes(self.buf)
+        self.ident, self.buf, self.total = -1, bytearray(), 0
+        return png
+
+
 def decodificar(datos: bytes) -> tuple[int, list[tuple]]:
+    if datos.startswith(CABECERA_IMAGEN):  # 0.76
+        if len(datos) < 2 + _PORTA.size:
+            raise protocol.ProtocolError("trozo de imagen no válido")
+        numero, ident, total, desde = _PORTA.unpack_from(datos, 2)
+        trozo = bytes(datos[2 + _PORTA.size:])
+        if not 0 < total <= MAX_IMAGEN or not trozo or len(trozo) > TROZO_PORTA or desde + len(trozo) > total:
+            raise protocol.ProtocolError("trozo de imagen no válido")
+        return numero, [(IMAGEN, ident, total, desde, trozo)]
     if datos.startswith(CABECERA_PORTA):
         if len(datos) < 2 + _PORTA.size:
             raise protocol.ProtocolError("trozo de portapapeles no válido")
@@ -301,6 +352,8 @@ class Ajustes:
         self.portapapeles = True
         self.nombre = ""  # 0.72: nombre de este PC para los móviles («Renombrar» en el Panel)
         self.suavizar = True  # 0.74: «Suavizar ratón entre PCs» (lo aplica el PC controlado)
+        self.compartir_notas = True  # 0.76: «Compartir historial y notas entre mis dispositivos»
+        self.pc_id = ""  # 0.76: id fijo de este PC para el registro común de nombres (nombres.py)
         self._lock = threading.Lock()
 
     def archivo(self) -> Path:
@@ -316,12 +369,20 @@ class Ajustes:
         self.permitir = data.get("otro_pc_permitir") is True
         self.portapapeles = data.get("otro_pc_portapapeles") is not False
         self.suavizar = data.get("otro_pc_suavizar") is not False
+        self.compartir_notas = data.get("compartir_notas") is not False
         try:
             import aprobacion
 
             self.nombre = aprobacion.limpiar_apodo(data.get("nombre_este_pc") or "")
         except (ValueError, TypeError):
             self.nombre = ""
+        pid = str(data.get("pc_id") or "")
+        if re.fullmatch(r"[0-9a-f]{16}", pid):
+            self.pc_id = pid
+        else:
+            self.pc_id = secrets.token_hex(8)
+            self._guardar(pc_id=self.pc_id)
+        self._migrar_nombre()
         try:
             self.tecla = leer_tecla(str(data.get("otro_pc_tecla") or TECLA_DEFECTO))[2]
         except ErrorPC:
@@ -361,17 +422,74 @@ class Ajustes:
         self._guardar(otro_pc_suavizar=self.suavizar)
         return self.suavizar
 
+    def clave(self) -> str:
+        """0.76: la clave de este PC en el registro común de nombres."""
+        if not self.pc_id:
+            try:
+                data = json.loads(self.archivo().read_text(encoding="utf-8"))
+                pid = str(data.get("pc_id") or "") if isinstance(data, dict) else ""
+            except (OSError, ValueError):
+                pid = ""
+            if re.fullmatch(r"[0-9a-f]{16}", pid):
+                self.pc_id = pid
+            else:
+                self.pc_id = secrets.token_hex(8)
+                self._guardar(pc_id=self.pc_id)
+        return "pc:" + self.pc_id
+
+    def _migrar_nombre(self) -> None:
+        """0.75 → 0.76: el nombre puesto con «Renombrar este PC» pasa al registro común con la
+        hora de ajustes.json (si otro dispositivo lo renombró después, gana aquel)."""
+        try:
+            import nombres
+
+            if self.nombre and nombres.NOMBRES.fila("pc:" + self.pc_id) is None:
+                try:
+                    t = int(os.path.getmtime(self.archivo()) * 1000)
+                except OSError:
+                    t = nombres.ahora_ms()
+                nombres.NOMBRES.poner("pc:" + self.pc_id, self.nombre, t=t)
+            fila = nombres.NOMBRES.fila("pc:" + self.pc_id)
+            if fila is not None:  # el registro común manda (pudo cambiarse desde otro dispositivo)
+                self.nombre, self._nombre_t = fila["n"], fila["t"]
+        except (ValueError, OSError):
+            pass
+
+    def nombre_propio(self) -> str:
+        """El nombre común de este PC ("" = el del sistema)."""
+        try:
+            import nombres
+
+            fila = nombres.NOMBRES.fila(self.clave())
+        except Exception:  # noqa: BLE001
+            fila = None
+        if fila is None:
+            return self.nombre
+        if fila["n"] or fila["t"] > getattr(self, "_nombre_t", 0):
+            return fila["n"]  # el común (también vacío si lo borraron después desde otro sitio)
+        return self.nombre
+
     def set_nombre(self, texto: Any) -> str:
         """0.72: nombre corto de este PC para la fila de PCs del móvil (vacío = el del sistema).
-        Mismas reglas que «Renombrar»: 40 como mucho, sin HTML."""
+        Mismas reglas que «Renombrar»: 40 como mucho, sin HTML. 0.76: es el nombre común: lo
+        usan todos los PCs y móviles."""
         import aprobacion
+        import nombres
 
         try:
             self.nombre = aprobacion.limpiar_apodo(texto)
+            nombres.NOMBRES.poner(self.clave(), self.nombre)
+            fila = nombres.NOMBRES.fila(self.clave())
+            self._nombre_t = fila["t"] if fila else 0
         except ValueError as exc:
             raise ErrorPC(str(exc)) from exc
         self._guardar(nombre_este_pc=self.nombre)
         return self.nombre
+
+    def set_compartir_notas(self, on: Any) -> bool:
+        self.compartir_notas = on is True
+        self._guardar(compartir_notas=self.compartir_notas)
+        return self.compartir_notas
 
     def set_tecla(self, texto: str) -> str:
         mods, vk, limpio = leer_tecla(texto)
@@ -614,6 +732,54 @@ def poner_portapapeles(texto: str) -> bool:
         return False
 
 
+def _describir(png: bytes) -> str:
+    try:
+        import imagenes
+
+        return imagenes.describir(png)
+    except Exception:  # noqa: BLE001
+        return "imagen"
+
+
+def leer_imagen() -> bytes | None:
+    """0.76: PNG del portapapeles de este PC (solo al cambiar de PC). Nada se guarda en disco."""
+    try:
+        import imagenes
+
+        return imagenes.leer()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def poner_imagen(png: bytes) -> bool:
+    """0.76: deja la imagen del otro PC en el portapapeles de este. No va al historial (es texto)
+    ni se guarda en disco."""
+    try:
+        import imagenes
+
+        return imagenes.poner(png)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _en_hilo(fn: Callable[..., Any], *args: Any) -> None:
+    """Poner una imagen puede tardar (pasarla a CF_DIB en Windows): nunca en el hilo del ratón."""
+    threading.Thread(target=fn, args=args, name="lazo-imagen", daemon=True).start()
+
+
+def _apuntar_nota(texto: str) -> None:
+    """0.76: lo que pasa a otro PC al cambiar se apunta en las notas de este (así, aunque en
+    Wayland no se lean solas, lo copiado y pasado con LaZoo sale en el historial común)."""
+    if not texto or "unittest" in sys.modules or "pytest" in sys.modules:
+        return
+    try:
+        import control
+
+        control.clipboard_history(texto, auto=True)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # --- Receptor -------------------------------------------------------------------------------
 
 
@@ -622,11 +788,13 @@ class Receptor:
 
     def __init__(self, inyector: Any, marcar: Callable[[], None] | None = None,
                  porta_poner: Callable[[str], Any] | None = None, suavizar: bool = False,
-                 hilo_suave: bool = True) -> None:
+                 hilo_suave: bool = True, imagen_poner: Callable[[bytes], Any] | None = None) -> None:
         self.iny = inyector
         self.marcar = marcar or (lambda: None)
         self.porta_poner = porta_poner  # None = este PC no comparte el portapapeles
+        self.imagen_poner = imagen_poner  # 0.76: None = sin imágenes
         self.juntar = Juntar()
+        self.juntar_imagen = JuntarImagen()
         self.teclas: dict[tuple[int, int, int], tuple[int, int, bool]] = {}
         self.botones: set[int] = set()
         self.numero = -1
@@ -737,8 +905,13 @@ class Receptor:
                 continue
             if tipo == RESPUESTA:
                 continue
-            if tipo == PIDE_PORTA:
-                respuestas.append((PIDE_PORTA, ev[1]))  # bucle_receptor contesta con el portapapeles
+            if tipo in (PIDE_PORTA, PIDE_TODO):
+                respuestas.append((tipo, ev[1]))  # bucle_receptor contesta con el portapapeles
+                continue
+            if tipo == IMAGEN:  # 0.76: una imagen del otro PC (en memoria hasta ponerla)
+                png = self.juntar_imagen.trozo(*ev[1:])
+                if png and self.imagen_poner is not None:
+                    _en_hilo(self.imagen_poner, png)
                 continue
             if tipo == PORTA:
                 texto = self.juntar.trozo(*ev[1:])
@@ -805,7 +978,8 @@ class Receptor:
 
 def bucle_receptor(sock: socket.socket, receptor: Receptor, abrir: Callable[[bytes], bytes],
                    sellar: Callable[[bytes], bytes], vivo: Callable[[], bool], tocar: Callable[[], None] | None = None,
-                   espera: float | None = None, porta_leer: Callable[[], str] | None = None) -> str:
+                   espera: float | None = None, porta_leer: Callable[[], str] | None = None,
+                   imagen_leer: Callable[[], bytes | None] | None = None) -> str:
     """Lee tramas del emisor hasta que cierra, calla `espera` s (SIN_RESPUESTA) o deja de estar
     permitido. SIEMPRE suelta lo pulsado al salir. Devuelve el motivo."""
     sock.settimeout(SIN_RESPUESTA if espera is None else espera)
@@ -832,14 +1006,17 @@ def bucle_receptor(sock: socket.socket, receptor: Receptor, abrir: Callable[[byt
             respuestas = receptor.tratar(abrir(payload))
             if tocar is not None:
                 tocar()
-            pedidos = [r[1] for r in respuestas if r[0] == PIDE_PORTA]
-            respuestas = [r for r in respuestas if r[0] != PIDE_PORTA]
+            pedidos = [r for r in respuestas if r[0] in (PIDE_PORTA, PIDE_TODO)]
+            respuestas = [r for r in respuestas if r[0] not in (PIDE_PORTA, PIDE_TODO)]
             if respuestas:
                 numero += 1
                 protocol.ws_send(sock, 0x2, sellar(codificar(numero, respuestas)))
-            for ident in pedidos:  # 0.71: el emisor vuelve a su PC y se lleva este portapapeles
+            for tipo, ident in pedidos:  # 0.71: el emisor vuelve a su PC y se lleva este portapapeles
                 texto = porta_leer() if porta_leer is not None else ""
-                for trozo in trozos_porta(ident, texto):
+                trozos: list[tuple] = []
+                if tipo == PIDE_TODO and not texto and imagen_leer is not None:  # 0.76: o la imagen
+                    trozos = trozos_imagen(ident, imagen_leer())
+                for trozo in trozos or trozos_porta(ident, texto):
                     numero += 1
                     protocol.ws_send(sock, 0x2, sellar(codificar_porta(numero, *trozo)))
     except protocol.ProtocolError:
@@ -855,9 +1032,11 @@ class Recepcion:
     """El lado controlado: una sola conexión a la vez (la nueva sustituye a la vieja)."""
 
     def __init__(self, fabrica: Callable[[], Any] = inyector_para_este_pc,
-                 porta_leer: Callable[[], str] = leer_portapapeles, porta_poner: Callable[[str], Any] = poner_portapapeles) -> None:
+                 porta_leer: Callable[[], str] = leer_portapapeles, porta_poner: Callable[[str], Any] = poner_portapapeles,
+                 imagen_leer: Callable[[], bytes | None] = leer_imagen, imagen_poner: Callable[[bytes], Any] = poner_imagen) -> None:
         self.fabrica = fabrica
         self.porta_leer, self.porta_poner = porta_leer, porta_poner
+        self.imagen_leer, self.imagen_poner = imagen_leer, imagen_poner
         self._iny: Any = None
         self.lock = threading.Lock()
         self.actual: dict | None = None
@@ -897,7 +1076,7 @@ class Recepcion:
                 marcar: Callable[[], None] | None = None) -> str:
         comparte = AJUSTES.portapapeles
         receptor = Receptor(self.inyector(), marcar, porta_poner=self.porta_poner if comparte else None,
-                            suavizar=AJUSTES.suavizar)
+                            suavizar=AJUSTES.suavizar, imagen_poner=self.imagen_poner if comparte else None)
         yo = {"sock": sock, "who": who, "nombre": nombre}
         with self.lock:
             viejo, self.actual = self.actual, yo
@@ -911,7 +1090,8 @@ class Recepcion:
         fluidez.acelerar(True)  # 0.74: Python cambia de hilo cada 1 ms mientras te controlan
         try:
             motivo = bucle_receptor(sock, receptor, abrir, sellar, vivo, tocar,
-                                    porta_leer=(lambda: self.porta_leer() if AJUSTES.portapapeles else ""))
+                                    porta_leer=(lambda: self.porta_leer() if AJUSTES.portapapeles else ""),
+                                    imagen_leer=(lambda: self.imagen_leer() if AJUSTES.portapapeles else None))
         finally:
             fluidez.acelerar(False)
             receptor.cerrar()
@@ -940,7 +1120,11 @@ def nombre_de_este_pc() -> str:
 
 def user_agent() -> str:
     sistema = "Windows" if sys.platform == "win32" else "Linux" if sys.platform.startswith("linux") else "PC"
-    return f"{UA_PREFIJO}{VERSION} ({sistema}; {nombre_de_este_pc()})"
+    try:  # 0.76: el nombre común de este PC, si lo tiene; si no, el del sistema
+        nombre = limpiar_nombre(AJUSTES.nombre_propio()) or nombre_de_este_pc()
+    except Exception:  # noqa: BLE001
+        nombre = nombre_de_este_pc()
+    return f"{UA_PREFIJO}{VERSION} ({sistema}; {nombre})"
 
 
 def nombre_desde_ua(ua: str) -> str | None:
@@ -957,6 +1141,16 @@ class PCs:
     def __init__(self, carpeta: Path | None = None) -> None:
         self._carpeta = carpeta
         self.lock = threading.Lock()
+        self._nombres: Any = None
+
+    @property
+    def nombres(self) -> Any:
+        """0.76: el registro común de nombres (el de esta carpeta, en pruebas)."""
+        if self._nombres is None:
+            import nombres
+
+            self._nombres = nombres.de_carpeta(self._carpeta)
+        return self._nombres
 
     def archivo(self) -> Path:
         return (self._carpeta or _carpeta()) / ARCHIVO_PCS
@@ -982,31 +1176,34 @@ class PCs:
         recordar._write_private(self.archivo(), json.dumps(data, ensure_ascii=False, indent=1).encode())
 
     def listar(self) -> list[dict]:
+        """0.76: «nombre» es el nombre común (nombres.py) si alguien lo renombró; si no, el que
+        dio el otro PC al emparejar. «apodo» queda por compatibilidad (= nombre común o "")."""
         with self.lock:
             data = self._leer()
-        return [{"id": r["id"], "nombre": str(r.get("apodo") or r.get("nombre", ""))[:40], "apodo": str(r.get("apodo", ""))[:40],
-                 "nombre_pc": str(r.get("nombre", ""))[:40], "host": str(r.get("host", "")),
-                 "puerto": int(r.get("puerto") or 8787), "fp": str(r.get("fp", "")), "fecha": str(r.get("fecha", "")),
-                 "ultimo": r["id"] == data["ultimo"]} for r in data["pcs"]]
+        filas = []
+        for r in data["pcs"]:
+            try:
+                comun = self.nombres.nombre_dispositivo(r["id"], es_pc=True)
+                clave = self.nombres.clave_dispositivo(r["id"], es_pc=True)
+            except Exception:  # noqa: BLE001
+                comun, clave = "", ""
+            filas.append({"id": r["id"], "nombre": (comun or str(r.get("nombre", "")))[:40], "apodo": comun[:40],
+                          "nombre_pc": str(r.get("nombre", ""))[:40], "host": str(r.get("host", "")),
+                          "puerto": int(r.get("puerto") or 8787), "fp": str(r.get("fp", "")), "fecha": str(r.get("fecha", "")),
+                          "ultimo": r["id"] == data["ultimo"], "clave": clave})
+        return filas
 
     def renombrar(self, pid: str, texto: Any) -> dict:
-        """0.71: un nombre propio para ese PC (vacío = el suyo). Solo en este PC."""
-        import aprobacion
-
+        """0.71: un nombre propio para ese PC (vacío = el suyo). 0.76: es el nombre común de ese
+        PC: si ya se sincronizó con él, lo verán igual todos los PCs y móviles."""
+        with self.lock:
+            existe = any(r["id"] == pid for r in self._leer()["pcs"])
+        if not existe:
+            raise ErrorPC("Ese PC ya no está en la lista")
         try:
-            apodo = aprobacion.limpiar_apodo(texto)
+            self.nombres.renombrar_dispositivo(pid, texto, es_pc=True)
         except ValueError as exc:
             raise ErrorPC(str(exc)) from exc
-        with self.lock:
-            data = self._leer()
-            fila = next((r for r in data["pcs"] if r["id"] == pid), None)
-            if fila is None:
-                raise ErrorPC("Ese PC ya no está en la lista")
-            if apodo:
-                fila["apodo"] = apodo
-            else:
-                fila.pop("apodo", None)
-            self._escribir(data)
         return next(r for r in self.listar() if r["id"] == pid)
 
     def buscar(self, pid: str | None) -> dict | None:
@@ -1036,8 +1233,11 @@ class PCs:
         with self.lock:
             data = self._leer()
             mismo = [r for r in data["pcs"] if r.get("host") == nueva["host"] and int(r.get("puerto") or 0) == nueva["puerto"]]
-            if mismo and mismo[-1].get("apodo"):
-                nueva["apodo"] = str(mismo[-1]["apodo"])[:40]  # 0.71: al volver a añadirlo, conserva su nombre propio
+            if mismo:
+                try:  # 0.71: al volver a añadirlo, conserva su nombre (0.76: el común)
+                    self.nombres.copiar(mismo[-1]["id"], nueva["id"])
+                except Exception:  # noqa: BLE001
+                    pass
             data["pcs"] = [r for r in data["pcs"] if r not in mismo]
             data["pcs"] = (data["pcs"] + [nueva])[-MAX_PCS:]
             data["ultimo"] = nueva["id"]
@@ -1115,6 +1315,45 @@ def _post(ip: str, puerto: int, ruta: str, cuerpo: dict, timeout: float = 6.0) -
         raise ErrorPC(f"No llego al otro PC ({ip}:{puerto}): ¿está LaZoo abierto allí?") from exc
     finally:
         con.close()
+
+
+def peticion(fila: dict, ruta: str, cuerpo: dict, kd: bytes, timeout: float = 8.0,
+             max_resp: int = 4_000_000) -> tuple[int, dict]:
+    """0.76: petición de este PC a otro como un dispositivo aprobado allí: firmada con la clave de
+    ese dispositivo (X-Lazo-*, como el móvil) y con el cuerpo y la respuesta sellados (LZ2). Solo
+    a la red local. La usa sincro.py. Devuelve (código, JSON)."""
+    import http.client
+
+    puerto = int(fila["puerto"])
+    ip = ip_de_lan(str(fila["host"]), puerto)
+    firma_k, sello = claves(kd)
+    raw = protocol.seal(json.dumps(cuerpo, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), sello)
+    stamp = int(time.time() * 1000)
+    nonce = secrets.token_hex(16)
+    cabeceras = {"Content-Type": "application/octet-stream", "User-Agent": user_agent(), "X-Seal": "1",
+                 protocol.H_ID: str(fila["id"]), protocol.H_T: str(stamp), protocol.H_N: nonce,
+                 protocol.H_S: protocol.sign_request(firma_k, "POST", ruta, stamp, nonce, len(raw))}
+    con = http.client.HTTPConnection(ip, puerto, timeout=timeout)
+    try:
+        con.request("POST", ruta, body=raw, headers=cabeceras)
+        res = con.getresponse()
+        datos = res.read(max_resp + 1)
+    except OSError as exc:
+        raise ErrorPC(f"No llego al otro PC ({fila['host']}:{puerto}): ¿está LaZoo abierto allí?") from exc
+    finally:
+        con.close()
+    if len(datos) > max_resp:
+        raise ErrorPC("El otro PC contestó demasiado")
+    if datos.startswith(protocol.MAGIC):
+        try:
+            datos = protocol.open_sealed(datos, sello)
+        except protocol.ProtocolError as exc:
+            raise ErrorPC("La respuesta del otro PC no está sellada con su clave") from exc
+    try:
+        data = json.loads(datos.decode("utf-8") or "{}")
+    except (ValueError, UnicodeError):
+        data = {}
+    return res.status, data if isinstance(data, dict) else {}
 
 
 class Emparejar:
@@ -1315,12 +1554,17 @@ class Control:
         # 0.71: portapapeles. Lo que sale (trozos P1) y lo que se espera al volver.
         self.porta_leer: Callable[[], str] = leer_portapapeles
         self.porta_poner: Callable[[str], Any] = poner_portapapeles
+        self.imagen_leer: Callable[[], bytes | None] = leer_imagen  # 0.76
+        self.imagen_poner: Callable[[bytes], Any] = poner_imagen
+        self.apuntar: Callable[[str], Any] = _apuntar_nota
         self._porta_salida: list[tuple] = []
         self._porta_id = 0
         self._porta_espera: tuple[int, threading.Event, list] | None = None
         self._juntar = Juntar()
+        self._juntar_imagen = JuntarImagen()
         # 0.74: fluidez. v2 = el receptor entiende MOVER_T (con la hora); medida = prueba en curso.
         self.v2 = False
+        self.v3 = False  # 0.76: el receptor entiende imágenes (I1, PIDE_TODO)
         self._t_mov = 0.0
         self.medida: fluidez.Medida | None = None
         self._acelerado = False
@@ -1490,7 +1734,9 @@ class Control:
                 return self.ver()
             sesion = object()
             self._sock, self._sello, self._sesion = sock, sello, sesion
-            self.v2 = _VERSIONES.get(fila["id"], 1) >= KVM_VERSION
+            version = _VERSIONES.get(fila["id"], 1)
+            self.v2 = version >= 2
+            self.v3 = version >= 3
             if not self._acelerado:
                 fluidez.acelerar(True)  # 0.74: el gancho no espera a que otro hilo suelte Python
                 self._acelerado = True
@@ -1499,6 +1745,7 @@ class Control:
                 self._cola = []
                 self._porta_salida = []
             self._juntar = Juntar()
+            self._juntar_imagen = JuntarImagen()
             self.ultimo_pong = self.reloj()
             threading.Thread(target=self._leer, args=(sesion, sock, sello), name="lazo-kvm-leer", daemon=True).start()
             threading.Thread(target=self._enviar, args=(sesion, sock, sello), name="lazo-kvm-enviar", daemon=True).start()
@@ -1507,6 +1754,8 @@ class Control:
                 raise ErrorPC("No pude capturar el ratón y el teclado de este PC")
             self.estado = "controlando"
             self.pcs.set_ultimo(fila["id"])
+        nombre = fila.get("nombre") or fila["host"]
+        texto = ""
         if AJUSTES.portapapeles:  # 0.71: lo copiado aquí se pega allí
             texto = self.porta_leer()
             if texto and len(texto.encode("utf-8")) <= MAX_PORTA:
@@ -1514,9 +1763,28 @@ class Control:
                     self._porta_id += 1
                     self._porta_salida = trozos_porta(self._porta_id, texto)
                 self._despertar.set()
-        nombre = fila.get("nombre") or fila["host"]
+                self.apuntar(texto)
         self._avisar("controlando", f"Controlando «{nombre}». {AJUSTES.tecla} vuelve a este PC; {EMERGENCIA} suelta siempre.")
+        if AJUSTES.portapapeles and not texto and self.v3:
+            # 0.76: sin texto, la imagen (una captura), en otro hilo: no frena el cambio
+            _en_hilo(self._mandar_imagen, self._sesion, nombre)
         return self.ver()
+
+    def _mandar_imagen(self, sesion: object, nombre: str) -> None:
+        png = self.imagen_leer()
+        if not png or self._sesion is not sesion:
+            return
+        trozos = trozos_imagen(0, png)
+        if not trozos:
+            self._avisar("controlando", f"Controlando «{nombre}». La imagen copiada pasa de 20 MB: no se pasa.")
+            return
+        with self._buf:
+            if self._porta_salida:  # ya va un texto
+                return
+            self._porta_id += 1
+            self._porta_salida = [(self._porta_id, *t[1:]) for t in trozos]
+        self._despertar.set()
+        self._avisar("controlando", f"Controlando «{nombre}». Pasa la {_describir(png)} del portapapeles (no se guarda en disco).")
 
     def parar(self, motivo: str = "Has vuelto a este PC.", traer: bool = False) -> bool:
         """Vuelve a este PC. Con `traer` (la tecla rápida), antes de cerrar se trae el portapapeles
@@ -1534,12 +1802,17 @@ class Control:
                 self.estado = "volviendo"
                 with self._buf:
                     self._porta_id += 1
-                    espera = (self._porta_id, threading.Event(), [None])
+                    espera = (self._porta_id, threading.Event(), [None], [0.0])
                     self._porta_espera = espera
-                self._evento((PIDE_PORTA, espera[0]))
+                self._evento((PIDE_TODO if self.v3 else PIDE_PORTA, espera[0]))
         if espera is not None:
-            if espera[1].wait(ESPERA_PORTA) and espera[2][0]:
-                self.porta_poner(espera[2][0])
+            llegado = self._esperar_porta(espera)
+            if isinstance(llegado, str) and llegado:
+                self.porta_poner(llegado)
+            elif isinstance(llegado, bytes) and llegado:  # 0.76: una imagen del otro PC
+                _en_hilo(self.imagen_poner, llegado)
+                if motivo:
+                    motivo = f"{motivo} Tienes en el portapapeles la {_describir(llegado)} del otro PC (no se guarda en disco)."
             with self._buf:
                 self._porta_espera = None
         with self.lock:
@@ -1565,6 +1838,20 @@ class Control:
         if motivo:
             self._avisar("libre", motivo)
         return True
+
+    def _esperar_porta(self, espera: tuple) -> Any:
+        """Espera lo que manda el otro PC al volver: ESPERA_PORTA s, y mientras sigan llegando trozos
+        de una imagen, hasta ESPERA_IMAGEN s."""
+        inicio = time.monotonic()  # no self.reloj: en las pruebas puede estar parado
+        while True:
+            if espera[1].wait(ESPERA_PORTA / 3 if len(espera) > 3 else ESPERA_PORTA):
+                return espera[2][0]
+            ahora = time.monotonic()
+            if len(espera) < 4:
+                return None
+            ultimo = espera[3][0] or inicio
+            if ahora - ultimo > ESPERA_PORTA or ahora - inicio > ESPERA_IMAGEN:
+                return None
 
     # Hilos de la conexión ---------------------------------------------------------------------
     def _enviar(self, sesion: object, sock: socket.socket, sello: bytes) -> None:
@@ -1652,6 +1939,16 @@ class Control:
                         if texto is not None and espera is not None and espera[0] == ev[1]:
                             espera[2][0] = texto
                             espera[1].set()
+                    if ev[0] == IMAGEN:  # 0.76
+                        self.ultimo_pong = self.reloj()
+                        png = self._juntar_imagen.trozo(*ev[1:])
+                        espera = self._porta_espera
+                        if espera is not None and espera[0] == ev[1]:
+                            if len(espera) > 3:
+                                espera[3][0] = time.monotonic()
+                            if png is not None:
+                                espera[2][0] = png
+                                espera[1].set()
         except (OSError, EOFError, ValueError):
             pass
         if self._sesion is sesion:
@@ -2091,16 +2388,26 @@ def _nombre_sistema() -> str:
 
 def para_movil() -> dict:
     """0.72: lo que el móvil (aprobado, por /api/status sellado) necesita para nombrar los PCs:
-    el nombre propio de este y los puestos con «Renombrar» a los de «Controlar otro PC», por
-    IP:puerto (la misma dirección con la que la App los guarda)."""
+    el nombre propio de este y los de los demás PCs por IP:puerto (la misma dirección con la que
+    la App los guarda). 0.76: son los nombres comunes (nombres.py), los mismos en todos los PCs."""
     apodos = {}
+    try:
+        import nombres
+
+        apodos.update(nombres.NOMBRES.hosts())
+    except Exception:  # noqa: BLE001
+        pass
     try:
         for pc in PCS.listar():
             if pc.get("apodo") and pc.get("host"):
                 apodos[f"{pc['host']}:{pc['puerto']}"] = pc["apodo"]
     except Exception:  # noqa: BLE001
-        apodos = {}
-    return {"pc_nombre": AJUSTES.nombre, "pcs_apodos": dict(list(apodos.items())[:50])}
+        pass
+    try:
+        propio = AJUSTES.nombre_propio()
+    except Exception:  # noqa: BLE001
+        propio = AJUSTES.nombre
+    return {"pc_nombre": propio, "pcs_apodos": dict(list(apodos.items())[:50])}
 
 
 def estado() -> dict:
@@ -2108,7 +2415,8 @@ def estado() -> dict:
     ok, motivo = CONTROL.puede_mandar()
     cap = CONTROL.captura
     data = {"permitir": AJUSTES.permitir, "tecla": AJUSTES.tecla, "emergencia": EMERGENCIA,
-            "portapapeles": AJUSTES.portapapeles, "nombre_este": AJUSTES.nombre, "nombre_sistema": _nombre_sistema(),
+            "portapapeles": AJUSTES.portapapeles, "nombre_este": AJUSTES.nombre_propio(), "nombre_sistema": _nombre_sistema(),
+            "compartir_notas": AJUSTES.compartir_notas, "clave_este": AJUSTES.clave(), "sincro": _sincro_ver(),
             "suavizar": AJUSTES.suavizar, "fluidez": PRUEBA.ver(),
             "puede_mandar": ok, "motivo": motivo, "pcs": PCS.listar(), "control": CONTROL.ver(),
             "emparejar": EMPAREJAR.ver(), "recibiendo": RECEPCION.nombre_actual(),
@@ -2116,6 +2424,15 @@ def estado() -> dict:
     if sys.platform.startswith("linux"):
         data.update(diagnostico_linux())
     return data
+
+
+def _sincro_ver() -> dict:
+    try:
+        import sincro
+
+        return sincro.SINCRO.ver()
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 _DIAG: list = [0.0, {}]

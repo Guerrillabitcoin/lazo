@@ -42,7 +42,7 @@ LOCAL = {"Content-Type": "application/json", "X-Lazo-Local": "1"}
 class PanelTarjetas(unittest.TestCase):
     def test_css_sin_columnas_de_un_caracter(self):
         self.assertNotIn("#pc-lista li { grid-template-columns", MESA, "la rejilla que partía la huella letra a letra")
-        self.assertIn('<ul id="pc-lista" class="tarjetas">', MESA)
+        self.assertNotIn('id="pc-lista"', MESA, "0.76: los PCs van en la lista de Dispositivos")
         self.assertIn('<ul id="devs" class="tarjetas">', MESA)
         css = MESA[MESA.index(".tarjetas {"):MESA.index("</style>")]
         self.assertIn("text-overflow: ellipsis", css)
@@ -79,7 +79,7 @@ class PanelTarjetas(unittest.TestCase):
                     m = re.search(r'data-medidas="([^"]*)"', dom)
                     self.assertIsNotNone(m, "el Panel no se pintó")
                     d = json.loads(h.unescape(m.group(1)))
-                    self.assertEqual(d["tarjetas"], 4)
+                    self.assertEqual(d["tarjetas"], 3)  # 0.76: el PC aprobado y el de la lista son el mismo: una tarjeta
                     self.assertEqual(d["malos"], [], f"a {ancho} px")
                     for texto, w, _h in d["medidas"]:
                         if texto.startswith("huella") or ":8787" in texto:
@@ -839,11 +839,11 @@ class BandejaLinux(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.75")
-        self.assertEqual(pcapc.VERSION, "0.75")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.75")
-        self.assertIn('<p class="ver">0.75', MESA)
-        for ident in ('id="pc-porta"', 'id="pc-arreglar"', 'id="pc-diag"', "/api/dispositivos/renombrar"):
+        self.assertEqual(lazo.VERSION, "0.76")
+        self.assertEqual(pcapc.VERSION, "0.76")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.76")
+        self.assertIn('<p class="ver">0.76', MESA)
+        for ident in ('id="pc-porta"', 'id="pc-arreglar"', 'id="pc-diag"', '"/api/nombre"'):  # 0.76: el nombre común
             self.assertIn(ident, MESA)
 
     def test_apk_sin_cambios(self):
@@ -854,7 +854,8 @@ class Entrega(unittest.TestCase):
         import ast
 
         permitidos = set(sys.stdlib_module_names) | {"pcapc", "sinventana", "linux_kvm", "control", "ydo", "aprobacion", "recordar", "protocol",
-                                                    "fluidez"}  # 0.74: fluidez.py (también solo stdlib)
+                                                    "fluidez",  # 0.74: fluidez.py (también solo stdlib)
+                                                    "nombres", "sincro", "imagenes"}  # 0.76 (también solo stdlib)
         for nombre in ("linux_kvm.py", "pcapc.py"):
             arbol = ast.parse((ROOT / nombre).read_text(encoding="utf-8"))
             for nodo in ast.walk(arbol):

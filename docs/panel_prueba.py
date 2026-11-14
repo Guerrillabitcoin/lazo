@@ -2,7 +2,7 @@
 
 Uso: python3 docs/panel_prueba.py RAIZ DESTINO
 Copia static/ de RAIZ a DESTINO, cambia fetch() por respuestas fijas (dos PCs, un móvil y un PC
-aprobados) y, al terminar de pintar, apunta en <body data-medidas> el tamaño de cada línea de
+aprobados; 0.76: el PC aprobado es el mismo que el primero de la lista y sale una vez) y, al terminar de pintar, apunta en <body data-medidas> el tamaño de cada línea de
 tarjeta. test_v071.py lo abre con Chrome a 460 px y a 1400 px y comprueba que ninguna línea
 sale letra a letra. Los nombres, IPs y huellas son inventados.
 """
@@ -17,14 +17,16 @@ DATOS = {
     "diagnostico": "Que otro PC controle este: xtest (Xorg con XTest (sin permisos extra).) · Controlar otro desde este: x11 (Xorg: XGrabKey y XGrabKeyboard/XGrabPointer (sin permisos extra).)",
     "control": {"estado": "libre", "nombre": "", "id": "", "mensaje": ""}, "emparejar": {"estado": "nada"},
     "pcs": [{"id": "a1b2c3d4e5f6a7b8", "nombre": "Portátil del salón", "apodo": "Portátil del salón", "nombre_pc": "DESKTOP-7Q2K9LM",
-             "host": "192.168.1.144", "puerto": 8787, "fp": "23DF-2756-7B7A-91C2-0D4E-55AB", "fecha": "2026-11-13 01:20", "ultimo": True},
+             "host": "192.168.1.144", "puerto": 8787, "fp": "23DF-2756-7B7A-91C2-0D4E-55AB", "fecha": "2026-11-13 01:20", "ultimo": True, "clave": "pc:5e1f0a9b3c7d2e48"},
             {"id": "b1b2c3d4e5f6a7b8", "nombre": "PC-ESTUDIO-CON-UN-NOMBRE-MUY-LARGO-DE-VERDAD", "apodo": "", "nombre_pc": "PC-ESTUDIO-CON-UN-NOMBRE-MUY-LARGO-DE-VERDAD",
-             "host": "192.168.1.25", "puerto": 8787, "fp": "AB12-CD34-EF56-7890-1122-3344", "fecha": "2026-11-12 22:05", "ultimo": False}]},
+             "host": "192.168.1.25", "puerto": 8787, "fp": "AB12-CD34-EF56-7890-1122-3344", "fecha": "2026-11-12 22:05", "ultimo": False, "clave": "pc:77aa0c1d2e3f4a5b"}],
+    "compartir_notas": True, "sincro": {"a1b2c3d4e5f6a7b8": {"estado": "ok", "mensaje": ""},
+      "b1b2c3d4e5f6a7b8": {"estado": "antiguo", "mensaje": "Tiene una versión anterior de LaZoo: actualízalo para compartir notas y nombres."}}},
   "/api/dispositivos": {"devices": [
      {"id": "c1c2c3c4c5c6c7c8", "short": "c1c2", "state": "aprobado", "label": "Móvil de casa", "tipo": "Android · App LaZoo", "apodo": "Móvil de casa",
-      "ip": "192.168.1.33", "left": 0, "ago": 5, "fp": "9F3A-77B1-0C2D-E4F5-6A7B-8C9D", "fecha": "2026-11-10", "recordado": True, "duplicado": False},
+      "ip": "192.168.1.33", "left": 0, "ago": 5, "fp": "9F3A-77B1-0C2D-E4F5-6A7B-8C9D", "fecha": "2026-11-10", "recordado": True, "duplicado": False, "clave": "dev:c1c2c3c4c5c6c7c8", "es_pc": False},
      {"id": "d1d2d3d4d5d6d7d8", "short": "d1d2", "state": "pendiente", "label": "PC · DESKTOP-7Q2K9LM", "tipo": "PC · DESKTOP-7Q2K9LM", "apodo": "",
-      "ip": "192.168.1.144", "left": 42, "ago": 1, "fp": "23DF-2756-7B7A-91C2-0D4E-55AB", "fecha": "", "recordado": False, "duplicado": False}], "me": ""},
+      "ip": "192.168.1.144", "left": 42, "ago": 1, "fp": "23DF-2756-7B7A-91C2-0D4E-55AB", "fecha": "", "recordado": False, "duplicado": False, "clave": "pc:5e1f0a9b3c7d2e48", "es_pc": True}], "me": ""},
 }
 STUB = """<script>
 window.__datos = %s;
@@ -37,14 +39,14 @@ window.fetch = async (url, opts) => {
 };
 window.addEventListener("load", () => setTimeout(() => {
   const malos = [], medidas = [];
-  for (const el of document.querySelectorAll("#pc-lista .t-nombre, #pc-lista .t-linea, #devs .t-nombre, #devs .t-linea, #pc-lista button, #devs button")) {
+  for (const el of document.querySelectorAll("#devs .t-nombre, #devs .t-linea, #devs button")) {
     const r = el.getBoundingClientRect(), fs = parseFloat(getComputedStyle(el).fontSize) || 14;
     const lineas = Math.round(r.height / (fs * 1.25));
     medidas.push([el.textContent.slice(0, 30), Math.round(r.width), Math.round(r.height)]);
     if (el.textContent.length > 3 && r.width < 40) malos.push(["estrecho", el.textContent, r.width]);
-    if (el.tagName !== "BUTTON" && r.height > fs * 2.2) malos.push(["varias lineas", el.textContent, r.height]);
+    if (el.tagName !== "BUTTON" && !el.classList.contains("aviso") && r.height > fs * 2.2) malos.push(["varias lineas", el.textContent, r.height]);  // 0.76: un aviso sí puede ocupar dos líneas
   }
-  const n = document.querySelectorAll("#pc-lista li.tarjeta").length + document.querySelectorAll("#devs li.tarjeta").length;
+  const n = document.querySelectorAll("#devs li.tarjeta").length;
   document.body.setAttribute("data-medidas", JSON.stringify({ tarjetas: n, malos, medidas }));
 }, 800));
 </script>"""

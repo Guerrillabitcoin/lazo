@@ -323,7 +323,7 @@ class PuntaAPunta(unittest.TestCase):
         who, _ = self.emparejar()
         ctl = pcapc.Control(self.pcs, fabrica=CapturaFalsa)
         ctl.iniciar(who)
-        self.assertEqual(pcapc._VERSIONES.get(who), 2)
+        self.assertEqual(pcapc._VERSIONES.get(who), pcapc.KVM_VERSION)  # 0.76: 3 (imágenes)
         self.assertTrue(ctl.v2)
         self.assertTrue(esperar(lambda: pcapc.RECEPCION.nombre_actual() != ""))
 
@@ -453,8 +453,8 @@ class AjusteYPanel(unittest.TestCase):
         self.assertIn('pcCall("suavizar"', MESA)
         self.assertIn('pcCall("fluidez"', MESA)
         self.assertIn("function pintaFluidez", MESA)
-        i = MESA.index('id="otro-pc"')
-        self.assertGreater(MESA.index('id="pc-fluidez-ok"'), i, "la prueba va en la sección PC a PC")
+        i = MESA.index('id="pc-avanzado"')  # 0.76: «Avanzado» de Dispositivos
+        self.assertGreater(MESA.index('id="pc-fluidez-ok"'), i, "la prueba va en lo avanzado de PC a PC")
 
     def test_servidor(self):
         self.assertIn('self.send_header("X-LaZoo-KVM", str(pcapc.KVM_VERSION))', LAZO)
@@ -481,10 +481,10 @@ class AjusteYPanel(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.75")
-        self.assertEqual(pcapc.VERSION, "0.75")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.75")
-        self.assertIn('<p class="ver">0.75', MESA)
+        self.assertEqual(lazo.VERSION, "0.76")
+        self.assertEqual(pcapc.VERSION, "0.76")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.76")
+        self.assertIn('<p class="ver">0.76', MESA)
 
     def test_apk_sin_cambios(self):
         texto = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")

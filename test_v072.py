@@ -169,7 +169,7 @@ class PanelSinPegarSolo(unittest.TestCase):
         self.assertIn("if (editable(event.target)) return;", pegar[:300])
 
     def test_refresco_con_firma(self):
-        for lista in ('$("#devs")', '$("#pc-lista")', "pintaLista(pin,", "pintaLista(clips,", "pintaLista(files,", "pintaLista(urls,", "pintaLista(lista,"):
+        for lista in ('$("#devs")', "pintaLista(pin,", "pintaLista(clips,", "pintaLista(files,", "pintaLista(urls,", "pintaLista(lista,"):
             self.assertIn(lista if lista.startswith("pintaLista") else f"pintaLista({lista}", MESA)
         self.assertNotIn('$("#pc-lista").replaceChildren', MESA)
         self.assertNotIn('$("#devs").replaceChildren', MESA)
@@ -216,9 +216,10 @@ class PanelEnChrome(unittest.TestCase):
             pg.on("pageerror", lambda e: errores.append(str(e)))
             await pg.goto(self.url)
             await asyncio.sleep(1.2)
-            await pg.evaluate("window.__li = document.querySelector('#pc-lista li'); window.__dev = document.querySelector('#devs li');")
+            await pg.evaluate("window.__li = document.querySelector('#devs li'); window.__dev = document.querySelector('#devs li:last-child');")
 
             # Escribir la IP letra a letra mientras el Panel refresca (antes: un clic por letra).
+            await pg.click("#pc-anadir-caja summary")  # 0.76: «Añadir PC» plegado en Dispositivos
             await pg.click("#pc-destino")
             await pg.keyboard.type("192.168.1.20:8787", delay=180)  # ~3 s: dos refrescos o más
             self.assertEqual(await pg.input_value("#pc-destino"), "192.168.1.20:8787")
@@ -230,8 +231,8 @@ class PanelEnChrome(unittest.TestCase):
             llamadas = await pg.evaluate("window.__llamadas")
             self.assertNotIn(["/api/clipboard", "POST"], llamadas, "pegar en la IP no guarda una nota")
             self.assertEqual(await pg.evaluate("window.__leidas"), 0, "el Panel no lee el portapapeles solo")
-            self.assertTrue(await pg.evaluate("window.__li === document.querySelector('#pc-lista li')"), "la lista no se rehízo sin cambios")
-            self.assertTrue(await pg.evaluate("window.__dev === document.querySelector('#devs li')"))
+            self.assertTrue(await pg.evaluate("window.__li === document.querySelector('#devs li')"), "la lista no se rehízo sin cambios")
+            self.assertTrue(await pg.evaluate("window.__dev === document.querySelector('#devs li:last-child')"))
 
             # Seleccionar la IP propia: no se pierde aunque cambien los datos; luego se actualiza.
             await pg.evaluate("""(() => { const s = document.querySelector('#pc-pin .sel'); const r = document.createRange();
@@ -254,7 +255,7 @@ class PanelEnChrome(unittest.TestCase):
             # Con datos nuevos la lista sí se repinta.
             await pg.evaluate("window.__datos['/api/pcapc'].pcs[0].apodo = window.__datos['/api/pcapc'].pcs[0].nombre = 'Nuevo nombre'")
             await asyncio.sleep(2.0)
-            self.assertIn("Nuevo nombre", await pg.text_content("#pc-lista"))
+            self.assertIn("Nuevo nombre", await pg.text_content("#devs"))
             self.assertEqual(errores, [])
             await b.close()
 
@@ -350,12 +351,12 @@ class RatonDeSerieEnChrome(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.75")
-        self.assertEqual(pcapc.VERSION, "0.75")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.75")
-        self.assertIn('<p class="ver">0.75', MESA)
-        self.assertIn("<title>LaZoo 0.75</title>", HTML)
-        self.assertIn('const PAGE_VERSION = "0.75"', JS)
+        self.assertEqual(lazo.VERSION, "0.76")
+        self.assertEqual(pcapc.VERSION, "0.76")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.76")
+        self.assertIn('<p class="ver">0.76', MESA)
+        self.assertIn("<title>LaZoo 0.76</title>", HTML)
+        self.assertIn('const PAGE_VERSION = "0.76"', JS)
 
     def test_apk_sin_cambios(self):
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")

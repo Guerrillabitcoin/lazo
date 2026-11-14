@@ -695,6 +695,15 @@ button[data-cursor] { min-height: 44px; }
 .pcs-lista li .ir small { display: block; color: #c4b8aa; font-weight: 400; }
 .pcs-lista li .ir.fuera { opacity: 0.6; }
 .pcs-lista li .quitar { flex: none; width: 44px; }
+/* 0.76: lápiz para renombrar (nombre común en todos los PCs y móviles) */
+.pcs-fila { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pcs-fila .hint { flex: 1; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+button.lapiz { flex: none; width: 44px; min-height: 44px; padding: 0; font-size: 18px; }
+.pcs-lista li .lapiz { width: 44px; }
+.nombre-box { display: grid; gap: 10px; border-color: #5a4a3a; }
+.nombre-box input { width: 100%; min-height: 46px; font-size: 16px; padding: 0 12px; border-radius: 10px; border: 1px solid #5a4a3a; background: #141210; color: #fff; box-sizing: border-box; }
+.nombre-error { color: #ff8a80; }
+.nombre-ok { background: #e07a3d; color: #1a1410; font-weight: 650; }
 /* 0.69: con el teclado abierto la vista se queda baja; si tiene varias cajas («Pasar por wifi»,
    Sistema…) no se encogen (se encimaban y las notas no se veían): la vista hace scroll.
    Una caja sola (el ratón) sigue ocupando todo el alto. */

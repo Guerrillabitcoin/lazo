@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.75</title>
-    <link rel="stylesheet" href="/app.css?v=0.75" />
+    <title>LaZoo 0.76</title>
+    <link rel="stylesheet" href="/app.css?v=0.76" />
     <link rel="icon" type="image/svg+xml" href="/img/infinito-naranja.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/img/icono-192.png" />
     <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
@@ -20,7 +20,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.75</p>
+          <p class="ver">0.76</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -464,7 +464,10 @@
         <div id="pcs" class="confirm pcs" hidden role="dialog" aria-modal="true" aria-labelledby="pcs-title">
           <div class="confirm-box">
             <p id="pcs-title" class="confirm-title">Este PC</p>
-            <p id="pcs-este" class="hint"></p>
+            <div class="pcs-fila"><p id="pcs-este" class="hint"></p>
+              <button id="pcs-este-lapiz" class="lapiz" type="button" aria-label="Renombrar este PC" title="Renombrar este PC (para todos tus dispositivos)">✎</button></div>
+            <div class="pcs-fila"><p id="pcs-movil" class="hint">Este móvil</p>
+              <button id="pcs-movil-lapiz" class="lapiz" type="button" aria-label="Renombrar este móvil" title="Renombrar este móvil (para todos tus PCs)">✎</button></div>
             <div id="pcs-otros-box" hidden>
               <p class="pcs-sub">Otros PC</p>
               <ul id="pcs-otros" class="pcs-lista"></ul>
@@ -473,6 +476,18 @@
             <p id="pcs-solo-app" class="hint" hidden>Para tener varios PC en la lista hace falta la app LaZoo. En el navegador, abre la dirección del otro PC.</p>
             <button id="pcs-salir" type="button" class="lock-red">Salir de este PC</button>
             <button id="pcs-cerrar" type="button">Cerrar</button>
+          </div>
+        </div>
+        <div id="nombre-dlg" class="confirm" hidden role="dialog" aria-modal="true" aria-labelledby="nombre-dlg-title">
+          <div class="confirm-box nombre-box">
+            <p id="nombre-dlg-title" class="confirm-title">Renombrar</p>
+            <p class="hint">Lo verán así todos tus PCs y móviles. Vacío = el de siempre.</p>
+            <input id="nombre-dlg-input" type="text" maxlength="40" autocomplete="off" spellcheck="false" enterkeyhint="done" />
+            <p id="nombre-dlg-error" class="hint nombre-error" hidden></p>
+            <div class="split">
+              <button id="nombre-dlg-no" type="button">Cancelar</button>
+              <button id="nombre-dlg-ok" type="button" class="nombre-ok">Guardar</button>
+            </div>
           </div>
         </div>
         <div id="confirm" class="confirm" hidden role="dialog" aria-modal="true" aria-labelledby="confirm-title">
@@ -487,8 +502,8 @@
         </div>
       </section>
     </main>
-    <script src="/logo.js?v=0.75"></script>
-    <script src="/seal.js?v=0.75"></script>
-    <script src="/app.js?v=0.75"></script>
+    <script src="/logo.js?v=0.76"></script>
+    <script src="/seal.js?v=0.76"></script>
+    <script src="/app.js?v=0.76"></script>
   </body>
 </html>

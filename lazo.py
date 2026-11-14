@@ -35,12 +35,14 @@ import patrocinios
 import despierto
 import sobre
 import fluidez
+import nombres
+import sincro
 import pcapc
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.75"
+VERSION = "0.76"
 pcapc.VERSION = VERSION  # 0.70: el User-Agent de «Controlar otro PC» lleva la versión
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
@@ -833,7 +835,8 @@ class Handler(BaseHTTPRequestHandler):
             self._guard(lambda _body: despierto.DESPIERTO.status())
             return
         if path == "/api/status":
-            self._guard(lambda _body: {**control.status(), **pcapc.para_movil(), "version": VERSION})
+            self._guard(lambda _body: {**control.status(), **pcapc.para_movil(), "version": VERSION,
+                                       "movil_nombre": aprobacion.APODOS.get(self.peer or "", es_pc=False)})
             return
         if path == "/api/about":
             self._guard(lambda _body: sobre.about(ROOT, VERSION, qr_svg))
@@ -920,7 +923,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Upgrade", "websocket")
         self.send_header("Connection", "Upgrade")
         self.send_header("Sec-WebSocket-Accept", protocol.ws_accept(self.headers.get("Sec-WebSocket-Key", "")))
-        self.send_header("X-LaZoo-KVM", str(pcapc.KVM_VERSION))  # 0.74: entiende MOVER_T y la medida de fluidez
+        self.send_header("X-LaZoo-KVM", str(pcapc.KVM_VERSION))  # 0.74: MOVER_T y fluidez; 0.76 (3): imágenes
         self.end_headers()
         sock = self.connection
         try:
@@ -955,13 +958,100 @@ class Handler(BaseHTTPRequestHandler):
 
     def _renombrar(self, body: dict) -> dict:
         who = str(body.get("id", ""))[:40]
-        if not any(d["id"] == who for d in APPROVALS.listing()):
+        fila = next((d for d in APPROVALS.listing() if d["id"] == who), None)
+        if fila is None:
             raise control.ControlError("Ese dispositivo ya no está")
-        try:
-            apodo = aprobacion.APODOS.poner(who, str(body.get("nombre", ""))[:200])
+        try:  # 0.76: es el nombre común (nombres.py): lo verán igual los demás PCs y móviles
+            apodo = aprobacion.APODOS.poner(who, str(body.get("nombre", ""))[:200], es_pc=bool(fila.get("es_pc")))
         except ValueError as exc:
             raise control.ControlError(str(exc)) from exc
         return {"ok": True, "apodo": apodo}
+
+    def _nombre(self, body: dict) -> dict:
+        """0.76: renombrar desde el Panel o desde el móvil, con el nombre común (nombres.py).
+        Panel: {"id": dispositivo} | {"pc": PC de la lista} | {"este": true}. Móvil (firmado):
+        {"yo": true} (el propio móvil) | {"este": true} (este PC) | {"host": "IP:puerto"} (otro PC
+        que este conoce)."""
+        texto = str(body.get("nombre", ""))[:200]
+        movil = self.peer if self.remote else None
+        try:
+            if body.get("este") is True:
+                n = pcapc.AJUSTES.set_nombre(texto)
+            elif movil and body.get("yo") is True:
+                n = aprobacion.APODOS.poner(movil, texto, es_pc=False)
+            elif body.get("host"):
+                host = str(body.get("host"))[:120]
+                clave = nombres.NOMBRES.clave_de_host(host)
+                if not clave:
+                    pc = next((r for r in pcapc.PCS.listar() if f"{r['host']}:{r['puerto']}" == host), None)
+                    if pc is None:
+                        raise control.ControlError("Este PC no conoce ese PC: renómbralo desde él")
+                    n = pcapc.PCS.renombrar(pc["id"], texto)["apodo"]
+                else:
+                    n = nombres.NOMBRES.poner(clave, texto)
+            elif not self.remote and body.get("pc"):
+                n = pcapc.PCS.renombrar(str(body.get("pc"))[:40], texto)["apodo"]
+            elif not self.remote and body.get("id"):
+                n = self._renombrar({"id": body.get("id"), "nombre": texto})["apodo"]
+            else:
+                raise control.ControlError("¿A quién renombro?")
+        except pcapc.ErrorPC as exc:
+            raise control.ControlError(str(exc)) from exc
+        except ValueError as exc:
+            raise control.ControlError(str(exc)) from exc
+        return {"ok": True, "nombre": n}
+
+    def _pc_sync(self) -> None:
+        """0.76: otro PC (aprobado aquí, «PC · …») sincroniza notas y nombres. Firmado con la clave
+        de ESE dispositivo y sellado, también desde 127.0.0.1; no cuenta como móvil conectado."""
+        self.remote = True
+        self.peer = None
+        self.close_connection = True
+        who = self._who()
+        got = tuple(self.headers.get(name, "") for name in (protocol.H_T, protocol.H_N, protocol.H_S))
+        try:
+            length = int(self.headers.get("Content-Length", "0") or 0)
+        except ValueError:
+            length = -1
+        if who == self.client_address[0] or not got[2]:
+            self._drain()
+            self._send(401, {"error": "Falta la firma"}, seal=False)
+            return
+        if not 0 < length <= sincro.MAX_CUERPO:
+            self._send(413, {"error": "Demasiado grande"}, seal=False)
+            return
+        self.denied = PAIRING.verify("POST", sincro.RUTA, length, *got, who=who)
+        if self.denied == "ok" and who in KICKED:
+            self.denied = "expulsado"
+        fila = None
+        if self.denied == "ok":
+            fila = next((d for d in APPROVALS.listing() if d["id"] == who), None)
+            if fila is None:
+                self.denied = "firma"
+            elif fila["state"] != "aprobado":
+                self.denied = "pendiente" if fila["state"] == "pendiente" else "rechazado"
+        if self.denied != "ok":
+            _deny_note(who, self.denied)
+            self._unauth()
+            return
+        self.peer = who
+        if not fila.get("es_pc"):
+            self._drain()
+            self._send(403, {"error": "Solo para otro PC con LaZoo"})
+            return
+        raw = self.rfile.read(length)
+        try:
+            body = sincro.leer_cuerpo(PAIRING.open(raw, who)) if raw.startswith(protocol.MAGIC) else None
+        except (protocol.ProtocolError, ValueError, UnicodeError):
+            body = None
+        if not isinstance(body, dict):
+            self._send(400, {"error": "Hace falta cifrado"})
+            return
+        try:
+            code, resp = sincro.atender(who, self.client_address[0], body)
+        except Exception:  # noqa: BLE001
+            code, resp = 500, {"error": "El PC no pudo sincronizar"}
+        self._send(code, resp)
 
     def _pcapc_estado(self) -> dict:
         data = pcapc.estado()
@@ -994,6 +1084,9 @@ class Handler(BaseHTTPRequestHandler):
                 pcapc.AJUSTES.set_nombre(str(body.get("nombre", ""))[:200])
             elif step == "portapapeles":  # 0.71: «Compartir portapapeles al cambiar de PC»
                 pcapc.AJUSTES.set_portapapeles(body.get("on") is True)
+            elif step == "compartir":  # 0.76: «Compartir historial y notas entre mis dispositivos»
+                pcapc.AJUSTES.set_compartir_notas(body.get("on") is True)
+                sincro.SINCRO.avisar()
             elif step == "suavizar":  # 0.74: «Suavizar ratón entre PCs» (desde la próxima conexión)
                 pcapc.AJUSTES.set_suavizar(body.get("on") is True)
             elif step == "fluidez":  # 0.74: «Probar fluidez» (el resultado sale en /api/pcapc)
@@ -1117,6 +1210,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/dispositivos/renombrar":  # 0.71: nombre propio, solo desde este PC
             self._local_only(self._renombrar)
+            return
+        if path == sincro.RUTA:  # 0.76: notas y nombres comunes con otro PC
+            self._pc_sync()
+            return
+        if path == "/api/nombre":  # 0.76: renombrar (Panel o móvil), nombre común
+            if self._loopback() and self.headers.get(protocol.H_S) is None:
+                self._local_only(self._nombre)
+            else:
+                self._guard(self._nombre)
             return
         if path == "/api/dispositivos/decidir":
             self._local_only(lambda body: {"ok": APPROVALS.decide(str(body.get("id", "")), bool(body.get("ok")))})
@@ -1689,6 +1791,7 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     PAIRING.pin = protocol.Pairing(args.pin).pin
     pcapc.AJUSTES.cargar()  # 0.70: «Permitir que otro PC me controle» y la tecla rápida
+    aprobacion.APODOS.es_pc = lambda who: any(d["id"] == who and d.get("es_pc") for d in APPROVALS.listing())
     fluidez.no_frenar_proceso()  # 0.74: Windows 11 no mete a LaZoo en «modo eficiencia» (ratón a tirones)
     remembered = load_remembered()
     if "unittest" not in sys.modules and "pytest" not in sys.modules:
@@ -1740,6 +1843,11 @@ def start(argv: list[str] | None = None, console: bool = True):
         pass
     try:
         control.watch_clipboard()
+    except Exception:
+        pass
+    try:
+        sincro.PUERTO = PORT  # 0.76: va en «yo» al sincronizar con otro PC
+        sincro.instalar()  # 0.76: notas y nombres comunes con los PCs de «Controlar otro PC»
     except Exception:
         pass
     try:

@@ -3,6 +3,9 @@ __pycache__/
 *.pyc
 .lazo-pin
 clipboard-history.json
+# 0.76: lápidas de las notas borradas (junto al historial) y nombres comunes
+clipboard-history-borrados.json
+nombres.json
 nube/
 lazo-ca.key
 lazo-ca.crt

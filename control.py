@@ -35,6 +35,13 @@ _history_loaded = False
 _clip_seq = 0
 _CLIP_LIMIT = 40
 _CLIP_CHARS = 8000
+# 0.76: historial y notas compartidos entre PCs (sincro.py). Borrados que viajan («lápidas»): id →
+# hora del borrado; «vaciado»: todo lo anterior a esa hora está borrado (botón «Borrar todo»).
+_borrados: dict[str, float] = {}
+_vaciado = 0.0
+_MAX_BORRADOS = 500
+_DIAS_BORRADOS = 60
+CLIP_CAMBIO: list[Any] = []  # se llama (sin argumentos, rápido) cuando cambian las notas
 
 
 class ControlError(Exception):
@@ -3424,11 +3431,13 @@ def pc_name() -> str:
 
 
 def set_history_path(path: Path) -> None:
-    global _history_path, _history, _history_loaded, _clip_seq
+    global _history_path, _history, _history_loaded, _clip_seq, _borrados, _vaciado
     _history_path = Path(path)
     _history = []
     _history_loaded = False
     _clip_seq = 0
+    _borrados = {}
+    _vaciado = 0.0
 
 
 
@@ -3438,19 +3447,25 @@ def delete_clipboard(clip_id: str) -> dict[str, Any]:
         raise ControlError("esa nota ya no está")
     with _clip_lock:
         _load_history()
-        before = len(_history)
-        _history[:] = [item for item in _history if str(item.get("id")) != clip_id]
-        if len(_history) == before:
+        gone = [item for item in _history if str(item.get("id")) == clip_id]
+        if not gone:
             raise ControlError("esa nota ya no está")
+        _history[:] = [item for item in _history if str(item.get("id")) != clip_id]
+        # 0.76: el borrado viaja a los demás PCs (lápida con la hora; nunca antes que la nota)
+        _borrados[clip_id] = max(time.time(), max(float(i.get("at") or 0) for i in gone))
+        _save_tombs()
         _save_history()
         return {"ok": True, "items": [dict(item) for item in _history]}
 
 
 def clear_clipboard() -> dict[str, Any]:
     """0.63: borra todas las notas (también del archivo cifrado del PC)."""
+    global _vaciado
     with _clip_lock:
         _load_history()
+        _vaciado = max([time.time(), _vaciado] + [float(i.get("at") or 0) for i in _history])
         _history.clear()
+        _save_tombs()
         _save_history()
         return {"ok": True, "items": []}
 
@@ -3503,6 +3518,7 @@ def _load_history() -> None:
     if _history_loaded:
         return
     _history_loaded = True
+    _load_tombs()
     try:
         raw = json.loads(_open_seal(_history_path.read_bytes()).decode("utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeError):
@@ -3542,7 +3558,133 @@ def _save_history() -> None:
 
         recordar._write_private(_history_path, _seal(raw))  # 0.63: solo legible por este usuario
     except OSError:
+        pass
+    for fn in list(CLIP_CAMBIO):  # 0.76: avisa a la sincronización entre PCs
+        try:
+            fn()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _tombs_path() -> Path:
+    return _history_path.with_name(_history_path.stem + "-borrados.json")
+
+
+def _load_tombs() -> None:
+    global _borrados, _vaciado
+    try:
+        raw = json.loads(_open_seal(_tombs_path().read_bytes()).decode("utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError, ValueError):
         return
+    if not isinstance(raw, dict):
+        return
+    _borrados = {str(k): float(v) for k, v in (raw.get("borrados") or {}).items()
+                 if re.fullmatch(r"[0-9a-f]{6,32}", str(k)) and isinstance(v, (int, float))} if isinstance(raw.get("borrados"), dict) else {}
+    try:
+        _vaciado = float(raw.get("vaciado") or 0)
+    except (TypeError, ValueError):
+        _vaciado = 0.0
+    _prune_tombs()
+
+
+def _prune_tombs() -> None:
+    global _borrados
+    viejo = time.time() - _DIAS_BORRADOS * 86400
+    vivos = sorted(((t, k) for k, t in _borrados.items() if t >= viejo), reverse=True)[:_MAX_BORRADOS]
+    _borrados = {k: t for t, k in vivos}
+
+
+def _save_tombs() -> None:
+    _prune_tombs()
+    try:
+        import recordar
+
+        raw = json.dumps({"borrados": _borrados, "vaciado": _vaciado}).encode("utf-8")
+        recordar._write_private(_tombs_path(), _seal(raw))
+    except OSError:
+        pass
+
+
+# --- 0.76: historial y notas comunes entre PCs (lo usa sincro.py) ------------------------------
+
+def _item_ok(item: Any, limite: float) -> dict[str, Any] | None:
+    if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+        return None
+    ident = str(item.get("id") or "")
+    if not re.fullmatch(r"[0-9a-f]{6,32}", ident):
+        return None
+    clean = _clip_norm(item["text"])
+    try:
+        at = float(item.get("at") or 0)
+        seq = int(item.get("seq") or 0)
+    except (TypeError, ValueError):
+        return None
+    if not clean or not (0 < at <= limite):
+        return None
+    return {"id": ident, "text": clean, "at": at, "seq": max(0, min(seq, 2**31))}
+
+
+def estado_notas() -> dict[str, Any]:
+    """Historial (notas) + lápidas, tal cual se mandan a otro PC."""
+    with _clip_lock:
+        _load_history()
+        return {"items": [dict(i) for i in _history], "borrados": dict(_borrados), "vaciado": _vaciado}
+
+
+def firma_notas(estado: dict[str, Any] | None = None) -> str:
+    """Huella de las notas: dos PCs con la misma huella no tienen nada que mandarse."""
+    e = estado if estado is not None else estado_notas()
+    filas = sorted((str(i["id"]), round(float(i["at"]), 3), hashlib.sha256(i["text"].encode("utf-8")).hexdigest()[:16])
+                   for i in e.get("items", []))
+    borr = sorted((k, round(float(v), 3)) for k, v in (e.get("borrados") or {}).items())
+    texto = json.dumps([filas, borr, round(float(e.get("vaciado") or 0), 3)], separators=(",", ":"))
+    return hashlib.sha256(texto.encode()).hexdigest()
+
+
+def fusionar_notas(remoto: Any) -> bool:
+    """Junta las notas de otro PC con las de este. Gana la versión más reciente de cada id; lo
+    borrado (lápida o «vaciado») no vuelve; dos notas con el mismo texto se quedan en una (la
+    más reciente; la otra recibe lápida, así todos los PCs eligen igual). Como mucho _CLIP_LIMIT.
+    Devuelve True si algo cambió aquí."""
+    global _vaciado, _borrados
+    if not isinstance(remoto, dict):
+        return False
+    limite = time.time() + 86400
+    with _clip_lock:
+        _load_history()
+        antes = firma_notas({"items": _history, "borrados": _borrados, "vaciado": _vaciado})
+        try:
+            vaciado = max(_vaciado, min(float(remoto.get("vaciado") or 0), limite))
+        except (TypeError, ValueError):
+            vaciado = _vaciado
+        borrados = dict(_borrados)
+        rb = remoto.get("borrados")
+        for k, v in (list(rb.items())[: _MAX_BORRADOS * 2] if isinstance(rb, dict) else []):
+            if re.fullmatch(r"[0-9a-f]{6,32}", str(k)) and isinstance(v, (int, float)) and 0 < v <= limite:
+                borrados[str(k)] = max(float(v), borrados.get(str(k), 0.0))
+        por_id: dict[str, dict[str, Any]] = {}
+        ri = remoto.get("items")
+        otros = [x for x in (_item_ok(i, limite) for i in (ri[: _CLIP_LIMIT * 3] if isinstance(ri, list) else [])) if x]
+        for item in [dict(i) for i in _history] + otros:
+            prev = por_id.get(item["id"])
+            if prev is None or (item["at"], item["text"]) > (prev["at"], prev["text"]):
+                por_id[item["id"]] = item
+        vivos = [i for i in por_id.values() if i["at"] > vaciado and i["at"] > borrados.get(i["id"], -1.0)]
+        por_texto: dict[str, dict[str, Any]] = {}
+        for item in sorted(vivos, key=lambda i: (i["at"], i["id"]), reverse=True):
+            if item["text"] in por_texto:
+                borrados[item["id"]] = max(item["at"], borrados.get(item["id"], 0.0))
+                continue
+            por_texto[item["text"]] = item
+        nuevos = sorted(por_texto.values(), key=lambda i: (i["at"], i["seq"], i["id"]), reverse=True)[:_CLIP_LIMIT]
+        _history[:] = nuevos
+        _borrados, _vaciado = borrados, vaciado
+        _prune_tombs()
+        cambio = firma_notas({"items": _history, "borrados": _borrados, "vaciado": _vaciado}) != antes
+        if cambio:
+            _save_tombs()
+            _save_history()
+        return cambio
 
 
 def _read_clipboard_text(sondeo: bool = False) -> str:

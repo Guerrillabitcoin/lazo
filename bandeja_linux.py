@@ -166,7 +166,7 @@ class GtkClip:
 
         self.Gtk, self.GLib, self.Gdk = Gtk, GLib, Gdk
 
-    def _en_gtk(self, fn: Any) -> Any:
+    def _en_gtk(self, fn: Any, espera: float = 1.5) -> Any:
         hecho, caja = threading.Event(), {}
 
         def correr() -> bool:
@@ -178,7 +178,7 @@ class GtkClip:
             return False
 
         self.GLib.idle_add(correr)
-        return caja.get("r") if hecho.wait(1.5) else None
+        return caja.get("r") if hecho.wait(espera) else None
 
     def escribir(self, text: str) -> bool:
         def poner(clip: Any) -> bool:
@@ -190,6 +190,36 @@ class GtkClip:
 
     def leer(self) -> str | None:
         return self._en_gtk(lambda clip: clip.wait_for_text())
+
+    def leer_imagen(self) -> bytes | None:
+        """0.76: la imagen del portapapeles como PNG (solo al cambiar de PC, nunca en sondeo)."""
+        def coger(clip: Any) -> bytes | None:
+            if not clip.wait_is_image_available():
+                return None
+            pb = clip.wait_for_image()
+            if pb is None:
+                return None
+            ok, datos = pb.save_to_bufferv("png", [], [])
+            return bytes(datos) if ok else None
+
+        return self._en_gtk(coger, espera=5.0)
+
+    def escribir_imagen(self, png: bytes) -> bool:
+        """0.76: deja una imagen PNG (de otro PC) en el portapapeles de Xorg."""
+        def poner(clip: Any) -> bool:
+            from gi.repository import GdkPixbuf
+
+            carga = GdkPixbuf.PixbufLoader.new_with_type("png")
+            carga.write(png)
+            carga.close()
+            pb = carga.get_pixbuf()
+            if pb is None:
+                return False
+            clip.set_image(pb)
+            clip.store()
+            return True
+
+        return bool(self._en_gtk(poner, espera=5.0))
 
 
 class LinuxTray:

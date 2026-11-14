@@ -505,7 +505,7 @@ class Tray:
         elif action == "pc-soltar":
             L.pcapc.CONTROL.parar("Has vuelto a este PC.")
         elif action == "pc-anadir":
-            self.open(self.url("/mesa#otro-pc"))
+            self.open(self.url("/mesa#pc-anadir-caja"))  # 0.76: «Añadir PC» en Dispositivos
         elif action == "pc-permitir":
             on = L.pcapc.AJUSTES.set_permitir(not L.pcapc.AJUSTES.permitir)
             if not on:

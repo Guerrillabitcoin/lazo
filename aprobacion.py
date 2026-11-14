@@ -92,73 +92,38 @@ def limpiar_apodo(texto: object) -> str:
 
 
 class Apodos:
-    """`apodos.json` en la carpeta de datos: id del dispositivo → nombre propio. Solo en este PC."""
+    """0.71: «Renombrar» un dispositivo. 0.76: ya no es un nombre solo de este PC: es el nombre
+    del dispositivo en el registro común (nombres.py), el mismo en todos los PCs y móviles. El
+    `apodos.json` de antes se migra solo (el más reciente gana)."""
 
     MAX = 200
 
     def __init__(self, carpeta=None) -> None:
-        self._carpeta = carpeta
-        self._datos: dict[str, str] | None = None
-        self.lock = threading.Lock()
+        import nombres
 
-    def archivo(self):
-        from pathlib import Path
+        self.nombres = nombres.de_carpeta(carpeta)
+        self.es_pc: Callable[[str], bool] = lambda who: False  # lazo.py: «PC · …» en la lista
 
-        if self._carpeta is not None:
-            return Path(self._carpeta) / "apodos.json"
-        import recordar
+    def get(self, who: str, es_pc: bool | None = None) -> str:
+        try:
+            return self.nombres.nombre_dispositivo(who, self.es_pc(who) if es_pc is None else es_pc)
+        except Exception:  # noqa: BLE001
+            return ""
 
-        return recordar.data_dir() / "apodos.json"
-
-    def _cargar(self) -> dict[str, str]:
-        if self._datos is None:
-            import json
-
-            try:
-                data = json.loads(self.archivo().read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                data = {}
-            self._datos = {str(k): str(v)[:MAX_APODO] for k, v in (data.items() if isinstance(data, dict) else [])
-                           if re.fullmatch(r"[0-9a-f]{8,40}", str(k)) and isinstance(v, str)}
-        return self._datos
-
-    def get(self, who: str) -> str:
-        with self.lock:
-            try:
-                return self._cargar().get(who, "")
-            except Exception:  # noqa: BLE001
-                return ""
-
-    def poner(self, who: str, texto: object) -> str:
+    def poner(self, who: str, texto: object, es_pc: bool | None = None) -> str:
         if not re.fullmatch(r"[0-9a-f]{8,40}", str(who or "")):
             raise ValueError("Ese dispositivo no está")
-        apodo = limpiar_apodo(texto)
-        import json
-
-        with self.lock:
-            datos = self._cargar()
-            if apodo:
-                datos[who] = apodo
-            else:
-                datos.pop(who, None)
-            while len(datos) > self.MAX:
-                datos.pop(next(iter(datos)))
-            try:
-                import recordar
-
-                f = self.archivo()
-                f.parent.mkdir(parents=True, exist_ok=True)
-                recordar._write_private(f, json.dumps(datos, ensure_ascii=False).encode("utf-8"))
-            except OSError as exc:
-                raise ValueError("No pude guardar el nombre") from exc
-        return apodo
+        try:
+            return self.nombres.renombrar_dispositivo(who, texto, self.es_pc(who) if es_pc is None else es_pc)
+        except OSError as exc:
+            raise ValueError("No pude guardar el nombre") from exc
 
 
 APODOS = Apodos()
 
 
 def con_apodo(who: str, label: str) -> str:
-    apodo = APODOS.get(who)
+    apodo = APODOS.get(who, es_pc=str(label).startswith("PC · "))
     return apodo or label
 
 
@@ -343,12 +308,21 @@ class Approvals:
             self._expire(now)
             return [
                 {"id": who, "short": who[:4], "state": row["state"], "label": con_apodo(who, row["label"]),
-                 "tipo": row["label"], "apodo": APODOS.get(who), "ip": row["ip"],
+                 "tipo": row["label"], "apodo": APODOS.get(who, es_pc=row["label"].startswith("PC · ")), "ip": row["ip"],
+                 "clave": _clave(who, row["label"]), "es_pc": row["label"].startswith("PC · "),
                  "left": max(0, int(WAIT_SECONDS - (now - row["since"]))) if row["state"] == "pendiente" else 0,
                  "ago": int(now - row["seen"]) if row["seen"] else -1, "fp": row.get("fp", ""), "fecha": row.get("fecha", ""),
                  "recordado": bool(row.get("recordado")), "duplicado": bool(row.get("duplicado"))}
                 for who, row in sorted(self.devices.items(), key=lambda kv: kv[1]["since"])
             ]
+
+
+def _clave(who: str, label: str) -> str:
+    """0.76: la clave del registro común de nombres (nombres.py) de ese dispositivo."""
+    try:
+        return APODOS.nombres.clave_dispositivo(who, label.startswith("PC · "))
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def ask_text(who: str, row: dict) -> str:

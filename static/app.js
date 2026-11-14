@@ -44,7 +44,7 @@ const deviceId = (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.75";
+const PAGE_VERSION = "0.76";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -278,7 +278,7 @@ function showPin(reason) {
    (siempre) y, con la App 3, cambiar a otro PC guardado o añadir uno. Cada PC tiene su propia
    clave (localStorage es por dirección), así que cambiar de PC no empareja de nuevo. */
 const pcsBox = document.querySelector("#pcs");
-let pcInfo = { nombre: "", sistema: "", avisado: 0, apodos: {} };
+let pcInfo = { nombre: "", sistema: "", avisado: 0, apodos: {}, movil: "" };
 function pcBridge(name) {
   const b = window.LaZooApp;
   return b && typeof b[name] === "function" ? b : null;
@@ -297,6 +297,7 @@ function pcSeen(data) {
   const sistema = pcSistema(data.platform);
   const nombre = String(data.pc_nombre || data.pc);
   const apodos = data.pcs_apodos && typeof data.pcs_apodos === "object" ? data.pcs_apodos : {};
+  pcInfo.movil = String(data.movil_nombre || "");  // 0.76: el nombre común de este móvil
   const firma = JSON.stringify(apodos);
   const cambio = pcInfo.nombre !== nombre || pcInfo.sistema !== sistema || pcInfo.firma !== firma;
   if (cambio) {
@@ -374,9 +375,47 @@ function pcGuardados() {
     return [];
   }
 }
+/* 0.76: renombrar desde el móvil (este PC, otro PC o este móvil) con un cuadro propio (en la
+   App, window.prompt no siempre sale). El nombre es común: el PC lo pasa a todos los demás. */
+function pideNombre(titulo, actual, guardar) {
+  const box = document.querySelector("#nombre-dlg");
+  const input = document.querySelector("#nombre-dlg-input");
+  const error = document.querySelector("#nombre-dlg-error");
+  document.querySelector("#nombre-dlg-title").textContent = titulo;
+  input.value = actual || "";
+  error.hidden = true;
+  box.hidden = false;
+  window.setTimeout(() => { input.focus(); input.select(); }, 50);
+  const ok = document.querySelector("#nombre-dlg-ok");
+  const no = document.querySelector("#nombre-dlg-no");
+  const cerrar = () => { box.hidden = true; ok.onclick = no.onclick = box.onclick = input.onkeydown = null; };
+  ok.onclick = async () => {
+    ok.disabled = true;
+    try { await guardar(input.value.trim()); cerrar(); }
+    catch (err) { error.textContent = (err && err.message) || "No se pudo renombrar"; error.hidden = false; }
+    finally { ok.disabled = false; }
+  };
+  no.onclick = cerrar;
+  box.onclick = (event) => { if (event.target === box) cerrar(); };
+  input.onkeydown = (event) => { if (event.key === "Enter") ok.onclick(); };
+}
+async function renombrarYRefrescar(cuerpo) {
+  await api("/api/nombre", cuerpo);
+  try { pcSeen(await api("/api/status", null, "GET")); } catch (_e) { /* se verá en el siguiente estado */ }
+  pcsPinta();
+  pcBarPinta();
+  say("Renombrado en todos tus dispositivos");
+}
+document.querySelector("#pcs-este-lapiz").addEventListener("click", () => {
+  pideNombre("Renombrar este PC", pcInfo.nombre, (nombre) => renombrarYRefrescar({ este: true, nombre }));
+});
+document.querySelector("#pcs-movil-lapiz").addEventListener("click", () => {
+  pideNombre("Renombrar este móvil", pcInfo.movil, (nombre) => renombrarYRefrescar({ yo: true, nombre }));
+});
 function pcsPinta() {
   document.querySelector("#pcs-este").textContent =
     [pcInfo.nombre || "Este PC", pcInfo.sistema, location.host].filter(Boolean).join(" · ");
+  document.querySelector("#pcs-movil").textContent = "Este móvil: " + (pcInfo.movil || "sin nombre");
   const otros = pcGuardados().filter((pc) => pc && pc.url && pc.url !== location.origin);
   const lista = document.querySelector("#pcs-otros");
   lista.replaceChildren(...otros.map((pc) => {
@@ -402,7 +441,16 @@ function pcsPinta() {
       pcsPinta();
       pcBarPinta();
     });
-    li.append(ir, quitar);
+    const lapiz = document.createElement("button");
+    lapiz.type = "button";
+    lapiz.className = "lapiz";
+    lapiz.textContent = "✎";
+    lapiz.setAttribute("aria-label", "Renombrar " + pcNombreDe(pc));
+    lapiz.addEventListener("click", () => {
+      const host = String(pc.url || "").replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+      pideNombre("Renombrar " + pcNombreDe(pc), pcNombreDe(pc), (nombre) => renombrarYRefrescar({ host, nombre }));
+    });
+    li.append(ir, lapiz, quitar);
     return li;
   }));
   document.querySelector("#pcs-otros-box").hidden = !otros.length;

@@ -134,6 +134,22 @@
       .chip .pc-campo { flex: 1; min-height: 30px; width: auto; height: auto; }
       #pc-codigo { flex: 0 0 90px; letter-spacing: 0.12em; }
       .pc-estado { margin: 0 0 8px; color: var(--texto); }
+      /* 0.76: Dispositivos con nombre común, lápiz y lo de «Controlar otro PC» plegado */
+      .este-pc { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; min-width: 0; }
+      .este-pc .este-k { color: var(--suave); font-size: 12px; flex: none; }
+      .este-pc .este-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; -webkit-user-select: text; }
+      button.lapiz { flex: none; min-height: 28px; min-width: 28px; padding: 0 6px; font-size: 14px; line-height: 1; background: transparent; border: 1px solid var(--borde, rgba(255,255,255,0.15)); border-radius: 8px; color: var(--suave); }
+      button.lapiz:hover { color: var(--naranja); }
+      .tarjetas li .t-cabeza { display: flex; align-items: center; gap: 6px; min-width: 0; }
+      .tarjetas li .t-cabeza .t-nombre { flex: 0 1 auto; }
+      .tarjetas li .t-linea.ok { color: var(--verde, #6c6); }
+      .tarjetas li .t-linea.aviso { color: var(--naranja); white-space: normal; }
+      .devs .compartir { margin-top: 10px; display: inline-flex; }
+      details.plegable { margin-top: 10px; }
+      details.plegable > summary { cursor: pointer; color: var(--suave); font-size: 13px; }
+      details.plegable[open] > summary { margin-bottom: 8px; }
+      .devs .row .pc-campo { flex: 1 1 140px; min-width: 0; }
+      .devs .row .pc-pin-campo { flex: 0 1 80px; }
       .pc-estado.on { color: var(--naranja); font-weight: 650; }
       .pc-nota { margin: 8px 0 0; color: var(--suave); font-size: 12px; }
       /* 0.71: cada dispositivo en su tarjeta: nombre arriba, IP y huella en líneas que se cortan
@@ -165,7 +181,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.75</p>
+          <p class="ver">0.76</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -223,8 +239,6 @@
           </div>
           <span class="chip" id="patrocinios-ultimo" hidden></span>
           <p class="cfg-sub">Este PC</p>
-          <span class="chip" id="nombre-este" title="Así sale este PC en la fila de PCs del móvil (y en «Controlar otro PC» de los demás, si allí lo renombran)">Nombre para el móvil: —</span>
-          <button type="button" class="chip" id="nombre-este-ok">Renombrar este PC</button>
           <label class="chip" title="Mientras uses LaZoo desde el móvil, y hasta 1 h 21 min después, Windows no apaga la pantalla ni se bloquea ni se suspende.">
           <input id="despierto" type="checkbox" /> No bloquear el PC mientras se usa el móvil
           </label>
@@ -237,38 +251,9 @@
           Tecla rápida <input id="pc-tecla" class="pc-campo" type="text" maxlength="24" spellcheck="false" autocomplete="off" />
           </label>
           <button type="button" class="chip" id="pc-tecla-ok">Guardar tecla</button>
-          <label class="chip" title="Al pulsar la tecla rápida, el texto copiado pasa al otro PC; al volver, el del otro PC vuelve a este. Solo con «Controlar otro PC».">
-          <input id="pc-porta" type="checkbox" /> Compartir portapapeles al cambiar de PC
+          <label class="chip" title="Al pulsar la tecla rápida, lo copiado (texto, o una imagen como una captura, hasta 20 MB) pasa al otro PC; al volver, lo del otro PC vuelve a este. La imagen no se guarda en disco.">
+          <input id="pc-porta" type="checkbox" /> Compartir portapapeles al cambiar de PC (texto e imágenes)
           </label>
-          <label class="chip" title="Cuando otro PC controla este: reparte cada movimiento en pasos de 4 ms en el tiempo en que se hizo allí, con un colchón pequeño que se adapta a la red. No predice nada. Vale desde la próxima vez que te controlen.">
-          <input id="pc-suave" type="checkbox" checked /> Suavizar ratón entre PCs
-          </label>
-        </section>
-        <section id="otro-pc" class="box cfg">
-          <h2>Controlar otro PC</h2>
-          <p id="pc-estado" class="pc-estado">Con el ratón y el teclado de este PC, maneja otro PC de tu red.</p>
-          <p id="pc-falta" class="pc-falta" hidden><span id="pc-falta-txt"></span> <button id="pc-arreglar" type="button">Arreglar</button></p>
-          <ul id="pc-lista" class="tarjetas"></ul>
-          <p class="cfg-sub">Añadir otro PC</p>
-          <div class="row">
-            <input id="pc-destino" class="pc-campo" type="text" placeholder="IP del otro PC, p. ej. 192.168.1.20:8787" spellcheck="false" autocomplete="off" />
-            <input id="pc-codigo" class="pc-campo" type="text" placeholder="PIN" inputmode="numeric" maxlength="6" autocomplete="off" />
-            <button id="pc-anadir" type="button">Añadir</button>
-          </div>
-          <p id="pc-par" class="pc-nota"></p>
-          <p class="pc-nota">En el otro PC: Configuración → «Permitir que otro PC me controle». Allí verás su IP y su PIN, y allí lo aceptas.
-            Se mandan Win y Alt+Tab; Ctrl+Alt+Supr y la pantalla de bloqueo o de administrador (UAC) no.</p>
-          <p id="pc-diag" class="pc-nota" hidden></p>
-          <p class="cfg-sub">Fluidez del ratón</p>
-          <div class="row">
-            <button id="pc-fluidez-ok" type="button" title="Mide el reloj de este PC y, si pasas al otro PC con la tecla rápida, el ratón, la red y el otro PC durante 5 s">Probar fluidez</button>
-          </div>
-          <div id="pc-fluidez" class="pc-fluidez" hidden>
-            <p id="pc-fluidez-txt" class="pc-fluidez-txt"></p>
-            <ul id="pc-fluidez-consejos" class="pc-fluidez-lista"></ul>
-            <details id="pc-fluidez-mas"><summary>Medidas</summary><ul id="pc-fluidez-datos" class="pc-fluidez-lista"></ul></details>
-          </div>
-          <p class="pc-nota">Si va a tirones también el ratón del móvil en este PC, la prueba sin pasar al otro PC ya dice si es el reloj de este PC.</p>
         </section>
         <section id="historial" class="box hist">
             <h2>Anuncios y patrocinios saltados</h2>
@@ -293,7 +278,42 @@
           </section>
           <section id="dispositivos" class="box devs">
             <h2>Dispositivos</h2>
+            <!-- 0.76: una sola lista (móviles y PCs) con el nombre común, el lápiz para renombrar y,
+                 en los PCs, «Controlar». Lo de «Controlar otro PC» vive aquí, simplificado. -->
+            <p id="este-pc" class="este-pc"><span class="este-k">Este PC</span> <b id="nombre-este" class="este-n">—</b>
+              <button type="button" class="lapiz" id="nombre-este-ok" title="Renombrar este PC (lo verán así todos tus PCs y móviles)" aria-label="Renombrar este PC">✎</button></p>
+            <p id="pc-estado" class="pc-estado">Con el ratón y el teclado de este PC, maneja otro PC de tu red.</p>
             <ul id="devs" class="tarjetas"></ul>
+            <label class="chip compartir" title="El historial del portapapeles y las notas son los mismos en todos tus PCs emparejados (y en el móvil conectado a cualquiera). Solo por tu red local, cifrado.">
+            <input id="pc-compartir" type="checkbox" checked /> Compartir historial y notas entre mis dispositivos
+            </label>
+            <details id="pc-anadir-caja" class="plegable">
+              <summary>Añadir PC</summary>
+              <div class="row">
+                <input id="pc-destino" class="pc-campo" type="text" placeholder="IP:puerto, p. ej. 192.168.1.20:8787" spellcheck="false" autocomplete="off" />
+                <input id="pc-codigo" class="pc-campo pc-pin-campo" type="text" placeholder="PIN" inputmode="numeric" maxlength="6" autocomplete="off" />
+                <button id="pc-anadir" type="button">Añadir</button>
+              </div>
+              <p class="pc-nota">En el otro PC: Configuración → «Permitir que otro PC me controle». Allí ves su IP y su PIN, y allí lo aceptas.</p>
+            </details>
+            <p id="pc-par" class="pc-nota"></p>
+            <details id="pc-avanzado" class="plegable">
+              <summary>Avanzado</summary>
+              <p id="pc-falta" class="pc-falta" hidden><span id="pc-falta-txt"></span> <button id="pc-arreglar" type="button">Arreglar</button></p>
+              <p id="pc-diag" class="pc-nota" hidden></p>
+              <label class="chip" title="Cuando otro PC controla este: reparte cada movimiento en pasos de 4 ms en el tiempo en que se hizo allí, con un colchón pequeño que se adapta a la red. No predice nada. Vale desde la próxima vez que te controlen.">
+              <input id="pc-suave" type="checkbox" checked /> Suavizar ratón entre PCs
+              </label>
+              <div class="row">
+                <button id="pc-fluidez-ok" type="button" title="Mide el reloj de este PC y, si pasas al otro PC con la tecla rápida, el ratón, la red y el otro PC durante 5 s">Probar fluidez</button>
+              </div>
+              <div id="pc-fluidez" class="pc-fluidez" hidden>
+                <p id="pc-fluidez-txt" class="pc-fluidez-txt"></p>
+                <ul id="pc-fluidez-consejos" class="pc-fluidez-lista"></ul>
+                <details id="pc-fluidez-mas"><summary>Medidas</summary><ul id="pc-fluidez-datos" class="pc-fluidez-lista"></ul></details>
+              </div>
+              <p class="pc-nota">Se mandan Win y Alt+Tab; Ctrl+Alt+Supr y la pantalla de bloqueo o de administrador (UAC) no. Si va a tirones también el ratón del móvil en este PC, la prueba sin pasar al otro PC ya dice si es el reloj de este PC.</p>
+            </details>
             <div class="row">
               <button id="kick-all" type="button">Expulsar a todos</button>
               <button id="forget-all" class="danger" type="button">Olvidar todos</button>
@@ -739,7 +759,7 @@
       }
 
       /* 0.71: tarjeta de un dispositivo. textContent siempre (nunca HTML con nombres). */
-      function tarjeta(nombre, lineas, botones) {
+      function tarjeta(nombre, lineas, botones, lapiz) {
         const li = document.createElement("li");
         li.className = "tarjeta";
         const info = document.createElement("div");
@@ -748,7 +768,19 @@
         n.className = "t-nombre";
         n.textContent = nombre;
         n.title = nombre;
-        info.append(n);
+        if (lapiz) {  // 0.76: el lápiz junto al nombre (renombra para todos los dispositivos)
+          const cab = document.createElement("div");
+          cab.className = "t-cabeza";
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "lapiz";
+          b.textContent = "✎";
+          b.title = "Renombrar (lo verán así todos tus PCs y móviles)";
+          b.setAttribute("aria-label", "Renombrar " + nombre);
+          b.addEventListener("click", lapiz);
+          cab.append(n, b);
+          info.append(cab);
+        } else info.append(n);
         for (const texto of lineas.filter(Boolean)) {
           const l = document.createElement("span");
           l.className = "t-linea";
@@ -776,35 +808,77 @@
         return li;
       }
       function renombrar(actual, apodo, guardar) {
-        const nuevo = window.prompt("Nombre para reconocerlo (máximo 40; vacío = el de siempre):", apodo || actual || "");
+        const nuevo = window.prompt("Nombre para todos tus dispositivos (máximo 40; vacío = el de siempre):", apodo || actual || "");
         if (nuevo === null) return;
         Promise.resolve(guardar(nuevo.trim())).catch((err) => window.alert(err.message || "No se pudo renombrar"));
       }
 
+      /* 0.76: «Dispositivos» = móviles y PCs en una sola lista, con el nombre común (el mismo en
+         todos los PCs y móviles) y su lápiz. Un PC que este controla y que también está aprobado
+         aquí sale UNA vez (misma «clave»). Se repinta solo si cambia algo (pintaLista). */
+      let devList = [];
+      const vistoDe = (d) => {
+        const ago = Number(d.ago) || 0;  // 0.63: «visto» separa el móvil real de un id viejo
+        return ago < 0 ? "sin ver desde que se abrió LaZoo" : ago < 20 ? "visto ahora" : ago < 3600 ? `visto hace ${Math.max(1, Math.round(ago / 60))} min` : ago < 86400 ? `visto hace ${Math.round(ago / 3600)} h` : `visto hace ${Math.round(ago / 86400)} d`;
+      };
       async function loadDevices() {
-        let list = [];
-        try { list = (await devCall("/api/dispositivos")).devices || []; } catch (_err) { return; }
-        const vistoDe = (d) => {
-          const ago = Number(d.ago) || 0;  // 0.63: «visto» separa el móvil real de un id viejo
-          return ago < 0 ? "sin ver desde que se abrió LaZoo" : ago < 20 ? "visto ahora" : ago < 3600 ? `visto hace ${Math.max(1, Math.round(ago / 60))} min` : ago < 86400 ? `visto hace ${Math.round(ago / 3600)} h` : `visto hace ${Math.round(ago / 86400)} d`;
-        };
-        const firma = list.map((d) => [d.id, d.label, d.apodo, d.tipo, d.state, d.duplicado, d.ip, d.fp, d.fecha, d.recordado, vistoDe(d)]);
-        pintaLista($("#devs"), firma, () => (list.length ? list : [null]).map((d) => {
-          if (!d) return tarjetaVacia("Ninguno.");
-          const visto = vistoDe(d);
-          const estado = d.duplicado ? "id antiguo (parece el mismo móvil; si vuelve, entra solo)" : STATES[d.state] || d.state;
-          const botones = [["Renombrar", () => renombrar(d.label, d.apodo, (nombre) => devCall("/api/dispositivos/renombrar", { id: d.id, nombre }).then(loadDevices))]];
-          if (d.state === "aprobado") botones.push([d.duplicado ? "Quitar" : "Expulsar", () => devCall("/api/dispositivos/expulsar", { id: d.id }).then(loadDevices).catch(() => {})]);
-          const li = tarjeta(d.label, [
-            (d.apodo ? d.tipo + " · " : "") + estado,
-            [d.ip, "id " + d.short, d.fp ? "huella " + d.fp : ""].filter(Boolean).join(" · "),
-            [visto, d.fecha ? "desde " + d.fecha : "", d.recordado ? "recordado" : ""].filter(Boolean).join(" · "),
-          ], botones);
-          if (d.state === "pendiente") li.querySelector(".t-linea").classList.add("estado-pendiente");
-          if (d.duplicado) li.style.opacity = "0.6";
-          return li;
-        }));
-        $("#kick-all").disabled = !list.some((d) => d.state === "aprobado");
+        try { devList = (await devCall("/api/dispositivos")).devices || []; } catch (_err) { return; }
+        pintaDispositivos();
+      }
+      function sincroTexto(s) {
+        if (!s || !s.estado || s.estado === "nada") return "";
+        if (s.estado === "ok") return "notas y nombres compartidos";
+        return s.mensaje || "";
+      }
+      function pintaDispositivos() {
+        const d = pcData || { pcs: [], control: {}, sincro: {} };
+        const c = d.control || {};
+        const pcs = d.pcs || [];
+        const sincro = d.sincro || {};
+        const clavesPc = new Set(pcs.map((pc) => pc.clave).filter(Boolean));
+        const extra = (pc) => devList.filter((x) => x.clave && x.clave === pc.clave);
+        const sueltos = devList.filter((x) => !(x.clave && clavesPc.has(x.clave)));
+        const firma = [pcs.map((pc) => [pc.id, pc.nombre, pc.apodo, pc.nombre_pc, pc.host, pc.puerto, pc.fp, pc.fecha, pc.ultimo, pc.clave, sincroTexto(sincro[pc.id])]),
+          c.estado, c.id, d.puede_mandar,
+          devList.map((x) => [x.id, x.label, x.apodo, x.tipo, x.state, x.duplicado, x.ip, x.fp, x.fecha, x.recordado, x.clave, vistoDe(x)])];
+        pintaLista($("#devs"), firma, () => {
+          const out = [];
+          for (const pc of pcs) {
+            const activo = c.estado !== "libre" && c.id === pc.id;
+            const nombre = pc.nombre || pc.host;
+            const aqui = extra(pc);
+            const botones = [[activo ? "Dejar de controlar" : "Controlar", () => pcCall(activo ? "soltar" : "controlar", { id: pc.id }), !d.puede_mandar]];
+            for (const x of aqui) if (x.state === "aprobado") botones.push(["Expulsar", () => devCall("/api/dispositivos/expulsar", { id: x.id }).then(loadDevices).catch(() => {})]);
+            botones.push(["Olvidar", () => { if (window.confirm(`¿Olvidar «${nombre}»? Para volver a usarlo habrá que añadirlo otra vez.`)) pcCall("olvidar", { id: pc.id }); }]);
+            const li = tarjeta(nombre, [
+              "PC · " + (activo ? "controlándolo" : pc.ultimo ? `último (${d.tecla || "tecla rápida"})` : "listo para controlar") + (pc.apodo && pc.nombre_pc && pc.apodo !== pc.nombre_pc ? ` · PC «${pc.nombre_pc}»` : ""),
+              aqui.length ? "también puede controlar este · " + aqui.map((x) => x.duplicado ? "id antiguo" : STATES[x.state] || x.state).join(", ") : "",
+              [`${pc.host}:${pc.puerto}`, pc.fp ? "huella " + pc.fp : "", pc.fecha ? "desde " + pc.fecha : ""].filter(Boolean).join(" · "),
+              sincroTexto(sincro[pc.id]),
+            ], botones, () => renombrar(pc.nombre_pc || pc.host, pc.apodo || pc.nombre, (nombre) => devCall("/api/nombre", { pc: pc.id, nombre }).then(() => { watchPc(); loadDevices(); })));
+            if (activo) li.classList.add("activo");
+            const s = sincro[pc.id];
+            const ultima = sincroTexto(s) ? li.querySelector(".t-info > .t-linea:last-child") : null;
+            if (ultima) ultima.classList.add(s.estado === "ok" ? "ok" : "aviso");
+            out.push(li);
+          }
+          for (const x of sueltos) {
+            const visto = vistoDe(x);
+            const estado = x.duplicado ? "id antiguo (parece el mismo móvil; si vuelve, entra solo)" : STATES[x.state] || x.state;
+            const botones = [];
+            if (x.state === "aprobado") botones.push([x.duplicado ? "Quitar" : "Expulsar", () => devCall("/api/dispositivos/expulsar", { id: x.id }).then(loadDevices).catch(() => {})]);
+            const li = tarjeta(x.label, [
+              (x.apodo ? x.tipo + " · " : "") + estado,
+              [x.ip, "id " + x.short, x.fp ? "huella " + x.fp : ""].filter(Boolean).join(" · "),
+              [visto, x.fecha ? "desde " + x.fecha : "", x.recordado ? "recordado" : ""].filter(Boolean).join(" · "),
+            ], botones, () => renombrar(x.tipo || x.label, x.apodo, (nombre) => devCall("/api/nombre", { id: x.id, nombre }).then(loadDevices)));
+            if (x.state === "pendiente") li.querySelector(".t-linea").classList.add("estado-pendiente");
+            if (x.duplicado) li.style.opacity = "0.6";
+            out.push(li);
+          }
+          return out.length ? out : [tarjetaVacia("Ninguno. Conecta el móvil con el QR o añade otro PC.")];
+        });
+        $("#kick-all").disabled = !devList.some((x) => x.state === "aprobado");
       }
       $("#kick-all").addEventListener("click", () => {
         if (!confirm("¿Expulsar a todos los dispositivos?")) return;
@@ -856,7 +930,8 @@
           partes.push(document.createTextNode("· PIN"), trozo(d.pin || ""), botonCopiar(d.pin || "", "Copiar el PIN"));
           return partes;
         });
-        ponTexto($("#nombre-este"), `Nombre para el móvil: ${d.nombre_este || d.nombre_sistema || "—"}` + (d.nombre_este && d.nombre_sistema ? ` (PC «${d.nombre_sistema}»)` : ""));
+        ponTexto($("#nombre-este"), d.nombre_este || d.nombre_sistema || "—");
+        $("#nombre-este").title = d.nombre_este && d.nombre_sistema ? `PC «${d.nombre_sistema}»` : "";
         const c = d.control || {};
         const est = $("#pc-estado");
         est.classList.toggle("on", c.estado === "controlando");
@@ -866,22 +941,10 @@
         else if (!d.puede_mandar) est.textContent = d.motivo || "Este PC no puede mandar su ratón a otro.";
         else est.textContent = c.mensaje || (d.pcs.length ? `Pulsa ${d.tecla} para pasar al último PC, o elige uno.` : "Añade otro PC para empezar.");
         if (d.puede_mandar && d.pcs.length && !d.tecla_ok && c.estado === "libre") est.textContent += ` (Ojo: otro programa usa ${d.tecla}; cámbiala en Configuración.)`;
-        const firmaPcs = [d.pcs, c.estado, c.id, d.puede_mandar];
-        pintaLista($("#pc-lista"), firmaPcs, () => (d.pcs.length ? d.pcs : [null]).map((pc) => {
-          if (!pc) return tarjetaVacia("Ninguno.");
-          const activo = c.estado !== "libre" && c.id === pc.id;
-          return tarjeta(pc.nombre || pc.host, [
-            pc.apodo && pc.nombre_pc ? `PC «${pc.nombre_pc}»` : "",
-            `${pc.host}:${pc.puerto}` + (pc.ultimo ? " · último" : ""),
-            [pc.fp ? "huella " + pc.fp : "", pc.fecha ? "desde " + pc.fecha : ""].filter(Boolean).join(" · "),
-          ], [
-            [activo ? "Dejar de controlar" : "Controlar", () => pcCall(activo ? "soltar" : "controlar", { id: pc.id }), !d.puede_mandar],
-            ["Renombrar", () => renombrar(pc.nombre || pc.host, pc.apodo, (nombre) => pcCall("renombrar", { id: pc.id, nombre }))],
-            ["Olvidar", () => { if (window.confirm(`¿Olvidar «${pc.nombre || pc.host}»? Para volver a usarlo habrá que añadirlo otra vez.`)) pcCall("olvidar", { id: pc.id }); }],
-          ]);
-        }));
+        pintaDispositivos();
         if (document.activeElement !== $("#pc-porta")) $("#pc-porta").checked = d.portapapeles !== false;
         if (document.activeElement !== $("#pc-suave")) $("#pc-suave").checked = d.suavizar !== false;
+        if (document.activeElement !== $("#pc-compartir")) $("#pc-compartir").checked = d.compartir_notas !== false;
         pintaFluidez(d.fluidez || {});
         $("#pc-falta").hidden = !d.falta;
         ponTexto($("#pc-falta-txt"), d.falta || "");
@@ -927,6 +990,7 @@
       $("#pc-tecla-ok").addEventListener("click", () => pcCall("tecla", { tecla: $("#pc-tecla").value }));
       $("#pc-porta").addEventListener("change", (event) => pcCall("portapapeles", { on: event.target.checked }));
       $("#pc-suave").addEventListener("change", (event) => pcCall("suavizar", { on: event.target.checked }));
+      $("#pc-compartir").addEventListener("change", (event) => pcCall("compartir", { on: event.target.checked }));
       $("#pc-fluidez-ok").addEventListener("click", () => pcCall("fluidez", {}));
       $("#pc-arreglar").addEventListener("click", async () => {
         try {
@@ -938,7 +1002,7 @@
       });
       $("#nombre-este-ok").addEventListener("click", () => {
         const d = pcData || {};
-        renombrar(d.nombre_sistema, d.nombre_este, (nombre) => pcCall("nombre", { nombre }));
+        renombrar(d.nombre_sistema, d.nombre_este, (nombre) => devCall("/api/nombre", { este: true, nombre }).then(watchPc));
       });
       $("#pc-anadir").addEventListener("click", () => {
         $("#pc-par").textContent = "Conectando con el otro PC…";
@@ -948,6 +1012,15 @@
       $("#pc-codigo").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#pc-anadir").click(); });
       watchPc();
       setInterval(() => { if (!document.hidden) watchPc(); }, 1500);
+      /* 0.76: el «Añadir otro PC» de la bandeja abre /mesa#pc-anadir-caja: se despliega y va al campo. */
+      function abrirAnadir() {
+        if (location.hash !== "#pc-anadir-caja") return;
+        $("#pc-anadir-caja").open = true;
+        $("#pc-anadir-caja").scrollIntoView({ block: "center" });
+        $("#pc-destino").focus();
+      }
+      window.addEventListener("hashchange", abrirAnadir);
+      abrirAnadir();
       $("#recordar").addEventListener("change", (event) => {
         devCall("/api/recordar", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
       });
@@ -1047,6 +1120,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.75"></script>
+    <script src="/logo.js?v=0.76"></script>
   </body>
 </html>
