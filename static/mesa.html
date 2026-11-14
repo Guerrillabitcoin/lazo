@@ -110,6 +110,12 @@
       .hist-lista { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; max-height: 420px; overflow: auto; }
       .hist-lista li { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--hondo); font-size: 13px; }
       .hist-lista .tipo { font-size: 11px; padding: 2px 8px; border-radius: 99px; background: #3a332b; color: var(--suave); text-align: center; }
+      /* 0.73: qué tramos de SponsorBlock se saltan */
+      .cfg-nota { margin: 0 0 6px 18px; font-size: 12px; color: var(--suave); }
+      .cfg .cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 0 8px; margin: 0 0 6px 18px; }
+      .cfg .cats .chip { margin: 0 0 6px; }
+      .cfg .cats .n { margin-left: auto; font-size: 12px; opacity: 0.75; }
+      .cfg .cats.apagado { opacity: 0.55; }
       .hist-lista .tipo.patrocinio { background: rgba(224,122,61,0.18); color: var(--naranja); }
       .hist-lista .vid { grid-column: 1 / -1; grid-row: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .hist-lista .vid a { color: var(--texto); }
@@ -151,7 +157,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.72</p>
+          <p class="ver">0.73</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -193,9 +199,21 @@
           </label>
           <span class="chip" id="anuncios-cuenta" title="Solo cuenta cuando el botón «Saltar» desapareció de verdad">Anuncios saltados: 0</span>
           <label class="chip" title="Salta el tramo en que el vídeo habla de su patrocinador, sin mover el ratón ni traer la ventana. Sale a internet: SponsorBlock ve tu IP, no qué vídeo ves.">
-          <input id="patrocinios" type="checkbox" /> Saltar patrocinios dentro del vídeo (se conecta a SponsorBlock)
+          <input id="patrocinios" type="checkbox" /> Saltar patrocinios, autobombo y más dentro del vídeo (se conecta a SponsorBlock)
           </label>
           <span class="chip" id="patrocinios-cuenta" title="Solo cuenta cuando la posición del vídeo cambió de verdad">Patrocinios saltados: 0</span>
+          <p class="cfg-nota" id="patrocinios-que">Qué saltar (lo marca la gente en SponsorBlock):</p>
+          <div class="cats" id="patrocinios-cats" title="Se pide todo a SponsorBlock con 4 letras del hash del vídeo y aquí se elige qué se salta. Los «momentos destacados» nunca se saltan.">
+            <label class="chip" data-cat="sponsor"><input type="checkbox" data-cat="sponsor" checked /> Patrocinios <span class="n"></span></label>
+            <label class="chip" data-cat="selfpromo"><input type="checkbox" data-cat="selfpromo" checked /> Autobombo / promo del canal <span class="n"></span></label>
+            <label class="chip" data-cat="interaction"><input type="checkbox" data-cat="interaction" checked /> Recordatorios de suscribirse y like <span class="n"></span></label>
+            <label class="chip" data-cat="intro"><input type="checkbox" data-cat="intro" /> Intros <span class="n"></span></label>
+            <label class="chip" data-cat="outro"><input type="checkbox" data-cat="outro" /> Outros / créditos <span class="n"></span></label>
+            <label class="chip" data-cat="preview"><input type="checkbox" data-cat="preview" /> Avances / resúmenes <span class="n"></span></label>
+            <label class="chip" data-cat="filler"><input type="checkbox" data-cat="filler" /> Relleno / desvíos <span class="n"></span></label>
+            <label class="chip" data-cat="music_offtopic"><input type="checkbox" data-cat="music_offtopic" /> Partes sin música en vídeos musicales <span class="n"></span></label>
+          </div>
+          <span class="chip" id="patrocinios-ultimo" hidden></span>
           <p class="cfg-sub">Este PC</p>
           <span class="chip" id="nombre-este" title="Así sale este PC en la fila de PCs del móvil (y en «Controlar otro PC» de los demás, si allí lo renombran)">Nombre para el móvil: —</span>
           <button type="button" class="chip" id="nombre-este-ok">Renombrar este PC</button>
@@ -573,11 +591,31 @@
         const m = Math.round(s / 60);
         return m < 60 ? m + " min" : Math.floor(m / 60) + " h " + String(m % 60).padStart(2, "0") + " min";
       }
+      const CAT_CORTO = { sponsor: "Patrocinio", selfpromo: "Autobombo", interaction: "Suscríbete", intro: "Intro",
+        outro: "Créditos", preview: "Avance", filler: "Relleno", music_offtopic: "Sin música" };
       function patrociniosTexto(info) {
         const total = Number(info.total) || 0;
         let txt = "Patrocinios saltados: " + total;
         if (total) txt += " · hoy: " + (Number(info.hoy) || 0) + " · ahorrado: " + ahorradoTexto(info.ahorrado);
         return txt;
+      }
+      /* 0.73: el último salto dice qué era, y avisa si el vídeo entero es patrocinado. */
+      function patrociniosDetalle(info) {
+        const partes = [];
+        const u = info.ultimo_salto || {};
+        if (u.nombre) partes.push("Último salto: " + u.nombre + (u.seg ? " (" + ahorradoTexto(u.seg) + ")" : ""));
+        if (info.entero) partes.push("Este vídeo entero está marcado como " + info.entero + ": no se salta nada");
+        return partes.join(" · ");
+      }
+      function pintaCategorias(info) {
+        const elegidas = Array.isArray(info.categorias) ? info.categorias : null;
+        const cuenta = info.por_categoria || {};
+        document.querySelectorAll("#patrocinios-cats input[data-cat]").forEach((box) => {
+          const cat = box.dataset.cat;
+          if (elegidas && document.activeElement !== box) box.checked = elegidas.includes(cat);
+          const n = Number(cuenta[cat]) || 0;
+          box.parentElement.querySelector(".n").textContent = n ? String(n) : "";
+        });
       }
       function siguesTexto(info, now) {
         const total = Number(info.total) || 0;
@@ -667,7 +705,14 @@
           if (document.activeElement !== $("#despierto")) $("#despierto").checked = !!data.despierto;
           if (data.anuncios_info) $("#anuncios-cuenta").textContent = `Anuncios saltados: ${data.anuncios_info.total || 0} · hoy: ${data.anuncios_info.hoy || 0}`;
           if (document.activeElement !== $("#patrocinios")) $("#patrocinios").checked = !!data.patrocinios;
-          if (data.patrocinios_info) $("#patrocinios-cuenta").textContent = patrociniosTexto(data.patrocinios_info);
+          if (data.patrocinios_info) {
+            $("#patrocinios-cuenta").textContent = patrociniosTexto(data.patrocinios_info);
+            pintaCategorias(data.patrocinios_info);
+            const det = patrociniosDetalle(data.patrocinios_info);
+            $("#patrocinios-ultimo").textContent = det;
+            $("#patrocinios-ultimo").hidden = !det;
+          }
+          $("#patrocinios-cats").classList.toggle("apagado", !data.patrocinios);
           ponTexto($("#st-net"), (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red");
         } catch (_err) {}
       }
@@ -760,6 +805,11 @@
       });
       $("#patrocinios").addEventListener("change", (event) => {
         devCall("/api/patrocinios", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
+      });
+      document.querySelectorAll("#patrocinios-cats input[data-cat]").forEach((box) => {
+        box.addEventListener("change", () => {
+          devCall("/api/patrocinios", { categorias: { [box.dataset.cat]: box.checked } }).then(watchConn).catch(() => watchConn());
+        });
       });
       $("#sigues").addEventListener("change", (event) => {
         devCall("/api/sigues", { on: event.target.checked }).then(watchConn).catch(() => watchConn());
@@ -895,7 +945,7 @@
           + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
         const tipo = document.createElement("span");
         tipo.className = `tipo ${e.tipo}`;
-        tipo.textContent = e.tipo === "patrocinio" ? "Patrocinio" : "Anuncio";
+        tipo.textContent = e.tipo === "patrocinio" ? (CAT_CORTO[e.cat] || "Patrocinio") : "Anuncio";
         const vid = document.createElement("span");
         vid.className = "vid";
         const nombre = e.titulo || (e.video ? `Vídeo ${e.video}` : "Vídeo de YouTube");
@@ -953,6 +1003,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.72"></script>
+    <script src="/logo.js?v=0.73"></script>
   </body>
 </html>

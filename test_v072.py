@@ -350,12 +350,12 @@ class RatonDeSerieEnChrome(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.72")
-        self.assertEqual(pcapc.VERSION, "0.72")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.72")
-        self.assertIn('<p class="ver">0.72', MESA)
-        self.assertIn("<title>LaZoo 0.72</title>", HTML)
-        self.assertIn('const PAGE_VERSION = "0.72"', JS)
+        self.assertEqual(lazo.VERSION, "0.73")
+        self.assertEqual(pcapc.VERSION, "0.73")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.73")
+        self.assertIn('<p class="ver">0.73', MESA)
+        self.assertIn("<title>LaZoo 0.73</title>", HTML)
+        self.assertIn('const PAGE_VERSION = "0.73"', JS)
 
     def test_apk_sin_cambios(self):
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")

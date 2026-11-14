@@ -99,7 +99,7 @@ class Historial:
 
     # --- apuntar ----------------------------------------------------------------
     def apuntar(self, tipo: str, titulo: str = "", video: str = "", desde: float | None = None,
-                hasta: float | None = None, seg: float | None = None, metodo: str = "") -> int:
+                hasta: float | None = None, seg: float | None = None, metodo: str = "", categoria: str = "") -> int:
         if tipo not in TIPOS:
             raise ValueError("tipo")
         import patrocinios
@@ -111,6 +111,8 @@ class Historial:
                  "video": vid, "desde": None if desde is None else round(max(0.0, float(desde)), 1),
                  "hasta": None if hasta is None else round(max(0.0, float(hasta)), 1),
                  "seg": None if seg is None else round(max(0.0, float(seg)), 1), "metodo": str(metodo)[:12]}
+            if categoria in patrocinios.CATEGORIAS:  # 0.73: qué tipo de tramo se saltó
+                e["cat"] = categoria
             self.entradas.insert(0, e)
             del self.entradas[MAX:]
             a = self.acumulado[tipo]
@@ -229,7 +231,7 @@ def anuncio_saltado(historial: Historial | None = None, row: dict[str, str] | No
 
 
 def patrocinio_saltado(titulo: str, video: str, desde: float | None, hasta: float | None, seg: float,
-                       metodo: str, historial: Historial | None = None) -> int:
-    """Lo llama patrocinios.py tras un salto verificado."""
+                       metodo: str, historial: Historial | None = None, categoria: str = "") -> int:
+    """Lo llama patrocinios.py tras un salto verificado (0.73: con la categoría)."""
     return (historial or HISTORIAL).apuntar("patrocinio", titulo=titulo, video=video, desde=desde,
-                                            hasta=hasta, seg=seg, metodo=metodo)
+                                            hasta=hasta, seg=seg, metodo=metodo, categoria=categoria)

@@ -39,7 +39,7 @@ import pcapc
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.72"
+VERSION = "0.73"
 pcapc.VERSION = VERSION  # 0.70: el User-Agent de «Controlar otro PC» lleva la versión
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
@@ -286,7 +286,8 @@ def connection_info() -> dict:
         "anuncios_info": {k: anuncios.ANUNCIOS.status()[k] for k in ("total", "hoy", "sesion", "ultimo")},
         "patrocinios": patrocinios.PATROCINIOS.status()["on"],
         "patrocinios_info": {k: v for k, v in patrocinios.PATROCINIOS.status().items()
-                             if k in ("total", "hoy", "sesion", "ultimo", "ahorrado", "ahorrado_hoy")},
+                             if k in ("total", "hoy", "sesion", "ultimo", "ahorrado", "ahorrado_hoy",
+                                      "categorias", "todas", "por_categoria", "ultimo_salto", "entero")},
         "despierto": despierto.DESPIERTO.status()["on"],
         "despierto_activo": despierto.DESPIERTO.status()["activo"],
         "approve_where": approve_where(),
@@ -1030,7 +1031,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/patrocinios":
             # 0.64: saltar los patrocinios dentro del vídeo (SponsorBlock). Igual que /api/anuncios.
-            self._guard(lambda body: patrocinios.PATROCINIOS.set_on(body.get("on"), bool(body.get("reset")) and not self.remote))
+            # 0.73: {"categorias": [...] o {cat: bool}} elige qué se salta (Panel y móvil).
+            def _patro(body: dict) -> dict:
+                if "categorias" in body:
+                    patrocinios.PATROCINIOS.set_categorias(body["categorias"])
+                return patrocinios.PATROCINIOS.set_on(body.get("on"), bool(body.get("reset")) and not self.remote)
+
+            self._guard(_patro)
             return
         if path == "/api/despierto":
             # 0.63: mantener el PC despierto mientras se usa desde el móvil (despierto.py).

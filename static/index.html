@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>LaZoo 0.72</title>
-    <link rel="stylesheet" href="/app.css?v=0.72" />
+    <title>LaZoo 0.73</title>
+    <link rel="stylesheet" href="/app.css?v=0.73" />
     <link rel="icon" type="image/svg+xml" href="/img/infinito-naranja.svg" />
     <link rel="icon" type="image/png" sizes="192x192" href="/img/icono-192.png" />
     <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
@@ -20,7 +20,7 @@
       <header id="status" class="top" data-link="off">
         <div class="brand-col">
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.72</p>
+          <p class="ver">0.73</p>
         </div>
         <div class="status-copy">
           <p id="link-label">Sin conexión</p>
@@ -236,8 +236,22 @@
             </div>
             <label class="diag-smooth yt-sigues"><input id="yt-sigues" type="checkbox" checked /> Evitar el aviso «¿Sigues ahí?»</label>
             <label class="diag-smooth yt-sigues"><input id="yt-anuncios" type="checkbox" checked /> Saltar anuncios (también con ⏭)</label>
-            <label class="diag-smooth yt-sigues"><input id="yt-patrocinios" type="checkbox" /> Saltar patrocinios del vídeo (SponsorBlock)</label>
+            <label class="diag-smooth yt-sigues"><input id="yt-patrocinios" type="checkbox" /> Saltar patrocinios y autobombo (SponsorBlock)</label>
             <p class="mini-label yt-aviso">Sale a internet: sponsor.ajay.app ve tu IP, no qué vídeo ves. Más en «Sobre».</p>
+            <details class="yt-cats" id="yt-cats">
+              <summary>Qué saltar</summary>
+              <div class="yt-cats-lista">
+                <label class="diag-smooth"><input type="checkbox" data-cat="sponsor" checked /> Patrocinios <span class="n"></span></label>
+                <label class="diag-smooth"><input type="checkbox" data-cat="selfpromo" checked /> Autobombo / promo del canal <span class="n"></span></label>
+                <label class="diag-smooth"><input type="checkbox" data-cat="interaction" checked /> Recordatorios de suscribirse y like <span class="n"></span></label>
+                <label class="diag-smooth"><input type="checkbox" data-cat="intro" /> Intros <span class="n"></span></label>
+                <label class="diag-smooth"><input type="checkbox" data-cat="outro" /> Outros / créditos <span class="n"></span></label>
+                <label class="diag-smooth"><input type="checkbox" data-cat="preview" /> Avances / resúmenes <span class="n"></span></label>
+                <label class="diag-smooth"><input type="checkbox" data-cat="filler" /> Relleno / desvíos <span class="n"></span></label>
+                <label class="diag-smooth"><input type="checkbox" data-cat="music_offtopic" /> Partes sin música en vídeos musicales <span class="n"></span></label>
+              </div>
+              <p class="mini-label yt-ultimo" id="yt-ultimo" hidden></p>
+            </details>
             <form id="yt-search" class="phrase">
               <input id="yt-q" maxlength="120" placeholder="Buscar" />
               <button type="submit">Buscar</button>
@@ -392,7 +406,7 @@
             <div class="about-head">
               <span class="lz-logo about-logo" data-estado="conectado" data-fijo="conectado" title="LaZoo"></span>
               <div>
-                <p class="about-name">LaZoo <span id="about-version">0.72</span></p>
+                <p class="about-name">LaZoo <span id="about-version">0.73</span></p>
                 <p class="hint">Hecho por GUERRILLA · <span id="about-license">MIT</span> · código abierto</p>
               </div>
             </div>
@@ -418,7 +432,7 @@
               <h3>Cuándo sale algo a internet</h3>
               <p>Entre el móvil y el PC nada sale de tu Wi-Fi. El PC solo sale a internet para:</p>
               <ul class="about-facts">
-                <li><b>Saltar patrocinios</b> (activado de serie): pregunta a SponsorBlock con 4 letras del hash del vídeo, no cuál es. Sí ve la IP de tu casa y cuándo cambias de vídeo.</li>
+                <li><b>Saltar patrocinios y autobombo</b> (se enciende en la pestaña YouTube): pregunta a SponsorBlock con 4 letras del hash del vídeo, no cuál es, y pide siempre todas las categorías, así tampoco sabe cuáles saltas. Sí ve la IP de tu casa y cuándo cambias de vídeo.</li>
                 <li><b>Buscar en YouTube</b> desde el móvil: va a youtube.com.</li>
                 <li><b>Buscar actualización</b>: consulta GitHub, solo al pulsarlo.</li>
                 <li>«Saltar anuncios» y «¿Sigues ahí?» no salen: leen YouTube en el propio PC.</li>
@@ -473,8 +487,8 @@
         </div>
       </section>
     </main>
-    <script src="/logo.js?v=0.72"></script>
-    <script src="/seal.js?v=0.72"></script>
-    <script src="/app.js?v=0.72"></script>
+    <script src="/logo.js?v=0.73"></script>
+    <script src="/seal.js?v=0.73"></script>
+    <script src="/app.js?v=0.73"></script>
   </body>
 </html>

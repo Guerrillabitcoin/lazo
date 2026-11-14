@@ -24,6 +24,14 @@ Qué hace (solo Windows), en el hilo `lazo-patrocinios`:
 Cada tramo se salta una vez por vídeo: si vuelves atrás para verlo, se queda. Al volver al
 principio del vídeo se pueden saltar otra vez. Si el tramo no cuadra con la duración que da
 Windows (otra versión del vídeo, o está sonando un anuncio de YouTube), no se salta.
+0.73: no solo «sponsor». SponsorBlock marca también el autobombo del canal (selfpromo), los
+«suscríbete, dale like y a la campana» (interaction), intros, créditos finales, avances,
+relleno y partes sin música en vídeos musicales. Se piden todas en la misma consulta (así la
+consulta no dice cuáles te interesan) y se saltan las elegidas; de serie: patrocinios,
+autobombo y recordatorios. Los «momentos destacados» (poi_highlight) no se piden ni se saltan, y si
+el vídeo entero está marcado como patrocinado o autopromoción (actionType «full») no se salta
+nada: solo se avisa.
+
 Desde 0.65 viene APAGADO de serie: se enciende en el Panel o en el móvil (se recuerda) o, solo para
 esa sesión, con `--con-patrocinios` / `LAZO_CON_PATROCINIOS=1`. `--sin-patrocinios` /
 `LAZO_SIN_PATROCINIOS=1` lo apagan del todo y mandan sobre todo lo demás.
@@ -45,7 +53,22 @@ import sigues
 
 API = "https://sponsor.ajay.app/api/skipSegments/"
 PREFIJO = 4              # letras del SHA-256 del id que salen del PC (las que recomienda SponsorBlock)
-CATEGORIAS = ("sponsor",)
+# 0.73: todas las que se pueden saltar, en el orden en que salen en el Panel y el móvil.
+CATEGORIAS = ("sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "filler", "music_offtopic")
+NOMBRES = {
+    "sponsor": "Patrocinios",
+    "selfpromo": "Autobombo / promo del canal",
+    "interaction": "Recordatorios de suscribirse y like",
+    "intro": "Intros",
+    "outro": "Outros / créditos",
+    "preview": "Avances / resúmenes",
+    "filler": "Relleno / desvíos",
+    "music_offtopic": "Partes sin música en vídeos musicales",
+}
+DEFECTO = ("sponsor", "selfpromo", "interaction")  # 0.73: lo que hace perder el tiempo, de serie
+CLAVE_CATEGORIAS = "patrocinios_categorias"        # en ajustes.json; sin ella, DEFECTO (migración)
+TIPOS_ENTERO = ("sponsor", "selfpromo", "exclusive_access")  # «todo el vídeo es…»: solo se avisa
+NOMBRES_ENTERO = {"sponsor": "patrocinado", "selfpromo": "autopromoción del canal", "exclusive_access": "acceso exclusivo pagado"}
 AGENTE = "LaZoo"         # User-Agent: sin versión del sistema ni nada personal
 TIEMPO_RED = 5.0
 DEFAULT_ON = False  # 0.65: apagado de serie (decisión del dueño); al encenderlo se recuerda en ajustes.json
@@ -103,8 +126,23 @@ def prefijo(vid: str) -> str:
 
 
 def url_consulta(vid: str) -> str:
-    query = "&".join([f"category={c}" for c in CATEGORIAS] + ["actionType=skip"])
+    """Siempre las mismas categorías (todas) y sin el id: solo el prefijo del hash sale del PC."""
+    cats = list(CATEGORIAS) + [c for c in TIPOS_ENTERO if c not in CATEGORIAS]
+    query = "&".join([f"category={c}" for c in cats] + ["actionType=skip", "actionType=full"])
     return f"{API}{prefijo(vid)}?{query}"
+
+
+def limpiar_categorias(valor: Any) -> list[str]:
+    """Lista válida de categorías (en el orden de CATEGORIAS). Acepta lista o {cat: bool}.
+    Lanza ValueError con algo que no sea una categoría conocida."""
+    if isinstance(valor, dict):
+        valor = [k for k, v in valor.items() if v is True]
+    if not isinstance(valor, (list, tuple)) or len(valor) > 20:
+        raise ValueError("categorías no válidas")
+    for c in valor:
+        if c not in CATEGORIAS:
+            raise ValueError(f"categoría desconocida: {str(c)[:30]}")
+    return [c for c in CATEGORIAS if c in valor]
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -116,7 +154,9 @@ def _num(value: Any, default: float = 0.0) -> float:
 
 
 def tramos(data: Any, vid: str) -> list[dict[str, Any]]:
-    """De la respuesta de SponsorBlock (vídeos con el mismo prefijo), los tramos de `vid`."""
+    """De la respuesta de SponsorBlock (vídeos con el mismo prefijo), los tramos de `vid` que se
+    pueden saltar, con su «categoria» (0.73: de todas; validos() se queda con las elegidas).
+    Los de «todo el vídeo» salen aparte con «entero»: True (nunca se saltan)."""
     out: list[dict[str, Any]] = []
     if not isinstance(data, list):
         return out
@@ -126,7 +166,12 @@ def tramos(data: Any, vid: str) -> list[dict[str, Any]]:
         for seg in video.get("segments") or []:
             if not isinstance(seg, dict):
                 continue
-            if seg.get("category") not in CATEGORIAS or seg.get("actionType", "skip") != "skip":
+            cat, accion = seg.get("category"), seg.get("actionType", "skip")
+            if accion == "full" and cat in TIPOS_ENTERO:
+                out.append({"inicio": 0.0, "fin": 0.0, "duracion": max(0.0, _num(seg.get("videoDuration"))),
+                            "categoria": cat, "entero": True})
+                continue
+            if cat not in CATEGORIAS or accion != "skip":  # poi_highlight, mute, chapter: nunca
                 continue
             pair = seg.get("segment")
             if not isinstance(pair, (list, tuple)) or len(pair) != 2:
@@ -134,36 +179,61 @@ def tramos(data: Any, vid: str) -> list[dict[str, Any]]:
             ini, fin = _num(pair[0], -1), _num(pair[1], -1)
             if ini < 0 or fin - ini < MIN_TRAMO:
                 continue
-            out.append({"inicio": ini, "fin": fin, "duracion": max(0.0, _num(seg.get("videoDuration")))})
+            out.append({"inicio": ini, "fin": fin, "duracion": max(0.0, _num(seg.get("videoDuration"))), "categoria": cat})
     out.sort(key=lambda t: t["inicio"])
     return out
 
 
-def unir(lista: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    """Tramos que se pisan o casi se tocan (menos de 1 s) se saltan de una vez."""
-    out: list[list[float]] = []
-    for ini, fin in sorted(lista):
+def entero(lista: list[dict[str, Any]]) -> str:
+    """0.73: «patrocinado», «autopromoción del canal»… si todo el vídeo está marcado así; si no, ""."""
+    for t in lista:
+        if t.get("entero"):
+            return NOMBRES_ENTERO.get(t.get("categoria"), "patrocinado")
+    return ""
+
+
+def unir(lista: list[tuple]) -> list[tuple]:
+    """Tramos que se pisan o casi se tocan (menos de 1 s) se saltan de una vez. Con tríos
+    (inicio, fin, categorías) el tramo unido lleva las categorías de todos (0.73)."""
+    out: list[list] = []
+    trios = bool(lista) and len(lista[0]) > 2
+    for t in sorted(lista, key=lambda x: (x[0], x[1])):
+        ini, fin = t[0], t[1]
+        cats = tuple(t[2]) if trios else ()
         if out and ini <= out[-1][1] + 1.0:
             out[-1][1] = max(out[-1][1], fin)
+            out[-1][2] = out[-1][2] + tuple(c for c in cats if c not in out[-1][2])
         else:
-            out.append([ini, fin])
-    return [(a, b) for a, b in out]
+            out.append([ini, fin, cats])
+    return [(a, b, c) if trios else (a, b) for a, b, c in out]
 
 
-def validos(lista: list[dict[str, Any]], duracion: float) -> list[tuple[float, float]]:
+def validos(lista: list[dict[str, Any]], duracion: float, categorias: Any = None,
+            con_categoria: bool = False) -> list[tuple]:
     """Solo con la duración real conocida. Un tramo marcado en un vídeo de otra duración (otra
-    versión, o lo que suena es un anuncio de YouTube) no vale."""
+    versión, o lo que suena es un anuncio de YouTube) no vale. 0.73: solo las `categorias`
+    elegidas (None = solo «sponsor», como hasta la 0.72); con `con_categoria`, tríos
+    (inicio, fin, categorías)."""
     if duracion <= 1:
         return []
+    elegidas = ("sponsor",) if categorias is None else tuple(categorias)
     out = []
     for t in lista:
+        if t.get("entero") or t.get("categoria", "sponsor") not in elegidas:
+            continue
         if t["duracion"] and abs(t["duracion"] - duracion) > TOLERANCIA:
             continue
         ini, fin = t["inicio"], min(t["fin"], duracion)
         if ini >= duracion - 0.5 or fin - ini < MIN_TRAMO:
             continue
-        out.append((ini, fin))
+        out.append((ini, fin, (t.get("categoria", "sponsor"),)) if con_categoria else (ini, fin))
     return unir(out)
+
+
+def nombre_de(categorias: Any) -> str:
+    """«Autobombo / promo del canal» o «Patrocinios + Intros» para el aviso del salto."""
+    cats = [c for c in (categorias or ()) if c in NOMBRES] or ["sponsor"]
+    return " + ".join(NOMBRES[c] for c in cats)
 
 
 def clave(ini: float) -> str:
@@ -179,12 +249,16 @@ def decidir(lista: list[tuple[float, float]], pos: float, duracion: float, tocan
     if not tocando:
         return {"accion": "esperar", "s": PASO}
     proximo = None
-    for ini, fin in lista:
+    for t in lista:
+        ini, fin = t[0], t[1]
         k = clave(ini)
         if k in hechos:
             continue
         if ini - ANTES <= pos < fin - MARGEN_FIN:
-            return {"accion": "saltar", "desde": ini, "hasta": fin, "clave": k}
+            out = {"accion": "saltar", "desde": ini, "hasta": fin, "clave": k}
+            if len(t) > 2:
+                out["categorias"] = list(t[2])
+            return out
         if ini - ANTES > pos and (proximo is None or ini < proximo):
             proximo = ini
     if proximo is None:
@@ -369,7 +443,7 @@ class Patrocinios(sigues.Sigues):
     COUNT = "patrocinios_contador"
     NAME = "lazo-patrocinios"
     DEFAULT = DEFAULT_ON
-    MESSAGE = "  YouTube: patrocinio saltado sin tocar el ratón."
+    MESSAGE = "  YouTube: {que} saltado sin tocar el ratón."  # 0.73: dice qué categoría
 
     def __init__(self, find: Callable[[], dict | None] | None = None, probe: Callable[[str], dict] | None = None,
                  file=None, fetch: Callable[[str], list] | None = None,
@@ -386,43 +460,91 @@ class Patrocinios(sigues.Sigues):
         self.consulta = ""                  # ok / nada / sin red
         self.n_video = 0
         self.sin_yt = 0.0
+        self.entero = ""                    # 0.73: «patrocinado»… si el vídeo entero lo es (no se salta)
+        self.ultimo_salto: dict[str, Any] = {}
         super().__init__(find=find, probe=probe, file=file)
+        self.categorias = self._load_categorias()
 
-    # --- contador con el tiempo ahorrado --------------------------------------
+    # --- 0.73: qué categorías se saltan ----------------------------------------
+    def _load_categorias(self) -> list[str]:
+        """Las guardadas en ajustes.json o, si nunca se eligieron (hasta 0.72 solo había
+        «sponsor»), las de serie: patrocinios, autobombo y recordatorios."""
+        p = self._path()
+        try:
+            data = json.loads(p.read_text(encoding="utf-8")) if p and p.is_file() else {}
+            if CLAVE_CATEGORIAS in data:
+                return limpiar_categorias(data[CLAVE_CATEGORIAS])
+        except Exception:  # noqa: BLE001 (archivo roto o lista rara: las de serie)
+            pass
+        return list(DEFECTO)
+
+    def set_categorias(self, valor: Any) -> dict[str, Any]:
+        cats = limpiar_categorias(valor)
+        if isinstance(valor, dict):  # {cat: bool}: solo cambian las que vienen
+            cats = [c for c in CATEGORIAS if (valor.get(c) is True) or (c in self.categorias and c not in valor)]
+        self.categorias = cats
+        self._save()
+        return self.status()
+
+    def _save_now(self, p) -> None:
+        super()._save_now(p)
+        try:
+            data = json.loads(p.read_text(encoding="utf-8")) if p.is_file() else {}
+            data[CLAVE_CATEGORIAS] = list(getattr(self, "categorias", DEFECTO))
+            tmp = p.with_name(f"{p.name}.{os.getpid()}.c.tmp")
+            tmp.write_text(json.dumps(data), encoding="utf-8")
+            os.replace(tmp, p)
+        except (OSError, ValueError):
+            pass
+
+    # --- contador con el tiempo ahorrado (y, 0.73, por categoría) ---------------
     def _load_count(self) -> None:
         super()._load_count()
         self.ahorrado = self.ahorrado_hoy = 0.0
+        self.por_categoria: dict[str, int] = {}
         p = self._path()
         try:
             data = json.loads(p.read_text(encoding="utf-8")) if p and p.is_file() else {}
             c = data.get(self.COUNT) or {}
             self.ahorrado = max(0.0, float(c.get("ahorrado", 0) or 0))
             self.ahorrado_hoy = max(0.0, float(c.get("ahorrado_hoy", 0) or 0))
+            pc = c.get("por_categoria") or {}
+            if isinstance(pc, dict):
+                self.por_categoria = {k: max(0, int(v)) for k, v in pc.items() if k in CATEGORIAS}
         except Exception:  # noqa: BLE001 (archivo roto: a cero)
             pass
 
     def _contador(self) -> dict[str, Any]:
         c = super()._contador()
-        c.update(ahorrado=round(self.ahorrado, 1), ahorrado_hoy=round(self.ahorrado_hoy, 1))
+        c.update(ahorrado=round(self.ahorrado, 1), ahorrado_hoy=round(self.ahorrado_hoy, 1),
+                 por_categoria=dict(getattr(self, "por_categoria", {})))
         return c
 
-    def contar(self, now: float | None = None, segundos: float = 0.0) -> None:
+    def contar(self, now: float | None = None, segundos: float = 0.0, categorias: Any = None) -> None:
         now = time.time() if now is None else now
         if time.strftime("%Y-%m-%d", time.localtime(now)) != self.dia:
             self.ahorrado_hoy = 0.0
         self.ahorrado += max(0.0, segundos)
         self.ahorrado_hoy += max(0.0, segundos)
+        for c in categorias or ():
+            if c in CATEGORIAS:
+                self.por_categoria[c] = self.por_categoria.get(c, 0) + 1
         super().contar(now)
 
     def reset(self) -> dict[str, Any]:
         self.ahorrado = self.ahorrado_hoy = 0.0
+        self.por_categoria = {}
         return super().reset()
 
     def status(self) -> dict[str, Any]:
         st = super().status()
         hoy = self.dia == time.strftime("%Y-%m-%d")
         st.update(ahorrado=round(self.ahorrado), ahorrado_hoy=round(self.ahorrado_hoy if hoy else 0),
-                  metodo=self.metodo, video=self.n_video, consulta=self.consulta, intervalo_s=PASO)
+                  metodo=self.metodo, video=self.n_video, consulta=self.consulta, intervalo_s=PASO,
+                  categorias=list(getattr(self, "categorias", DEFECTO)),
+                  todas=[{"id": c, "nombre": NOMBRES[c], "defecto": c in DEFECTO} for c in CATEGORIAS],
+                  por_categoria=dict(getattr(self, "por_categoria", {})),
+                  ultimo_salto=dict(getattr(self, "ultimo_salto", {})), entero=getattr(self, "entero", ""))
         return st
 
     # --- bucle ------------------------------------------------------------------
@@ -481,8 +603,11 @@ class Patrocinios(sigues.Sigues):
             self.pendiente = None
         if not vid or sesion is None:
             self.n_video = 0
+            self.entero = ""
             return {"skip": "sin vídeo"}
-        lista = validos(self._tramos(vid, now), _num(sesion.get("len")))
+        crudos = self._tramos(vid, now)
+        self.entero = entero(crudos)  # 0.73: vídeo entero patrocinado: no se salta, solo se avisa
+        lista = validos(crudos, _num(sesion.get("len")), categorias=self.categorias, con_categoria=True)
         self.n_video = len(lista)
         pos = _num(sesion.get("pos"))
         hechos = self.v["hechos"]
@@ -544,6 +669,7 @@ class Patrocinios(sigues.Sigues):
     def _saltar(self, d: dict[str, Any], sesion: dict, teclas_ok: bool, pos: float) -> None:
         k = d["clave"]
         self.v.setdefault("tramo", {})[k] = (pos, d["hasta"])  # 0.66: para el historial
+        self.v.setdefault("cats", {})[k] = tuple(d.get("categorias") or ("sponsor",))  # 0.73
         p = self.pendiente
         if p and p["clave"] == k and self.clock() - p["t"] < VERIFICAR * 2:
             return  # Windows ya lo aceptó: se espera a que se note, nunca dos saltos
@@ -598,17 +724,21 @@ class Patrocinios(sigues.Sigues):
     def _hecho(self, k: str, segundos: float, metodo: str) -> None:
         self.v.setdefault("hechos", set()).add(k)
         self.metodo, self.error = metodo, ""
-        self.contar(segundos=max(0.0, segundos))
-        try:  # 0.66: al historial del Panel
+        cats = tuple(self.v.get("cats", {}).get(k) or ("sponsor",))
+        que = nombre_de(cats)
+        self.contar(segundos=max(0.0, segundos), categorias=cats)
+        self.ultimo_salto = {"categorias": list(cats), "nombre": que, "t": round(time.time(), 1),
+                             "seg": round(max(0.0, segundos), 1)}
+        try:  # 0.66: al historial del Panel (0.73: con la categoría)
             import historial
 
             desde, hasta = self.v.get("tramo", {}).get(k, (None, None))
             historial.patrocinio_saltado(str(self.v.get("titulo") or ""), str(self.v.get("vid") or ""),
-                                         desde, hasta, max(0.0, segundos), metodo)
+                                         desde, hasta, max(0.0, segundos), metodo, categoria=cats[0])
         except Exception:  # noqa: BLE001 (el historial nunca rompe el salto)
             pass
         try:
-            print(self.MESSAGE, flush=True)
+            print(self.MESSAGE.format(que=que), flush=True)
         except Exception:  # noqa: BLE001 (sin consola o consola cp1252)
             pass
 

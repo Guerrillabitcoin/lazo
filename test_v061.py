@@ -195,14 +195,14 @@ class Rutas(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.72")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.72")
+        self.assertEqual(lazo.VERSION, "0.73")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.73")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
         self.assertIn('android:versionCode="66"', apk)
         self.assertIn('android:versionName="3"', apk)
-        self.assertIn('<p class="ver">0.72', MESA)
+        self.assertIn('<p class="ver">0.73', MESA)
         self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
-        self.assertIn("# LaZoo 0.72", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("# LaZoo 0.73", (ROOT / "README.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

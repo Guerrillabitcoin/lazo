@@ -83,7 +83,7 @@ EMERGENCIA = "Ctrl+Alt+Esc"
 UA_PREFIJO = "LaZoo-PC/"
 ARCHIVO_PCS = "otros-pcs.json"
 MAX_PCS = 20
-VERSION = "0.72"
+VERSION = "0.73"
 
 MOVER, BOTON, RUEDA, TECLA, SOLTAR, LATIDO_EV, RESPUESTA, PIDE_PORTA = 1, 2, 3, 4, 5, 6, 7, 8
 PORTA = 9  # solo en tramas P1

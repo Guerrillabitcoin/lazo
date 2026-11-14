@@ -44,7 +44,7 @@ const deviceId = (() => {
 
 /* 0.57: diagnóstico de conexión (sin claves, PIN ni fichas): fase actual, último error,
    versiones de PC/APK/página. Botón «Copiar diagnóstico de conexión» en PIN y espera. */
-const PAGE_VERSION = "0.72";
+const PAGE_VERSION = "0.73";
 const PAGE_PROTO = 2;
 const conn = { phase: "inicio", error: "", pc: "", proto: 0, log: [] };
 function connStep(phase, error) {
@@ -3997,12 +3997,45 @@ if (ytAnuncios) {
 // 0.64: saltar patrocinios dentro del vídeo (patrocinios.py, SponsorBlock). Mismo patrón.
 const ytPatrocinios = document.querySelector("#yt-patrocinios");
 if (ytPatrocinios) {
+  // 0.73: qué categorías se saltan (patrocinios, autobombo, «suscríbete»…), con su contador.
+  const ytCats = document.querySelector("#yt-cats");
+  const pintaPatrocinios = (st) => {
+    if (document.activeElement !== ytPatrocinios) ytPatrocinios.checked = !!st.on;
+    if (!ytCats) return;
+    ytCats.classList.toggle("apagado", !st.on);
+    const elegidas = Array.isArray(st.categorias) ? st.categorias : null;
+    const cuenta = st.por_categoria || {};
+    ytCats.querySelectorAll("input[data-cat]").forEach((box) => {
+      if (elegidas && document.activeElement !== box) box.checked = elegidas.includes(box.dataset.cat);
+      box.disabled = ytPatrocinios.disabled;
+      const n = Number(cuenta[box.dataset.cat]) || 0;
+      const marca = box.parentElement.querySelector(".n");
+      if (marca) marca.textContent = n ? String(n) : "";
+    });
+    const ultimo = ytCats.querySelector("#yt-ultimo");
+    if (ultimo) {
+      const u = st.ultimo_salto || {};
+      const partes = [];
+      if (u.nombre) partes.push("Último salto: " + u.nombre);
+      if (st.entero) partes.push("Este vídeo entero es " + st.entero + ": no se salta");
+      ultimo.textContent = partes.join(" · ");
+      ultimo.hidden = !partes.length;
+    }
+  };
   const syncPatrocinios = () => api("/api/patrocinios", {}).then((st) => {
     ytPatrocinios.disabled = !st.available || !!st.disabled;
-    if (document.activeElement !== ytPatrocinios) ytPatrocinios.checked = !!st.on;
+    pintaPatrocinios(st);
   }).catch(() => {});
   PREF_PUSH.push(syncPatrocinios);
   ytPatrocinios.addEventListener("change", () => {
-    api("/api/patrocinios", { on: ytPatrocinios.checked }).then((st) => { ytPatrocinios.checked = !!st.on; }).catch(() => syncPatrocinios());
+    api("/api/patrocinios", { on: ytPatrocinios.checked }).then(pintaPatrocinios).catch(() => syncPatrocinios());
   });
+  if (ytCats) {
+    ytCats.addEventListener("toggle", () => { if (ytCats.open) syncPatrocinios(); });
+    ytCats.querySelectorAll("input[data-cat]").forEach((box) => {
+      box.addEventListener("change", () => {
+        api("/api/patrocinios", { categorias: { [box.dataset.cat]: box.checked } }).then(pintaPatrocinios).catch(() => syncPatrocinios());
+      });
+    });
+  }
 }

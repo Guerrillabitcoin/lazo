@@ -380,7 +380,7 @@ class AtSpi(unittest.TestCase):
         p = patrocinios.Patrocinios(probe=self.l.orden, find=self.l.find_row, file=Path(tempfile.mkdtemp()) / "a.json",
                                     fetch=lambda vid: [{"desde": 60.0, "hasta": 95.0, "categoria": "sponsor"}])
         p.on = True
-        with mock.patch.object(patrocinios, "validos", lambda lista, _len: lista), \
+        with mock.patch.object(patrocinios, "validos", lambda lista, _len, *a, **k: lista), \
                 mock.patch.object(patrocinios, "decidir", lambda *a, **k: {"accion": "saltar", "clave": "60", "desde": 60.0, "hasta": 95.0, "s": 0}):
             p.check_once()
         self.assertEqual(self.saltos[-1], ("Lentejas", 95.0))
@@ -430,10 +430,10 @@ class Paquete(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_067(self):
-        self.assertEqual(lazo.VERSION, "0.72")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.72")
+        self.assertEqual(lazo.VERSION, "0.73")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.73")
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("# LaZoo 0.72", readme)
+        self.assertIn("# LaZoo 0.73", readme)
         self.assertIn("**Novedad 0.67 (Linux):**", readme)
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         for txt in ("linux_yt.py", "bandeja_linux.py", "test_v067.py"):

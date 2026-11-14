@@ -157,7 +157,8 @@ class Privacidad(unittest.TestCase):
         self.assertEqual(vista["headers"].get("User-agent"), "LaZoo")
         self.assertNotIn("Cookie", vista["headers"])
         self.assertLessEqual(vista["timeout"], 10)
-        self.assertEqual([(t["inicio"], t["fin"]) for t in out], [(30.0, 90.0), (480.0, 510.0)])
+        sponsor = [t for t in out if t.get("categoria") == "sponsor" and not t.get("entero")]  # 0.73: vienen todas
+        self.assertEqual([(t["inicio"], t["fin"]) for t in sponsor], [(30.0, 90.0), (480.0, 510.0)])
 
     def test_404_es_que_no_hay_tramos(self):
         def abrir(req, timeout):
@@ -185,7 +186,7 @@ class Privacidad(unittest.TestCase):
 
 class Tramos(unittest.TestCase):
     def test_solo_los_del_video_y_de_patrocinio(self):
-        out = P.tramos(RESPUESTA, VID)
+        out = [t for t in P.tramos(RESPUESTA, VID) if t["categoria"] == "sponsor" and not t.get("entero")]  # 0.73: vienen todas
         self.assertEqual([(t["inicio"], t["fin"], t["duracion"]) for t in out], [(30.0, 90.0, 600.0), (480.0, 510.0, 600.4)])
         self.assertEqual(P.tramos(RESPUESTA, VID2), [])
 
@@ -255,6 +256,7 @@ class Vigilante(unittest.TestCase):
         p = P.Patrocinios(find=lambda: dict(self.row) if self.row else None, probe=self.ps, file=Path(self.tmp.name) / "ajustes.json",
                           fetch=fetch or buscar, keys=keys, clock=lambda: self.t[0])
         p.on = True  # 0.65: viene apagado de serie; estas pruebas son con la casilla encendida
+        p.categorias = ["sponsor"]  # 0.73: de serie también autobombo y recordatorios; estas son de solo «sponsor»
         return p
 
     def tearDown(self):
@@ -478,7 +480,8 @@ class Rutas(Base):
     def test_panel(self):
         info = lazo.connection_info()
         self.assertIn("patrocinios", info)
-        self.assertEqual(set(info["patrocinios_info"]), {"total", "hoy", "sesion", "ultimo", "ahorrado", "ahorrado_hoy"})
+        self.assertEqual(set(info["patrocinios_info"]), {"total", "hoy", "sesion", "ultimo", "ahorrado", "ahorrado_hoy",
+                                                             "categorias", "todas", "por_categoria", "ultimo_salto", "entero"})  # 0.73
 
 
 class Interfaz(unittest.TestCase):
