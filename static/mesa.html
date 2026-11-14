@@ -172,6 +172,16 @@
       .tarjetas li .t-linea, .tarjetas li .t-nombre, .conn .url { user-select: text; -webkit-user-select: text; }
       .copiar { min-height: 26px; padding: 0 8px; font-size: 12px; border-radius: 8px; }
       .cfg .chip.pc-pin { flex-wrap: wrap; gap: 6px 8px; }
+      #vpn-aviso, #conn-vpn { color: var(--naranja); font-size: 12px; margin: 8px 0 0; line-height: 1.35; }
+      .redes h3 { font-size: 13px; color: var(--suave); font-weight: 600; margin: 12px 0 6px; }
+      .redes ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+      .redes li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+      .redes li .r-nombre { font-weight: 600; min-width: 64px; }
+      .redes li .r-ip { font-variant-numeric: tabular-nums; color: var(--texto); }
+      .redes li.vpn .r-nombre { color: var(--naranja); }
+      .redes li .r-qr { font-size: 11px; padding: 1px 6px; border-radius: 6px; background: var(--naranja); color: #141210; }
+      .redes li button { margin-left: auto; min-height: 26px; padding: 0 8px; border-radius: 8px; font-size: 11px; background: #3a332b; color: var(--texto); border: 0; cursor: pointer; }
+      .redes-nota { font-size: 11px; color: var(--suave); margin: 6px 0 0; }
       .url-fila { display: flex; gap: 6px; align-items: center; justify-content: center; flex-wrap: wrap; }
       .clip-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
     </style>
@@ -181,7 +191,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.76</p>
+          <p class="ver">0.77</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -200,6 +210,7 @@
           <div id="conn-qr" class="qr" aria-label="Código QR para conectar"></div>
           <p id="conn-pin" class="pin"></p>
           <div id="conn-urls"></div>
+          <p id="conn-vpn" class="aviso" hidden></p>
           <p class="url" style="color:var(--suave);font-size:12px">Acéptalo <span id="conn-where">en el aviso de Windows o en el icono de la bandeja</span>.</p>
           <div class="links">
             <a class="primary" href="/conectar" target="_blank" rel="noopener">QR a pantalla completa</a>
@@ -275,6 +286,12 @@
               <dt>Recordar dispositivos</dt><dd id="st-rec">—</dd>
               <dt>Red</dt><dd id="st-net">—</dd>
             </dl>
+            <p id="vpn-aviso" class="aviso" hidden></p>
+            <div id="redes-caja" class="redes">
+              <h3>Direcciones de este PC</h3>
+              <ul id="redes-lista" aria-label="Direcciones de este PC"></ul>
+              <p class="redes-nota">La primera va al QR. Elige otra si el móvil no conecta.</p>
+            </div>
           </section>
           <section id="dispositivos" class="box devs">
             <h2>Dispositivos</h2>
@@ -698,6 +715,60 @@
         catch (_err) { window.prompt("Copia este diagnóstico:", connDiag); }
         window.setTimeout(() => { btn.textContent = "Diagnóstico"; }, 2500);
       });
+      // 0.77: todas las IPs con su interfaz; la primera va al QR. Se puede elegir otra (se recuerda).
+      function pintaRedes(data) {
+        const redes = data.redes || [];
+        const aviso = data.aviso_vpn || "";
+        for (const id of ["#vpn-aviso", "#conn-vpn"]) {
+          const el = $(id);
+          if (el) { el.hidden = !aviso; ponTexto(el, aviso); }
+        }
+        pintaLista($("#redes-lista"), [redes, data.elegida || ""], () => {
+          if (!redes.length) {
+            const li = document.createElement("li");
+            li.textContent = "Sin red local";
+            return [li];
+          }
+          return redes.map((r) => {
+            const li = document.createElement("li");
+            if (r.vpn) li.classList.add("vpn");
+            const n = document.createElement("span");
+            n.className = "r-nombre";
+            n.textContent = r.label;
+            n.title = r.nombre || r.label;
+            const ip = document.createElement("span");
+            ip.className = "r-ip";
+            ip.textContent = (r.url || r.ip).replace(/^https?:\/\//, "").replace(/\/$/, "");
+            li.append(n, ip);
+            if (r.qr) {
+              const q = document.createElement("span");
+              q.className = "r-qr";
+              q.textContent = r.elegida ? "QR (elegida)" : "QR";
+              li.append(q);
+            }
+            const b = document.createElement("button");
+            b.type = "button";
+            if (r.qr && r.elegida) {
+              b.textContent = "Automática";
+              b.title = "Volver a elegir la dirección sola";
+              b.addEventListener("click", () => elegirRed(""));
+            } else if (!r.qr) {
+              b.textContent = "Usar en el QR";
+              b.title = "Poner esta dirección en el QR y en el enlace";
+              b.addEventListener("click", () => elegirRed(r.ip));
+            } else {
+              return li;
+            }
+            li.append(b);
+            return li;
+          });
+        });
+      }
+      async function elegirRed(ip) {
+        try { await devCall("/api/red", { ip }); } catch (_err) { /* se ve en la lista */ }
+        watchConn();
+      }
+
       async function watchConn() {
         try {
           const data = await fetch("/api/conexion").then((res) => res.json());
@@ -754,6 +825,7 @@
             $("#patrocinios-ultimo").hidden = !det;
           }
           $("#patrocinios-cats").classList.toggle("apagado", !data.patrocinios);
+          pintaRedes(data);
           ponTexto($("#st-net"), (data.targets || []).map((t) => t.label + " " + t.ip).join(" · ") || "sin red");
         } catch (_err) {}
       }
@@ -1120,6 +1192,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.76"></script>
+    <script src="/logo.js?v=0.77"></script>
   </body>
 </html>

@@ -22,6 +22,13 @@ DATOS = {
              "host": "192.168.1.25", "puerto": 8787, "fp": "AB12-CD34-EF56-7890-1122-3344", "fecha": "2026-11-12 22:05", "ultimo": False, "clave": "pc:77aa0c1d2e3f4a5b"}],
     "compartir_notas": True, "sincro": {"a1b2c3d4e5f6a7b8": {"estado": "ok", "mensaje": ""},
       "b1b2c3d4e5f6a7b8": {"estado": "antiguo", "mensaje": "Tiene una versión anterior de LaZoo: actualízalo para compartir notas y nombres."}}},
+  # 0.77: PC por cable con Hyper-V/WSL y ProtonVPN encendida (la VPN va la última y sale el aviso).
+  "/api/conexion": {"connected": 1, "pin": "123456", "qr": "", "elegida": "", "vpn": "ProtonVPN",
+    "aviso_vpn": "Tienes una VPN activa; si el móvil no conecta, activa en la VPN \"permitir red local\".",
+    "targets": [{"label": "Ethernet", "ip": "192.168.1.40", "url": "http://192.168.1.40:8787/"}],
+    "redes": [{"label": "Ethernet", "ip": "192.168.1.40", "nombre": "Ethernet", "tipo": "cable", "puerta": True, "vpn": False, "qr": True, "elegida": False, "url": "http://192.168.1.40:8787/"},
+              {"label": "Virtual (Hyper-V)", "ip": "172.29.48.1", "nombre": "vEthernet (WSL)", "tipo": "virtual", "puerta": False, "vpn": False, "qr": False, "elegida": False, "url": "http://172.29.48.1:8787/"},
+              {"label": "VPN (ProtonVPN)", "ip": "10.2.0.2", "nombre": "ProtonVPN", "tipo": "vpn", "puerta": False, "vpn": True, "qr": False, "elegida": False, "url": "http://10.2.0.2:8787/"}]},
   "/api/dispositivos": {"devices": [
      {"id": "c1c2c3c4c5c6c7c8", "short": "c1c2", "state": "aprobado", "label": "Móvil de casa", "tipo": "Android · App LaZoo", "apodo": "Móvil de casa",
       "ip": "192.168.1.33", "left": 0, "ago": 5, "fp": "9F3A-77B1-0C2D-E4F5-6A7B-8C9D", "fecha": "2026-11-10", "recordado": True, "duplicado": False, "clave": "dev:c1c2c3c4c5c6c7c8", "es_pc": False},

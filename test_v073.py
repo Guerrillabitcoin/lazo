@@ -332,12 +332,12 @@ console.log(JSON.stringify([
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.76")
-        self.assertEqual(pcapc.VERSION, "0.76")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.76")
-        self.assertIn('<p class="ver">0.76', MESA)
-        self.assertIn("<title>LaZoo 0.76</title>", HTML)
-        self.assertIn('const PAGE_VERSION = "0.76"', JS)
+        self.assertEqual(lazo.VERSION, "0.77")
+        self.assertEqual(pcapc.VERSION, "0.77")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
+        self.assertIn('<p class="ver">0.77', MESA)
+        self.assertIn("<title>LaZoo 0.77</title>", HTML)
+        self.assertIn('const PAGE_VERSION = "0.77"', JS)
 
     def test_apk_sin_cambios(self):
         texto = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")

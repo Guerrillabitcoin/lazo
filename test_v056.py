@@ -153,6 +153,8 @@ class Navegador(Base):
         super().setUp()
         import socket
 
+        antes = list(aprobacion.EXTRA_NETS)  # 0.77: sin esto, 0.0.0.0/0 se quedaba para las demás pruebas
+        self.addCleanup(lambda: aprobacion.EXTRA_NETS.__setitem__(slice(None), antes))
         aprobacion.add_allowed("0.0.0.0/0")
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
@@ -291,13 +293,13 @@ class Logo(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.76")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.76")
-        self.assertIn("<title>LaZoo 0.76</title>", HTML)
-        self.assertIn("/logo.js?v=0.76", MESA)
+        self.assertEqual(lazo.VERSION, "0.77")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
+        self.assertIn("<title>LaZoo 0.77</title>", HTML)
+        self.assertIn("/logo.js?v=0.77", MESA)
         self.assertIn('android:versionName="3"', APK)
         self.assertIn('android:versionCode="66"', APK)
-        self.assertIn("# LaZoo 0.76", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("# LaZoo 0.77", (ROOT / "README.md").read_text(encoding="utf-8"))
         self.assertIn("## Estado (0.61)", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
 

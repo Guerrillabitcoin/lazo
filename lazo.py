@@ -38,11 +38,12 @@ import fluidez
 import nombres
 import sincro
 import pcapc
+import redes
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.76"
+VERSION = "0.77"
 pcapc.VERSION = VERSION  # 0.70: el User-Agent de «Controlar otro PC» lleva la versión
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
@@ -113,50 +114,15 @@ def _rank(ip: str) -> tuple[int, str]:
     return (2, ip)
 
 
-SKIP_ADAPTER = (
-    "virtual", "vmware", "vbox", "virtualbox", "hyper-v", "vethernet",
-    "wsl", "docker", "bluetooth", "loopback", "tap-windows", "tailscale",
-    "zerotier", "hamachi", "vpn", "wan miniport", "pseudo", "tun",
-    "npcap", "radmin", "virtual",
-)
+# 0.77: la lista de direcciones sale de redes.py (interfaz, tipo y puerta de enlace). Antes se
+# ponía primera «la IP con la que salgo a internet» (socket UDP a 8.8.8.8): con una VPN era la
+# de la VPN (p. ej. 10.2.0.2) y el móvil no llegaba. Ese truco ya no se usa.
+_IPS_CACHE: tuple[float, list] = (0.0, [])
+IPS_TTL = 30.0  # 0.45: la ventana del PC pregunta cada 1,5 s; el sistema solo cada 30 s
+_IP_QR: list[str] = []  # 0.77: IP elegida en el Panel para el QR (cacheada; "" = automática)
 
 
-def _adapter_label(name: str) -> str:
-    low = name.lower()
-    if any(word in low for word in ("wi-fi", "wifi", "wlan", "wireless", "inalámbrica", "inalambrica")):
-        return "Wi-Fi"
-    if "ethernet" in low or "lan" in low:
-        return "Cable"
-    return name[:28] or "Red"
-
-
-def _adapters_from_ipconfig(text: str) -> list[tuple[str, str]]:
-    found: list[tuple[str, str]] = []
-    blocks = re.split(r"\r?\n(?=\S)", text)
-    for block in blocks:
-        lines = [line for line in block.splitlines() if line.strip()]
-        if not lines:
-            continue
-        name = lines[0].strip().rstrip(":")
-        low = name.lower()
-        if any(word in low for word in SKIP_ADAPTER):
-            continue
-        ips: list[str] = []
-        for line in lines[1:]:
-            low_line = line.lower()
-            if "ipv4" not in low_line:
-                continue
-            ips.extend(ip for ip in IP_RE.findall(line) if _private(ip))
-        for ip in ips:
-            found.append((_adapter_label(name), ip))
-    return found
-
-
-_IPS_CACHE: tuple[float, list[tuple[str, str]]] = (0.0, [])
-IPS_TTL = 30.0  # 0.45: la ventana del PC pregunta cada 1,5 s; ipconfig solo cada 30 s
-
-
-def _ips_from_system() -> list[tuple[str, str]]:
+def _ips_from_system() -> list:
     global _IPS_CACHE
     now = time.monotonic()
     if _IPS_CACHE[1] and now - _IPS_CACHE[0] < IPS_TTL:
@@ -166,63 +132,57 @@ def _ips_from_system() -> list[tuple[str, str]]:
     return list(found)
 
 
-def _ips_from_system_now() -> list[tuple[str, str]]:
-    if sys.platform == "win32":
-        commands = [["ipconfig"]]
-    else:
-        commands = [["ip", "-4", "-o", "addr"], ["ifconfig"]]
-    for cmd in commands:
-        try:
-            out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=3, text=True,
-                                          errors="replace", creationflags=sinventana.flags())
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if sys.platform == "win32":
-            parsed = _adapters_from_ipconfig(out)
-            if parsed:
-                return parsed
-        else:
-            ips = [ip for ip in IP_RE.findall(out) if _private(ip)]
-            if ips:
-                return [("Red", ip) for ip in ips]
-    return []
+def _ips_from_system_now() -> list[dict]:
+    return redes.del_sistema()
+
+
+def _como_interfaz(item) -> dict:
+    if isinstance(item, dict):
+        return item
+    label, ip = item
+    tipo, marca = redes.clasificar(label, "", None, ip)
+    return redes.interfaz(ip, label, tipo, marca, True)
+
+
+def ip_elegida() -> str:
+    if not _IP_QR:
+        _IP_QR.append(redes.elegida())
+    return _IP_QR[0]
+
+
+def elegir_ip(ip: str) -> dict:
+    try:
+        saved = redes.guardar_elegida(str(ip or ""))
+    except ValueError as exc:
+        raise control.ControlError(f"IP no válida: {exc}") from exc
+    _IP_QR[:] = [saved]
+    _QR_CACHE.clear()
+    return {"ok": True, "elegida": saved, "redes": redes_lan()}
+
+
+def redes_lan() -> list[dict]:
+    """Todas las IPv4 de la red local, ordenadas (la primera va al QR), con su interfaz."""
+    return redes.ordenar([_como_interfaz(x) for x in _ips_from_system()], ip_elegida())
 
 
 def lan_ips() -> list[str]:
-    ordered: list[str] = []
-    for _label, ip in _ips_from_system():
-        if ip not in ordered:
-            ordered.append(ip)
-    primary = ""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.connect(("8.8.8.8", 80))
-        primary = sock.getsockname()[0]
-        sock.close()
-    except OSError:
-        pass
-    if primary and _private(primary) and primary not in ordered:
-        ordered.append(primary)
-    try:
-        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ip = info[4][0]
-            if _private(ip) and ip not in ordered:
-                ordered.append(ip)
-    except OSError:
-        pass
-    wifi = [ip for ip in ordered if any(label == "Wi-Fi" and other == ip for label, other in _ips_from_system())]
-    rest = [ip for ip in ordered if ip not in wifi]
-    rest.sort(key=_rank)
-    if primary in rest and _rank(primary)[0] <= 1:
-        rest.remove(primary)
-        rest.insert(0, primary)
-    ordered = wifi + rest
-    return ordered or ["127.0.0.1"]
+    return [ip for _label, ip in lan_targets()] or ["127.0.0.1"]
 
 
 def lan_targets() -> list[tuple[str, str]]:
-    labels = {ip: label for label, ip in _ips_from_system()}
-    return [(labels.get(ip, "Red"), ip) for ip in lan_ips()]
+    """(etiqueta, ip) para QR, Panel, bandeja y PC a PC. Sin VPN ni virtuales salvo que no haya otra
+    cosa o que se haya elegido una a mano en el Panel."""
+    todas = redes_lan()
+    fisicas = [it for it in todas if it["tipo"] not in ("vpn", "virtual") or it.get("elegida")]
+    return [(it["label"], it["ip"]) for it in (fisicas or todas)]
+
+
+def vpn_activa(lista: list[dict] | None = None) -> str:
+    """Nombre de la VPN encendida («ProtonVPN», «VPN»...) o ""."""
+    for it in (redes_lan() if lista is None else lista):
+        if it["tipo"] == "vpn":
+            return it["marca"] or "VPN"
+    return ""
 
 
 def phone_url(ip: str) -> str:
@@ -261,6 +221,7 @@ def connection_info() -> dict:
     aprobados que han dado señal en los últimos protocol.ALIVE_SECONDS segundos
     (cualquier petición firmada o el WebSocket del ratón). Con 0, la ventana enseña QR y PIN."""
     targets = lan_targets()[:3]
+    todas = redes_lan()
     qr = ""
     if targets:
         url = phone_url(targets[0][1])
@@ -279,6 +240,11 @@ def connection_info() -> dict:
         "pin": PAIRING.pin,
         "qr": qr,
         "targets": [{"label": label, "ip": ip, "url": plain_url(ip)} for label, ip in targets],
+        "redes": [{**{k: it[k] for k in ("label", "ip", "nombre", "tipo", "puerta", "vpn", "qr", "elegida")},
+                   "url": plain_url(it["ip"])} for it in todas],  # 0.77: todas, con su interfaz
+        "elegida": ip_elegida(),
+        "vpn": vpn_activa(todas),
+        "aviso_vpn": redes.AVISO_VPN if vpn_activa(todas) else "",
         "pending": len([d for d in APPROVALS.listing() if d["state"] == "pendiente"]),
         "waiting": [{"label": d["label"], "ip": d["ip"], "short": d["short"], "left": d["left"], "fp": d.get("fp", "")}
                     for d in APPROVALS.listing() if d["state"] == "pendiente"],
@@ -325,7 +291,7 @@ def conn_diag() -> str:
     head = [f"LaZoo PC {VERSION} · protocolo {PROTO} · {sys.platform}",
             f"Recordar dispositivos: {'sí' if STORE.enabled() else 'no'} · conectados: {PAIRING.phone_count()}",
             "Dispositivos: " + (", ".join(f"{d['short']}={d['state']}" for d in rows) or "ninguno"),
-            "IPs: " + (", ".join(ip for _l, ip in lan_targets()) or "sin red"), "--- últimos pasos ---"]
+            "IPs: " + (", ".join(f"{it['ip']} ({it['label']}{', QR' if it['qr'] else ''})" for it in redes_lan()) or "sin red"), "--- últimos pasos ---"]
     return "\n".join(head + list(CONN_LOG))
 
 
@@ -1120,6 +1086,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/recordar":
             self._local_only(lambda body: set_remember(bool(body.get("on"))))
             return
+        if path == "/api/red":
+            # 0.77: IP del QR elegida en el Panel ("" = automática). Solo desde este PC.
+            self._local_only(lambda body: elegir_ip(str(body.get("ip", ""))))
+            return
         if path == "/api/sigues":
             # 0.59: el Panel (local) y el móvil (sellado) pueden encenderlo o apagarlo.
             self._guard(lambda body: sigues.SIGUES.set_on(body.get("on"), bool(body.get("reset")) and not self.remote))
@@ -1822,6 +1792,8 @@ def start(argv: list[str] | None = None, console: bool = True):
     print("  Misma Wi-Fi de casa. No hace falta VPN.")
     for label, ip in lan_targets():
         print(f"  {label}: {plain_url(ip)}")
+    if vpn_activa():
+        print(f"  {redes.AVISO_VPN}")
     print("  Al entrar el móvil se abre el puente Wi-Fi. No pasa por internet.")
     print("  No abras este puerto en el router. Solo acepta conexiones de tu red local.")
     print("  Cada móvil nuevo hay que aceptarlo en este PC la primera vez.")

@@ -112,14 +112,14 @@ class Fuente(unittest.TestCase):
     def test_cliente(self):
         self.assertIn("forgetKey();", JS)
         self.assertIn("connDiagText", JS)
-        self.assertIn('const PAGE_VERSION = "0.76"', JS)
+        self.assertIn('const PAGE_VERSION = "0.77"', JS)
 
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.76")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.76")
+        self.assertEqual(lazo.VERSION, "0.77")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
         apk = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
         self.assertIn('android:versionCode="66"', apk)
-        self.assertIn("# LaZoo 0.76", (ROOT / "README.md").read_text(encoding="utf-8"))
+        self.assertIn("# LaZoo 0.77", (ROOT / "README.md").read_text(encoding="utf-8"))
 
 
 def _ip():
@@ -139,6 +139,8 @@ class Navegador(Base):
 
     def setUp(self):
         super().setUp()
+        antes = list(aprobacion.EXTRA_NETS)  # 0.77: sin esto, 0.0.0.0/0 se quedaba para las demás pruebas
+        self.addCleanup(lambda: aprobacion.EXTRA_NETS.__setitem__(slice(None), antes))
         aprobacion.add_allowed("0.0.0.0/0")
         self.ip = _ip()
         if not self.ip or self.ip.startswith("127."):
