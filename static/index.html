@@ -10,6 +10,13 @@
     <link rel="apple-touch-icon" href="/img/apple-touch-icon.png" />
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#000000" />
+    <!-- iPhone (Safari, «Añadir a pantalla de inicio»): pantalla completa, nombre corto, barra negra
+         y sin convertir el PIN ni las IP en enlaces de teléfono. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="LaZoo" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="format-detection" content="telephone=no" />
   </head>
   <body>
     <div id="wait-banner" class="wait-banner" role="alert" hidden>
