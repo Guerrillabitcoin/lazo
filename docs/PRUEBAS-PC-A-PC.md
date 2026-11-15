@@ -75,3 +75,4 @@ Igual que A, con **B en Linux** (instalado con `instalar-linux.sh`).
 - «El reloj de los dos PC no coincide»: pon la hora automática en los dos (la firma vale 60 s).
 - Ctrl+Alt+L no hace nada y el Panel avisa «otro programa usa Ctrl+Alt+L»: cambia la tecla.
 - Ventanas de administrador en B (Administrador de tareas, instaladores): Windows no deja que un programa normal les mande teclas o clics (UIPI). Ábrelas con el ratón y el teclado de B, o arranca LaZoo de B como administrador.
+- **Plan de betas (0.78):** qué entra en cada beta, la lista corta de prueba de cada una y la plantilla para contar qué pasó están en `docs/BETAS-PC-A-PC.md`.

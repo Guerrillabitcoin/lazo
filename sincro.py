@@ -33,7 +33,8 @@ RUTA = "/api/pc/sync"
 VERSION_SYNC = 1
 PERIODO = 5.0           # s entre rondas (antes si algo cambia aquí)
 ESPERA_ANTIGUO = 600.0  # s: un PC 0.75 no sabe sincronizar
-ESPERA_ERROR = 30.0     # s tras un error de red o de permiso
+ESPERA_ERROR = 30.0     # s tras un error de red o de permiso (o tras MAX_SEGUIDAS rondas sin coincidir)
+MAX_SEGUIDAS = 3        # 0.78: rondas seguidas «aún distintos» antes de dejar de insistir
 MAX_CUERPO = 4_000_000  # bytes (sellado) de una petición o respuesta
 PUERTO = 8787           # el de este LaZoo (lazo.py lo pone al arrancar)
 
@@ -145,7 +146,7 @@ class Sincro:
 
     def ver(self) -> dict[str, dict]:
         with self.lock:
-            return {k: {kk: vv for kk, vv in v.items() if kk not in ("firma_ok", "siguiente")} for k, v in self.pares.items()}
+            return {k: {kk: vv for kk, vv in v.items() if kk not in ("firma_ok", "siguiente", "desacuerdos")} for k, v in self.pares.items()}
 
     def start(self) -> bool:
         if self._hilo and self._hilo.is_alive():
@@ -187,7 +188,8 @@ class Sincro:
             with self.lock:
                 par = self.pares.setdefault(fila["id"], {"estado": "nada", "mensaje": "", "visto": 0.0, "firma_ok": "", "siguiente": 0.0})
                 espera = self.reloj() < par["siguiente"]
-                if not forzar and espera and (not cambio or par["estado"] in ("error", "antiguo")):
+                atascado = int(par.get("desacuerdos") or 0) > MAX_SEGUIDAS  # 0.78: no insistir 3 veces/s
+                if not forzar and espera and (not cambio or atascado or par["estado"] in ("error", "antiguo")):
                     continue
             self.uno(fila)
             hechos += 1
@@ -230,6 +232,7 @@ class Sincro:
         nombres.NOMBRES.enlazar(pid, "pc:" + suyo["pc_id"], host=f"{host}:{fila['puerto']}")
         nombres.NOMBRES.fusionar(r.get("nombres"))
         firma_ok = ""
+        desacuerdos = 0
         if comparte and r.get("comparte") is True:
             if isinstance(r.get("notas"), dict):
                 control.fusionar_notas(r["notas"])
@@ -237,12 +240,19 @@ class Sincro:
             if r.get("igual") or (isinstance(r.get("notas"), dict) and control.firma_notas(r["notas"]) == mia):
                 firma_ok = mia
             else:
-                self.ev.set()  # aún distintos: otra vuelta enseguida, ya con todo
+                # 0.78: aún distintos: otra vuelta enseguida, ya con todo; pero solo MAX_SEGUIDAS
+                # veces. Si una nota que uno acepta y el otro no (hora rara, id raro) hace que las
+                # huellas nunca coincidan, antes se repetía 3 veces por segundo para siempre.
+                desacuerdos = int(par.get("desacuerdos") or 0) + 1
+                if desacuerdos <= MAX_SEGUIDAS:
+                    self.ev.set()
         estado = "ok" if (comparte and r.get("comparte") is True) else "sin_notas"
         mensaje = "" if estado == "ok" else ("Compartir notas está apagado en este PC." if not comparte
                                              else "El otro PC no comparte notas (está apagado allí).")
-        self._poner(pid, estado=estado, mensaje=mensaje, visto=time.time(), firma_ok=firma_ok,
-                    siguiente=self.reloj() + PERIODO - 0.5, sistema=suyo["sistema"])
+        if desacuerdos > MAX_SEGUIDAS:
+            mensaje = "Las notas de los dos PC no acaban de coincidir: se vuelve a probar cada medio minuto."
+        self._poner(pid, estado=estado, mensaje=mensaje, visto=time.time(), firma_ok=firma_ok, desacuerdos=desacuerdos,
+                    siguiente=self.reloj() + (PERIODO - 0.5 if desacuerdos <= MAX_SEGUIDAS else ESPERA_ERROR), sistema=suyo["sistema"])
         return estado
 
 

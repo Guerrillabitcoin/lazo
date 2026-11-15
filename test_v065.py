@@ -345,13 +345,13 @@ class App2(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_065(self):
-        self.assertEqual(lazo.VERSION, "0.77")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
-        self.assertIn('const PAGE_VERSION = "0.77"', JS)
-        self.assertIn("<title>LaZoo 0.77</title>", HTML)
-        self.assertIn('<p class="ver">0.77', MESA)
+        self.assertEqual(lazo.VERSION, "0.78")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.78")
+        self.assertIn('const PAGE_VERSION = "0.78"', JS)
+        self.assertIn("<title>LaZoo 0.78</title>", HTML)
+        self.assertIn('<p class="ver">0.78', MESA)
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("# LaZoo 0.77", readme)
+        self.assertIn("# LaZoo 0.78", readme)
         self.assertIn("**Novedad 0.65:**", readme)
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("mando.py", agents)

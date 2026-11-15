@@ -191,7 +191,7 @@
       <header id="status" class="top" data-link="off">
         <div>
           <span class="lz-logo" data-estado="desconectado" title="LaZoo"></span>
-          <p class="ver">0.77</p>
+          <p class="ver">0.78</p>
         </div>
         <div>
           <p class="title">Panel de LaZoo</p>
@@ -1066,7 +1066,10 @@
       $("#pc-fluidez-ok").addEventListener("click", () => pcCall("fluidez", {}));
       $("#pc-arreglar").addEventListener("click", async () => {
         try {
-          const r = await devCall("/api/pcapc/arreglar", {});
+          // 0.78: el grupo «input» deja leer el teclado a cualquier programa tuyo: solo si lo aceptas aquí.
+          const d = pcData || {};
+          const emisor = !!d.falta_emisor && window.confirm((d.aviso_input || "") + "\n\n¿Dar también ese permiso? (Cancelar = solo lo necesario para que otro PC controle este)");
+          const r = await devCall("/api/pcapc/arreglar", { emisor });
           pcPinta(r);
           $("#pc-par").textContent = (r.arreglo || {}).mensaje || "";
           $("#pc-par").dataset.firma = "";
@@ -1192,6 +1195,6 @@
         if (box) window.setTimeout(() => box.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
       })();
     </script>
-    <script src="/logo.js?v=0.77"></script>
+    <script src="/logo.js?v=0.78"></script>
   </body>
 </html>

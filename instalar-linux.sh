@@ -5,6 +5,7 @@
 #   sh instalar-linux.sh --quitar   quita el acceso del menú y el inicio con el sistema
 #   sh instalar-linux.sh --ydotool  solo prepara el ratón en Wayland (ydotool)
 #   sh instalar-linux.sh --pcapc    0.71: solo los permisos de «Controlar otro PC» (un paso, con sudo o pkexec)
+#                                    0.78: añade --emisor para controlar otro PC desde este en Wayland (grupo «input»)
 # No instala nada fuera de tu usuario salvo los paquetes del sistema, y solo si dices que sí.
 cd "$(dirname "$0")" || exit 1
 DIR="$(pwd)"
@@ -13,37 +14,61 @@ AUTO="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
 
 # 0.71 · «Controlar otro PC»: lo que hace falta como administrador, en un solo paso.
 #   /dev/uinput para el grupo «uinput» (que otro PC mueva el ratón de este, también en Wayland)
-#   y el usuario en «uinput» e «input» (leer el teclado y el ratón para controlar otro PC en Wayland).
+#   y, SOLO con «--emisor» (0.78), el usuario también en «input» (leer el teclado y el ratón para
+#   controlar otro PC desde este en Wayland). Con el grupo «input» cualquier programa del usuario
+#   puede leer el teclado, contraseñas incluidas: para que te controlen basta «uinput».
 # En Xorg no hace falta nada de esto: LaZoo usa XTest y XGrabKeyboard, sin permisos.
 if [ "$1" = "--permisos-root" ]; then
   U="$2"
   if [ "$(id -u)" != "0" ] || [ -z "$U" ] || ! id "$U" >/dev/null 2>&1; then
-    echo "Uso interno: como administrador, --permisos-root USUARIO"; exit 1
+    echo "Uso interno: como administrador, --permisos-root USUARIO [--emisor]"; exit 1
   fi
   groupadd -f uinput
   echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' > /etc/udev/rules.d/80-lazoo-uinput.rules
   modprobe uinput 2>/dev/null
   echo uinput > /etc/modules-load.d/lazoo-uinput.conf 2>/dev/null
   udevadm control --reload-rules && udevadm trigger --name-match=uinput
-  getent group input >/dev/null 2>&1 || groupadd -f input
-  usermod -aG uinput,input "$U"
-  echo "Permisos listos para $U. Cierra sesión y vuelve a entrar."
+  if [ "$3" = "--emisor" ]; then
+    getent group input >/dev/null 2>&1 || groupadd -f input
+    usermod -aG uinput,input "$U"
+    echo "Permisos listos para $U (uinput e input). Cierra sesión y vuelve a entrar."
+  else
+    usermod -aG uinput "$U"
+    echo "Permiso listo para $U (uinput: que otro PC controle este). Cierra sesión y vuelve a entrar."
+  fi
   exit 0
 fi
 
 permisos_pcapc() {
   echo
-  echo "Controlar otro PC: en Wayland, LaZoo necesita permiso para mover el ratón (/dev/uinput) y para leer"
-  echo "tu teclado y ratón (/dev/input, grupo «input»: cualquier programa tuyo podría leerlos). Se hace una vez."
-  if [ "$1" = "--si" ]; then RESP=s; else printf "¿Lo preparo ahora (pide tu contraseña)? [s/N] "; read -r RESP; fi
+  echo "Controlar otro PC: en Wayland, LaZoo necesita permiso para mover el ratón de este PC (/dev/uinput)."
+  echo "Para controlar OTRO PC desde este también en Wayland, además hay que leer tu teclado y ratón"
+  echo "(/dev/input, grupo «input»): ojo, cualquier programa tuyo podría leer el teclado, contraseñas incluidas."
+  echo "Se hace una vez."
+  EMISOR=""
+  SI=""
+  for A in "$1" "$2"; do
+    [ "$A" = "--si" ] && SI=1
+    [ "$A" = "--emisor" ] && EMISOR="--emisor"
+  done
+  if [ -n "$SI" ]; then RESP=s; else printf "¿Lo preparo ahora (pide tu contraseña)? [s/N] "; read -r RESP; fi
+  case "$RESP" in
+    s|S|si|sí|y|Y)
+      # 0.78: el grupo «input» solo si lo pides (--emisor) o dices que sí aquí; con --si a secas, no.
+      if [ -z "$EMISOR" ] && [ -z "$SI" ]; then
+        printf "¿También controlar otro PC desde este en Wayland (grupo «input», lee el teclado)? [s/N] "; read -r R2
+        case "$R2" in s|S|si|sí|y|Y) EMISOR="--emisor" ;; esac
+      fi
+      ;;
+  esac
   case "$RESP" in
     s|S|si|sí|y|Y)
       if command -v sudo >/dev/null 2>&1 && [ -t 0 ]; then
-        sudo sh "$DIR/instalar-linux.sh" --permisos-root "$USER"
+        sudo sh "$DIR/instalar-linux.sh" --permisos-root "$USER" $EMISOR
       elif command -v pkexec >/dev/null 2>&1; then
-        pkexec sh "$DIR/instalar-linux.sh" --permisos-root "$USER"
+        pkexec sh "$DIR/instalar-linux.sh" --permisos-root "$USER" $EMISOR
       else
-        echo "No encuentro sudo ni pkexec: como administrador, ejecuta: sh $DIR/instalar-linux.sh --permisos-root $USER"
+        echo "No encuentro sudo ni pkexec: como administrador, ejecuta: sh $DIR/instalar-linux.sh --permisos-root $USER $EMISOR"
       fi
       echo "CIERRA SESIÓN Y VUELVE A ENTRAR para que valgan los permisos."
       ;;
@@ -52,7 +77,7 @@ permisos_pcapc() {
 }
 
 if [ "$1" = "--pcapc" ]; then
-  permisos_pcapc "$2"
+  permisos_pcapc "$2" "$3"
   exit 0
 fi
 

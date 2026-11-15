@@ -100,13 +100,14 @@ ESPERA_PORTA = 1.5     # s que se espera el portapapeles del otro PC al volver
 LOTE = 0.004           # s: 0.74: tandas cada 4 ms (250 Hz), por plazos fijos
 LATIDO = 0.5           # s entre latidos del emisor
 SIN_RESPUESTA = 3.0    # s sin respuesta (emisor) o sin tramas (receptor): se suelta todo
+DESPEDIDA = 1.0        # 0.78: s como mucho para despedirse del otro PC al volver (nunca se queda colgado)
 ESPERA_APROBAR = 130   # s que el emisor espera a que el otro PC acepte
 TECLA_DEFECTO = "Ctrl+Alt+L"
 EMERGENCIA = "Ctrl+Alt+Esc"
 UA_PREFIJO = "LaZoo-PC/"
 ARCHIVO_PCS = "otros-pcs.json"
 MAX_PCS = 20
-VERSION = "0.77"
+VERSION = "0.78"
 
 MOVER, BOTON, RUEDA, TECLA, SOLTAR, LATIDO_EV, RESPUESTA, PIDE_PORTA = 1, 2, 3, 4, 5, 6, 7, 8
 PORTA = 9  # solo en tramas P1
@@ -788,7 +789,8 @@ class Receptor:
 
     def __init__(self, inyector: Any, marcar: Callable[[], None] | None = None,
                  porta_poner: Callable[[str], Any] | None = None, suavizar: bool = False,
-                 hilo_suave: bool = True, imagen_poner: Callable[[bytes], Any] | None = None) -> None:
+                 hilo_suave: bool = True, imagen_poner: Callable[[bytes], Any] | None = None,
+                 candado: Any = None) -> None:
         self.iny = inyector
         self.marcar = marcar or (lambda: None)
         self.porta_poner = porta_poner  # None = este PC no comparte el portapapeles
@@ -803,7 +805,9 @@ class Receptor:
         self._hilo: threading.Thread | None = None
         self._fin = False
         # 0.74: un solo hilo a la vez dentro del inyector (Xlib no es seguro entre hilos).
-        self._ilock = threading.Lock()
+        # 0.78: el candado es del inyector, no de cada conexión: cuando otro PC sustituye al que
+        # controlaba, la conexión vieja (soltando sus teclas) y la nueva usan el MISMO inyector.
+        self._ilock = candado if candado is not None else threading.Lock()
         self.llegadas = fluidez.Ritmo()
         self.aplicados = fluidez.Ritmo()
         self.midiendo = False
@@ -824,7 +828,8 @@ class Receptor:
                 dx, dy = self._mov
                 self._mov = [0, 0]
             try:
-                self.iny.mover(dx, dy)
+                with self._ilock:
+                    self.iny.mover(dx, dy)
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1039,6 +1044,7 @@ class Recepcion:
         self.imagen_leer, self.imagen_poner = imagen_leer, imagen_poner
         self._iny: Any = None
         self.lock = threading.Lock()
+        self.candado = threading.Lock()  # 0.78: un solo hilo a la vez en el inyector, sea de la conexión que sea
         self.actual: dict | None = None
         self.escuchas: list[Callable[[str, str], None]] = []
 
@@ -1076,7 +1082,8 @@ class Recepcion:
                 marcar: Callable[[], None] | None = None) -> str:
         comparte = AJUSTES.portapapeles
         receptor = Receptor(self.inyector(), marcar, porta_poner=self.porta_poner if comparte else None,
-                            suavizar=AJUSTES.suavizar, imagen_poner=self.imagen_poner if comparte else None)
+                            suavizar=AJUSTES.suavizar, imagen_poner=self.imagen_poner if comparte else None,
+                            candado=self.candado)
         yo = {"sock": sock, "who": who, "nombre": nombre}
         with self.lock:
             viejo, self.actual = self.actual, yo
@@ -1348,7 +1355,18 @@ def peticion(fila: dict, ruta: str, cuerpo: dict, kd: bytes, timeout: float = 8.
         try:
             datos = protocol.open_sealed(datos, sello)
         except protocol.ProtocolError as exc:
-            raise ErrorPC("La respuesta del otro PC no está sellada con su clave") from exc
+            if res.status == 200:
+                raise ErrorPC("La respuesta del otro PC no está sellada con su clave") from exc
+            # 0.78: un LaZoo anterior a la 0.76 no conoce la ruta y contesta su 404 sellado con su
+            # clave general (no con la de este dispositivo): no se puede leer, pero el código basta
+            # para saber que es «antiguo». Antes salía como error, cada 30 s y con un mensaje raro.
+            datos = b"{}"
+    elif res.status == 200:
+        # 0.78: un 200 solo vale sellado con la clave de ese PC. En claro podría venir de cualquier
+        # equipo de la red que conteste en esa IP:puerto (un LaZoo falso, una IP reasignada) y
+        # sincro lo fusionaría (vaciar todas las notas, meter notas o nombres falsos). Los errores
+        # (401/403/404, seal=False en lazo._unauth) siguen llegando en claro, solo para el mensaje.
+        raise ErrorPC("El otro PC contestó sin sellar: no me fío de esa respuesta")
     try:
         data = json.loads(datos.decode("utf-8") or "{}")
     except (ValueError, UnicodeError):
@@ -1458,6 +1476,8 @@ def mensaje_error(codigo: int, data: dict) -> str:
         return "El otro PC ya no reconoce a este (lo expulsaron o se reinició sin «Recordar dispositivos»): vuelve a añadirlo."
     if data.get("clock"):
         return "El reloj de los dos PC no coincide: ponlos en hora."
+    if codigo == 404:  # 0.78: un LaZoo anterior a la 0.70 no tiene «Controlar otro PC» (decía «no está»)
+        return "El otro PC tiene una versión de LaZoo anterior, sin «Controlar otro PC»: actualízalo."
     return str(data.get("error") or f"El otro PC no dejó conectar ({codigo})")
 
 
@@ -1827,8 +1847,16 @@ class Control:
                 self._acelerado = False
         if sock is not None:
             try:  # el otro PC suelta lo pulsado (también lo hace solo al cerrarse la conexión)
+                # 0.78: con plazo. Si la red se cayó a media imagen o texto largo, el búfer de
+                # envío está lleno y esta despedida se quedaba colgada (minutos en Linux) con el
+                # hilo de la tecla rápida dentro: Ctrl+Alt+L y Ctrl+Alt+Esc dejaban de contestar.
+                sock.settimeout(DESPEDIDA)
                 sock.sendall(trama_cliente(0x2, protocol.seal(codificar(0xFFFFFFFF, [(SOLTAR,)]), sello)))
                 sock.sendall(trama_cliente(0x8, b""))
+            except (OSError, ValueError):
+                pass
+            try:
+                sock.shutdown(socket.SHUT_RDWR)  # despierta a los hilos que leen o mandan por él
             except OSError:
                 pass
             try:
@@ -2448,7 +2476,9 @@ def diagnostico_linux(forzar: bool = False) -> dict:
             d = linux_kvm.diagnostico()
             _DIAG[1] = {"diagnostico": f"Que otro PC controle este: {d['receptor']} ({d['receptor_por']}) · "
                                        f"Controlar otro desde este: {d['emisor']} ({d['emisor_por']})",
-                        "falta": linux_kvm.falta(d), "arreglable": bool(d.get("arreglable"))}
+                        "falta": linux_kvm.falta(d), "arreglable": bool(d.get("arreglable")),
+                        # 0.78: el Panel avisa antes de pedir el grupo «input» (solo hace falta para el emisor)
+                        "falta_emisor": d.get("emisor") == "ninguno", "aviso_input": linux_kvm.AVISO_INPUT}
         except Exception as exc:  # noqa: BLE001
             _DIAG[1] = {"diagnostico": f"Sin diagnóstico ({exc.__class__.__name__})", "falta": "", "arreglable": False}
         _DIAG[0] = time.monotonic()

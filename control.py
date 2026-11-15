@@ -41,6 +41,7 @@ _borrados: dict[str, float] = {}
 _vaciado = 0.0
 _MAX_BORRADOS = 500
 _DIAS_BORRADOS = 60
+_FUTURO_NOTAS = 60.0  # 0.78: s en el futuro que se aceptan de otro PC (= protocol.CLOCK_SECONDS); antes 24 h
 CLIP_CAMBIO: list[Any] = []  # se llama (sin argumentos, rápido) cuando cambian las notas
 
 
@@ -3641,6 +3642,26 @@ def firma_notas(estado: dict[str, Any] | None = None) -> str:
     return hashlib.sha256(texto.encode()).hexdigest()
 
 
+def _sanear_futuro(ahora: float, limite: float) -> None:
+    """0.78: lo de ESTE PC que quedó fechado en el futuro (se hizo con el reloj adelantado). Se
+    llama al sincronizar, o sea, cuando el reloj de este PC ya coincide con el de otro (la firma
+    lo exige). Con `_clip_lock` cogido.
+    - «vaciado» futuro: borraría una y otra vez las notas nuevas de aquí y, al llegar su hora, las
+      de los demás. Se deja justo antes de la nota más antigua que hay aquí (todas son de después
+      de aquel «Borrar todo», que dejó la lista vacía) y nunca más tarde que ahora.
+    - lápidas y notas futuras: se quedan con la hora de ahora, para que los demás las acepten."""
+    global _vaciado
+    for item in _history:
+        if float(item.get("at") or 0) > limite:
+            item["at"] = ahora
+    for k, v in list(_borrados.items()):
+        if v > limite:
+            _borrados[k] = ahora
+    if _vaciado > limite:
+        horas = [float(i.get("at") or 0) for i in _history if float(i.get("at") or 0) > 0]
+        _vaciado = min([ahora] + [t - 0.001 for t in horas])
+
+
 def fusionar_notas(remoto: Any) -> bool:
     """Junta las notas de otro PC con las de este. Gana la versión más reciente de cada id; lo
     borrado (lápida o «vaciado») no vuelve; dos notas con el mismo texto se quedan en una (la
@@ -3649,14 +3670,22 @@ def fusionar_notas(remoto: Any) -> bool:
     global _vaciado, _borrados
     if not isinstance(remoto, dict):
         return False
-    limite = time.time() + 86400
+    # 0.78: antes se aceptaban horas hasta 24 h en el futuro. Un PC que pulsó «Borrar todo» con el
+    # reloj adelantado (arranque dual Windows/Linux, pila gastada) o una respuesta falsa mandaba un
+    # «vaciado» futuro y borraba las notas de todos, también las nuevas de las próximas horas. Las
+    # firmas ya exigen relojes a menos de CLOCK_SECONDS (60 s), así que nada legítimo llega de más
+    # adelante: un vaciado, una lápida o una nota de más allá de ese margen NO se acepta.
+    ahora = time.time()
+    limite = ahora + _FUTURO_NOTAS
     with _clip_lock:
         _load_history()
         antes = firma_notas({"items": _history, "borrados": _borrados, "vaciado": _vaciado})
+        _sanear_futuro(ahora, limite)
         try:
-            vaciado = max(_vaciado, min(float(remoto.get("vaciado") or 0), limite))
+            suyo = float(remoto.get("vaciado") or 0)
         except (TypeError, ValueError):
-            vaciado = _vaciado
+            suyo = 0.0
+        vaciado = max(_vaciado, suyo) if 0 < suyo <= limite else _vaciado
         borrados = dict(_borrados)
         rb = remoto.get("borrados")
         for k, v in (list(rb.items())[: _MAX_BORRADOS * 2] if isinstance(rb, dict) else []):

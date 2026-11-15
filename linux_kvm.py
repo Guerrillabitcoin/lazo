@@ -475,7 +475,7 @@ def elegir_emisor(ses: str, legibles: int, xlib: bool) -> tuple[str, str]:
         return "evdev", "Teclado y ratón por /dev/input con EVIOCGRAB (vale también en Wayland)."
     if ses == "wayland":
         return "", ("En Wayland hace falta leer /dev/input para capturar el ratón y el teclado: "
-                    "pulsa «Arreglar» en el Panel (o: sh instalar-linux.sh --pcapc) y cierra sesión.")
+                    "pulsa «Arreglar» en el Panel (o: sh instalar-linux.sh --pcapc --emisor) y cierra sesión.")
     return "", "Sin permiso en /dev/input ni sesión X11: este PC no puede controlar otro."
 
 
@@ -511,22 +511,32 @@ def falta(d: dict) -> str:
     return ""
 
 
-def arreglar(popen: Callable[..., Any] = subprocess.Popen, which: Callable[[str], Any] = shutil.which) -> dict:
+AVISO_INPUT = ("Para controlar OTRO PC desde este en Wayland, LaZoo tiene que leer tu teclado y tu ratón "
+               "(grupo «input»). Ojo: con ese permiso cualquier programa tuyo puede leer el teclado, "
+               "contraseñas incluidas. Para que otro PC controle este no hace falta.")
+
+
+def arreglar(popen: Callable[..., Any] = subprocess.Popen, which: Callable[[str], Any] = shutil.which,
+             emisor: bool = False) -> dict:
     """El botón «Arreglar» del Panel: los permisos de instalar-linux.sh en un paso, con pkexec
-    (pide la contraseña en una ventana). Devuelve {"ok", "mensaje"}."""
+    (pide la contraseña en una ventana). Devuelve {"ok", "mensaje"}.
+    0.78: de serie solo /dev/uinput (que otro PC controle este). El grupo «input» (leer el teclado:
+    hace falta para controlar otro PC desde este en Wayland) solo con `emisor=True`, que el Panel
+    manda después de enseñar AVISO_INPUT y de que el usuario diga que sí."""
     import getpass
 
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instalar-linux.sh")
     usuario = getpass.getuser()
     if not re.fullmatch(r"[A-Za-z0-9._-]{1,32}", usuario or ""):
         return {"ok": False, "mensaje": "No sé tu nombre de usuario: ejecuta «sh instalar-linux.sh --pcapc» en una terminal."}
+    extra = " --emisor" if emisor else ""
     if not which("pkexec"):
-        return {"ok": False, "mensaje": f"Ejecuta en una terminal: sh {script} --pcapc (y luego cierra sesión)."}
+        return {"ok": False, "mensaje": f"Ejecuta en una terminal: sh {script} --pcapc{extra} (y luego cierra sesión)."}
     try:
-        popen(["pkexec", "sh", script, "--permisos-root", usuario], stdin=subprocess.DEVNULL,
+        popen(["pkexec", "sh", script, "--permisos-root", usuario] + (["--emisor"] if emisor else []), stdin=subprocess.DEVNULL,
               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     except OSError:
-        return {"ok": False, "mensaje": f"Ejecuta en una terminal: sh {script} --pcapc (y luego cierra sesión)."}
+        return {"ok": False, "mensaje": f"Ejecuta en una terminal: sh {script} --pcapc{extra} (y luego cierra sesión)."}
     return {"ok": True, "mensaje": "Escribe tu contraseña en la ventana que sale. Después, cierra sesión y vuelve a entrar."}
 
 

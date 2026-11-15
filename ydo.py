@@ -154,7 +154,9 @@ class Teclado(_Base):
         except Exception:  # noqa: BLE001
             pass
         antes = subprocess.run(["wl-paste", "--no-newline"], capture_output=True, timeout=3, env=self.env)
-        subprocess.run(["wl-copy", "--", text], timeout=3, env=self.env)
+        # 0.78: por stdin, no como argumento: un argumento se ve en /proc/<pid>/cmdline (ps) y
+        # con textos muy largos pasa de ARG_MAX.
+        subprocess.run(["wl-copy"], input=text.encode("utf-8"), timeout=3, env=self.env)
         time.sleep(0.05)
         self.ydo("key", "29:1", "47:1", "47:0", "29:0")
         time.sleep(0.2)

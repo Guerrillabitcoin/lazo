@@ -43,7 +43,7 @@ import redes
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 IMG_TYPES = {"svg": "image/svg+xml", "png": "image/png"}
-VERSION = "0.77"
+VERSION = "0.78"
 pcapc.VERSION = VERSION  # 0.70: el User-Agent de «Controlar otro PC» lleva la versión
 PROTO = 2  # 0.57: versión del emparejamiento (saludo X25519 de 0.54). El móvil la compara.
 PAIRING = protocol.Pairing()
@@ -987,6 +987,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send(413, {"error": "Demasiado grande"}, seal=False)
             return
         self.denied = PAIRING.verify("POST", sincro.RUTA, length, *got, who=who)
+        if self.denied in ("ok", "hora"):
+            # 0.78: la firma es de su clave: lo que se le conteste («reloj distinto», «pendiente»)
+            # va sellado para él, como en _authed. Antes iba con la clave general y el otro PC
+            # no podía leer el motivo (salía «la respuesta no está sellada con su clave»).
+            self.peer = who
         if self.denied == "ok" and who in KICKED:
             self.denied = "expulsado"
         fila = None
@@ -1063,7 +1068,8 @@ class Handler(BaseHTTPRequestHandler):
                 import linux_kvm
 
                 data = self._pcapc_estado()
-                data["arreglo"] = linux_kvm.arreglar()
+                # 0.78: el grupo «input» (leer el teclado) solo si el Panel lo pide tras el aviso
+                data["arreglo"] = linux_kvm.arreglar(emisor=body.get("emisor") is True)
                 return data
             elif step == "diagnostico":
                 if sys.platform.startswith("linux"):

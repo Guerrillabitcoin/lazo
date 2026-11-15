@@ -803,7 +803,7 @@ class ConServidor(unittest.TestCase):
     @unittest.skipUnless(sys.platform.startswith("linux"), "Linux")
     def test_api_arreglar_y_diagnostico(self):
         saved = lk.arreglar
-        lk.arreglar = lambda: {"ok": True, "mensaje": "Escribe tu contraseña"}
+        lk.arreglar = lambda **_k: {"ok": True, "mensaje": "Escribe tu contraseña"}  # 0.78: recibe emisor=
         try:
             code, data = _req(self.port, "POST", "/api/pcapc/arreglar", b"{}", LOCAL)
             self.assertEqual(code, 200)
@@ -839,10 +839,10 @@ class BandejaLinux(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.77")
-        self.assertEqual(pcapc.VERSION, "0.77")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
-        self.assertIn('<p class="ver">0.77', MESA)
+        self.assertEqual(lazo.VERSION, "0.78")
+        self.assertEqual(pcapc.VERSION, "0.78")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.78")
+        self.assertIn('<p class="ver">0.78', MESA)
         for ident in ('id="pc-porta"', 'id="pc-arreglar"', 'id="pc-diag"', '"/api/nombre"'):  # 0.76: el nombre común
             self.assertIn(ident, MESA)
 
