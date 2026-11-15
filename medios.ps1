@@ -2,6 +2,9 @@
 # Escribe una línea JSON cada 1,5 s y se cierra solo si LaZoo se cierra.
 param([int]$Parent = 0)
 $ErrorActionPreference = 'Stop'
+# 0.78: UTF-8 (medios.py lee UTF-8). Sin esto, tildes y emojis llegaban como «?» y la sesión
+# no casaba con el título de la ventana (no se sabía qué YouTube sonaba).
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 try {
   Add-Type -AssemblyName System.Runtime.WindowsRuntime
   $asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' })[0]

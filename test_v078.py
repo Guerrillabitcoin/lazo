@@ -46,6 +46,17 @@ class Elegir(unittest.TestCase):
         row, why = control.elegir_youtube([A, dict(B, active=True)], [], {"id": "", "title": ""})
         self.assertEqual((row["id"], why), ("2", "activa"))
 
+    def test_emojis_y_tildes_casan(self):
+        # Visto en Windows: la ventana «🔴 Directo… - YouTube» y la sesión con «??» (medios.ps1 sin UTF-8).
+        a = {"id": "1", "title": "\U0001f534 Directo canción 2026 - YouTube - Google Chrome"}
+        row, why = control.elegir_youtube([a, B], [ses("?? Directo canción 2026", "Playing")], {})
+        self.assertEqual((row["id"], why), ("1", "sonando"))
+        row, why = control.elegir_youtube([a, B], [ses("\U0001f534 Directo canción 2026", "Playing")], {})
+        self.assertEqual((row["id"], why), ("1", "sonando"))
+
+    def test_medios_ps1_escribe_utf8(self):
+        self.assertIn("[Console]::OutputEncoding = [Text.Encoding]::UTF8", (ROOT / "medios.ps1").read_text(encoding="utf-8"))
+
     def test_otro_navegador_o_spotify_no_cuentan(self):
         row, why = control.elegir_youtube([A, B], [ses("Perros", "Playing", app="Spotify.exe")], {})
         self.assertEqual(why, "primera")
@@ -250,7 +261,9 @@ class Script(unittest.TestCase):
         self.assertIn("InvokePattern", boton)
         self.assertIn("if (-not $p) { return '' }", boton)
         fija = ps[ps.index("function FijaVol"):ps.index("function Smtc")]
-        self.assertIn("$condRepro", fija)
+        self.assertIn("Repro $hwnd", fija)
+        repro = ps[ps.index("function Repro"):ps.index("function Boton")]
+        self.assertIn("StartsWith", repro)  # «youtube video player in fullscreen»
         for malo in ("SetForegroundWindow", "SetCursorPos", "SetFocus", "mouse_event", "SendInput"):
             self.assertNotIn(malo, ps)
 

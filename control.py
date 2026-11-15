@@ -2282,11 +2282,18 @@ def _yt_browser_sessions(sesiones: list[dict[str, Any]] | None) -> list[dict[str
             and any(b in str(x.get("app", "")).lower() for b in medios.BROWSERS)]
 
 
+def _yt_norm(text: str) -> str:
+    """Para casar títulos: sin mayúsculas, emojis, «?» ni caracteres rotos (hasta 0.77
+    medios.ps1 no escribía en UTF-8 y «🔴» llegaba como «??»), espacios juntos."""
+    out = "".join(c for c in str(text).lower() if ord(c) <= 0xFFFF and c not in "?\ufffd" and not 0xD800 <= ord(c) <= 0xDFFF)
+    return " ".join(out.split())
+
+
 def _yt_session_of(row: dict[str, Any], sesiones: list[dict[str, Any]]) -> dict[str, Any] | None:
     """La sesión multimedia (Windows SMTC / Linux MPRIS) cuyo título va en el de la ventana."""
-    low = str(row.get("title", "")).lower()
+    low = _yt_norm(str(row.get("title", "")))
     for x in sesiones:
-        t = str(x.get("title") or "").strip().lower()
+        t = _yt_norm(str(x.get("title") or ""))
         if len(t) >= 3 and t in low:
             return x
     return None

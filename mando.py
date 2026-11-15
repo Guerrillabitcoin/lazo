@@ -158,10 +158,21 @@ function Pos($s) {
   }
   return $pos
 }
-# 0.78: botones del reproductor por accesibilidad (Invoke), sin teclas, foco ni ratón.
-function Boton($hwnd, $atajo) {
+# 0.78: el reproductor de YouTube. Nombre exacto o que empiece igual: en pantalla completa
+# Chrome lo llama «YouTube Video Player in Fullscreen» (visto en Windows).
+function Repro($hwnd) {
   $win = $AE::FromHandle([IntPtr][Int64]$hwnd)
   $p = $win.FindFirst($TS::Descendants, $condRepro)
+  if ($p) { return $p }
+  foreach ($g in $win.FindAll($TS::Descendants, (New-Object Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Group)))) {
+    $n = ([string]$g.Current.Name).ToLower()
+    foreach ($r in $repro) { if ($n.StartsWith($r)) { return $g } }
+  }
+  return $null
+}
+# 0.78: botones del reproductor por accesibilidad (Invoke), sin teclas, foco ni ratón.
+function Boton($hwnd, $atajo) {
+  $p = Repro $hwnd
   if (-not $p) { return '' }  # solo dentro del reproductor de YouTube, nunca el navegador
   $botones = $p.FindAll($TS::Descendants, (New-Object Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Button)))
   foreach ($x in $botones) {
@@ -174,8 +185,7 @@ function Boton($hwnd, $atajo) {
 }
 # 0.78: el deslizador de volumen del reproductor, fijado por accesibilidad (RangeValue).
 function FijaVol($hwnd, $nivel) {
-  $win = $AE::FromHandle([IntPtr][Int64]$hwnd)
-  if (-not $win.FindFirst($TS::Descendants, $condRepro)) { return @{ hay = $false } }
+  if (-not (Repro $hwnd)) { return @{ hay = $false } }
   $v = Volumen $hwnd
   if (-not $v.hay) { return @{ hay = $false } }
   $s = $deslizadores[$hwnd]
