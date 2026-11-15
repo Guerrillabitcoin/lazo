@@ -266,11 +266,11 @@ class Panel(unittest.TestCase):
 
 class Version(unittest.TestCase):
     def test_066(self):
-        self.assertEqual(lazo.VERSION, "0.77")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
-        self.assertIn('<p class="ver">0.77', MESA)
+        self.assertEqual(lazo.VERSION, "0.78")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.78")
+        self.assertIn('<p class="ver">0.78', MESA)
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertIn("# LaZoo 0.77", readme)
+        self.assertIn("# LaZoo 0.78", readme)
         self.assertIn("**Novedad 0.66:**", readme)
         agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("historial.py", agents)

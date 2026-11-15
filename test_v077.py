@@ -463,14 +463,14 @@ class Panel(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.77")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
+        self.assertEqual(lazo.VERSION, "0.78")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.78")
         import pcapc
-        self.assertEqual(pcapc.VERSION, "0.77")
-        self.assertIn('PAGE_VERSION = "0.77"', (ROOT / "static" / "app.js").read_text(encoding="utf-8"))
+        self.assertEqual(pcapc.VERSION, "0.78")
+        self.assertIn('PAGE_VERSION = "0.78"', (ROOT / "static" / "app.js").read_text(encoding="utf-8"))
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
-        self.assertTrue(readme.startswith("# LaZoo 0.77"))
-        self.assertIn("Novedad 0.77", readme)
+        self.assertTrue(readme.startswith("# LaZoo 0.78"))
+        self.assertIn("Novedad 0.77", readme)  # 0.78: se mantiene
         self.assertIn("- 0.77", (ROOT / "AGENTS.md").read_text(encoding="utf-8"))
 
     def test_apk_sin_cambios(self):

@@ -183,7 +183,7 @@ def _yt_row() -> dict[str, str] | None:
             return None
         with control._lock:
             row = control._find_youtube_unlocked()
-        return dict(row) if row else None
+        return dict(row) if row and not row.get("fondo") else None  # 0.78: sin ventana
     except Exception:  # noqa: BLE001
         return None
 

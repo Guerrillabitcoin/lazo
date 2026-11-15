@@ -367,7 +367,7 @@ def _find_youtube_hwnd() -> str | None:
         return None
     with control._lock:
         row = control._find_youtube_unlocked()
-    return str(row["id"]) if row else None
+    return str(row["id"]) if row and not row.get("fondo") else None  # 0.78: pestaña de fondo, sin ventana
 
 
 SIGUES = Sigues(find=_find_youtube_hwnd)

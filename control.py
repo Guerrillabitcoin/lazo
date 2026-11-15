@@ -2270,31 +2270,161 @@ def _yt_words(title: str) -> set[str]:
     return {w for w in re.findall(r"\w+", clean) if len(w) > 2}
 
 
-def pick_youtube(rows: list[dict[str, str]], memory: dict[str, Any] | None = None) -> dict[str, str] | None:
-    """Elige la ventana de YouTube: primero la recordada (mismo id, aunque haya cambiado
-    de vídeo), luego la de título más parecido al recordado y, si no, la primera."""
+def _yt_tubes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [r for r in rows if "youtube" in str(r.get("title", "")).lower()
+            and "youtube music" not in str(r.get("title", "")).lower()]
+
+
+def _yt_browser_sessions(sesiones: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    import medios
+
+    return [x for x in (sesiones or []) if isinstance(x, dict)
+            and any(b in str(x.get("app", "")).lower() for b in medios.BROWSERS)]
+
+
+def _yt_session_of(row: dict[str, Any], sesiones: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """La sesión multimedia (Windows SMTC / Linux MPRIS) cuyo título va en el de la ventana."""
+    low = str(row.get("title", "")).lower()
+    for x in sesiones:
+        t = str(x.get("title") or "").strip().lower()
+        if len(t) >= 3 and t in low:
+            return x
+    return None
+
+
+def _yt_playing(x: dict[str, Any] | None) -> bool:
+    return bool(x) and str(x.get("status") or "").lower() == "playing"
+
+
+def elegir_youtube(rows: list[dict[str, Any]], sesiones: list[dict[str, Any]] | None = None,
+                   memory: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, str]:
+    """0.78: a qué YouTube van las órdenes del móvil, sin traer nada delante. Devuelve (fila, motivo).
+
+    1. «unica»: si solo hay una ventana de YouTube, esa.
+    2. «sonando»: si una está reproduciendo (sesión multimedia en «Playing»), esa.
+    3. «recordada»: la última que estuvo delante o que se mandó (mismo id aunque cambie de vídeo,
+       o el título más parecido). «activa»: la que está delante ahora. «primera»: como antes.
+    4. «fondo»: ninguna ventana enseña YouTube en el título (pestaña de fondo, otra pestaña
+       delante): la sesión multimedia del navegador que suena o la del último vídeo que se vio.
+       Esa fila no tiene id de ventana: solo vale para lo que va por los controles multimedia.
+    """
     memory = _YT_MEM if memory is None else memory
-    tubes = [r for r in rows if "youtube" in r["title"].lower() and "youtube music" not in r["title"].lower()]
+    ses = _yt_browser_sessions(sesiones)
+    tubes = _yt_tubes(rows)
+    recordada = None
     if memory.get("id"):
         same = next((r for r in rows if str(r.get("id")) == str(memory["id"])), None)
         if same is not None and (same in tubes or memory.get("title") and _yt_words(same["title"]) & _yt_words(memory["title"])):
-            return same
-    if not tubes:
-        return None
-    if memory.get("title") and len(tubes) > 1:
-        want = _yt_words(memory["title"])
-        best = max(tubes, key=lambda r: len(_yt_words(r["title"]) & want))
-        if _yt_words(best["title"]) & want:
-            return best
-    return tubes[0]
+            recordada = same
+    cands = list(tubes)
+    if recordada is not None and recordada not in cands:
+        cands.append(recordada)
+    if len(cands) == 1:
+        return cands[0], "unica"
+    if cands:
+        sonando = [r for r in cands if _yt_playing(_yt_session_of(r, ses))]
+        if len(sonando) == 1:
+            return sonando[0], "sonando"
+        pool = sonando or cands
+        if recordada is not None and recordada in pool:
+            return recordada, "recordada"
+        if memory.get("title"):
+            want = _yt_words(memory["title"])
+            best = max(pool, key=lambda r: len(_yt_words(r["title"]) & want))
+            if _yt_words(best["title"]) & want:
+                return best, "recordada"
+        activa = next((r for r in pool if r.get("active")), None)
+        if activa is not None:
+            return activa, "activa"
+        return pool[0], "primera"
+    # Sin ventana con YouTube en el título: ¿una pestaña de fondo que sigue en el navegador?
+    libres = [x for x in ses if not any(_yt_session_of(r, [x]) for r in rows) and str(x.get("title") or "").strip()]
+    want = _yt_words(str(memory.get("title") or ""))
+    elegida = next((x for x in libres if want and _yt_words(str(x["title"])) & want), None)
+    if elegida is None:
+        elegida = next((x for x in libres if _yt_playing(x)), None)
+    if elegida is None:
+        return None, ""
+    titulo = str(elegida["title"])[:160]
+    return {"id": "", "title": f"{titulo} - YouTube", "process": str(elegida.get("app", "")), "fondo": True}, "fondo"
+
+
+def pick_youtube(rows: list[dict[str, str]], memory: dict[str, Any] | None = None) -> dict[str, str] | None:
+    """Elige la ventana de YouTube: primero la recordada (mismo id, aunque haya cambiado
+    de vídeo), luego la de título más parecido al recordado y, si no, la primera.
+    0.78: es elegir_youtube sin datos de lo que suena."""
+    row, _why = elegir_youtube(rows, [], memory)
+    return None if row is not None and row.get("fondo") else row
+
+
+# «disco»: en las pruebas no se toca el ajustes.json de verdad (test_v078 lo activa en una carpeta temporal).
+_YT_MEM_GUARDADA = {"cargada": False, "id": "", "title": "",
+                    "disco": "unittest" not in sys.modules and "pytest" not in sys.modules}
+
+
+def _yt_mem_file() -> Any:
+    import recordar
+
+    return recordar.data_dir() / "ajustes.json"
+
+
+def _yt_mem_load() -> None:
+    """0.78: la última ventana de YouTube sobrevive a reiniciar LaZoo (si el navegador sigue
+    abierto, la ventana conserva su id). Se guarda en ajustes.json, clave «youtube_ultima»."""
+    if _YT_MEM_GUARDADA["cargada"] or not _YT_MEM_GUARDADA["disco"]:
+        return
+    _YT_MEM_GUARDADA["cargada"] = True
+    try:
+        data = json.loads(_yt_mem_file().read_text(encoding="utf-8"))
+        last = data.get("youtube_ultima") if isinstance(data, dict) else None
+        if isinstance(last, dict) and not _YT_MEM.get("id") and not _YT_MEM.get("title"):
+            _YT_MEM["id"] = str(last.get("id") or "")[:24]
+            _YT_MEM["title"] = str(last.get("title") or "")[:180]
+            _YT_MEM_GUARDADA.update(id=_YT_MEM["id"], title=_YT_MEM["title"])
+    except (OSError, ValueError):
+        pass
+
+
+def _yt_mem_save() -> None:
+    """Solo escribe si cambió la ventana o el vídeo (no en cada sondeo del móvil)."""
+    if not _YT_MEM_GUARDADA["disco"]:
+        return
+    if (_YT_MEM.get("id"), _YT_MEM.get("title")) == (_YT_MEM_GUARDADA["id"], _YT_MEM_GUARDADA["title"]):
+        return
+    _YT_MEM_GUARDADA.update(id=_YT_MEM.get("id", ""), title=_YT_MEM.get("title", ""))
+    try:
+        import sigues
+
+        path = _yt_mem_file()
+        with sigues._SAVE_LOCK:
+            data: dict[str, Any] = {}
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    data = {}
+            except (OSError, ValueError):
+                data = {}
+            data["youtube_ultima"] = {"id": _YT_MEM.get("id", ""), "title": _YT_MEM.get("title", "")}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.yt.tmp")
+            tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+            os.replace(tmp, path)
+    except Exception:  # noqa: BLE001 (sin disco: solo en memoria)
+        pass
 
 
 def remember_youtube(row: dict[str, str], speed: float | None = None) -> None:
+    if row.get("fondo"):
+        # Pestaña de fondo: se recuerda el vídeo, no la ventana (no se sabe cuál es).
+        _YT_MEM["title"], _YT_MEM["at"] = row.get("title", ""), time.time()
+        _yt_mem_save()
+        return
     if str(row.get("id")) != str(_YT_MEM.get("id")):
         _YT_MEM["speed"] = None  # otra ventana: su velocidad no la sabemos
     _YT_MEM["id"], _YT_MEM["title"], _YT_MEM["at"] = str(row.get("id", "")), row.get("title", ""), time.time()
     if speed is not None:
         _YT_MEM["speed"] = speed
+    _yt_mem_save()
 
 
 def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
@@ -2342,10 +2472,11 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
     state = _yt_state(row)
     if action == "status":
-        real = _win_is_fullscreen(row["id"])
+        real = _win_is_fullscreen(row["id"]) if str(row.get("id") or "").isdigit() else None
         if real is not None:
             _yt["full"] = real
-        out = {"detail": "", "title": row["title"], "level": _levels["youtube"], "full": _yt["full"], **state}
+        out = {"detail": "", "title": row["title"], "level": _levels["youtube"], "full": _yt["full"],
+               "motivo": row.get("motivo", ""), "fondo": bool(row.get("fondo")), **state}
         vol = _yt_real_volume(row)
         if vol:
             out.update(level=vol["level"], muted=vol["muted"], vol_real=True)
@@ -2376,17 +2507,25 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
             if _skip_ad_now():
                 return {"detail": "Anuncio saltado", "title": row["title"], "level": _levels["youtube"], **state}
     hecho = False
+    via = ""
+    quien = {"Al inicio del vídeo": "restart", "Vídeo anterior": "history_back"}.get(detail, action) if action == "prev" else action
+    if SYSTEM == "Windows":
+        # 0.78: primero sin teclas ni foco (controles multimedia y botones por accesibilidad).
+        via = _youtube_windows_sin_foco(action, quien, row)
+        hecho = bool(via)
     if SYSTEM == "Linux":
-        quien = {"Al inicio del vídeo": "restart", "Vídeo anterior": "history_back"}.get(detail, action) if action == "prev" else action
         hecho = _youtube_linux(action, quien, row)
+        via = "sin foco" if hecho else ""
         if not hecho and _wayland() and action in ("subs_up", "subs_down"):
             raise ControlError("En Linux con Wayland el tamaño de los subtítulos aún no va: cámbialo en los ajustes de YouTube.")
     if not hecho:
+        _yt_need_window(row)
         if not _focus_for_keys(row["id"]):
             raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
         time.sleep(0.18)
         with _lock:
             _yt_keys(keys)
+        via = "teclas"
     if action == "play":
         if state.get("playing") is not None:
             state["playing"] = not state["playing"]
@@ -2395,11 +2534,56 @@ def youtube(action: str, extra: dict | None = None) -> dict[str, Any]:
     if action in ("next", "prev") and detail != "Al inicio del vídeo":
         _yt["since"] = time.time()
         _yt["playing"] = True
-    if action == "volup":
+    if via == "volumen":
+        pass  # 0.78: el nivel ya es el real del reproductor
+    elif action == "volup":
         _levels["youtube"] = min(100, _levels["youtube"] + 5)
     elif action == "voldown":
         _levels["youtube"] = max(0, _levels["youtube"] - 5)
-    return {"detail": detail, "title": row["title"], "level": _levels["youtube"], **state}
+    return {"detail": detail, "title": row["title"], "level": _levels["youtube"], "via": via,
+            "motivo": row.get("motivo", ""), "fondo": bool(row.get("fondo")), **state}
+
+
+# 0.78: qué va sin foco en Windows. Controles multimedia del sistema (la sesión del navegador,
+# vale aunque YouTube esté detrás, minimizado o en una pestaña de fondo) y, con la ventana
+# conocida, los botones del reproductor por accesibilidad (sin ratón ni foco).
+YT_SMTC = {"play": ("toggle", 0.0), "next": ("next", 0.0), "restart": ("pos", 0.0),
+           "history_back": ("prev", 0.0), "back": ("rel", -10.0), "forward": ("rel", 10.0)}
+YT_BOTON = {"play": "(k)", "next": "(shift+n)", "mute": "(m)", "captions": "(c)", "theater": "(t)"}
+
+
+def _youtube_windows_sin_foco(action: str, quien: str, row: dict[str, Any]) -> str:
+    """"" si no se pudo (y entonces van las teclas de siempre, trayendo la ventana delante)."""
+    try:
+        import mando
+
+        m = mando.MANDO
+        if not m.available():
+            return ""
+        if quien in YT_SMTC:
+            accion, seg = YT_SMTC[quien]
+            if m.smtc(row["title"], accion, seg):
+                return "multimedia"
+        hwnd = str(row.get("id") or "")
+        if not hwnd.isdigit():
+            return ""
+        if quien in YT_BOTON and m.boton(hwnd, YT_BOTON[quien]):
+            return "accesibilidad"
+        if action in ("volup", "voldown"):
+            actual = (m.volumen(hwnd, fresco=True) or {}).get("level", _levels["youtube"])
+            vol = m.fijar_volumen(hwnd, actual + (5 if action == "volup" else -5))
+            if vol:
+                _levels["youtube"] = vol["level"]
+                return "volumen"
+    except Exception:  # noqa: BLE001 (sin PowerShell/UIA: teclas como antes)
+        return ""
+    return ""
+
+
+def _yt_need_window(row: dict[str, Any]) -> None:
+    """Las teclas necesitan una ventana. Una pestaña de fondo no la tiene: se avisa sin tocar nada."""
+    if row.get("fondo") or not str(row.get("id") or "").strip():
+        raise ControlError("YouTube está en una pestaña de fondo: para esto pon su pestaña delante una vez.")
 
 
 _yt: dict[str, Any] = {"title": "", "since": 0.0, "restart": 0.0, "playing": None, "full": False}
@@ -2460,13 +2644,15 @@ def _youtube_fullscreen() -> dict[str, Any]:
         row = _find_youtube_unlocked()
         if row is None:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
-    real = _win_is_fullscreen(row["id"])
+    real = _win_is_fullscreen(row["id"]) if str(row.get("id") or "").isdigit() else None
     is_full = _yt["full"] if real is None else real
     lin = _linux_yt() if SYSTEM == "Linux" else None
     if lin is not None and lin.boton("f"):  # 0.68: el botón del reproductor, sin teclas
         _yt["full"] = not is_full
         return {"detail": "Pantalla completa" if _yt["full"] else "Salir de pantalla completa",
                 "title": row["title"], "level": _levels["youtube"], "full": _yt["full"]}
+    # Pantalla completa es de la ventana: aquí sí hace falta traerla delante (siempre fue así).
+    _yt_need_window(row)
     if not _focus_for_keys(row["id"]):
         raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
     time.sleep(0.18)
@@ -2513,6 +2699,8 @@ def _known_speed(row: dict[str, str]) -> float | None:
 def _yt_real_volume(row: dict[str, str], fresh: bool = False) -> dict[str, Any] | None:
     """0.65: volumen y silencio REALES del reproductor de YouTube (mando.py, solo Windows).
     Si se leen, LaZoo los toma como punto de partida para las flechas de volumen."""
+    if row.get("fondo") or not str(row.get("id") or ""):
+        return None  # 0.78: pestaña de fondo: no hay reproductor a la vista
     try:
         import mando
 
@@ -2581,6 +2769,7 @@ def _youtube_speed(raw: object) -> dict[str, Any]:
     if taps and SYSTEM == "Linux" and _wayland():
         raise ControlError("En Linux con Wayland la velocidad aún no va desde el móvil: cámbiala en los ajustes de YouTube.")
     if taps:
+        _yt_need_window(row)
         if not _focus_for_keys(row["id"]):
             raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
         time.sleep(0.16)
@@ -2663,11 +2852,24 @@ def _youtube_volume(level: int) -> dict[str, Any]:
             _levels["youtube"] = vol["nivel"]
             return {"detail": "YouTube", "title": row["title"], "level": vol["nivel"], "vol_real": True,
                     "muted": mando_silencio(vol)}
+    if SYSTEM == "Windows" and str(row.get("id") or "").isdigit():
+        # 0.78: el deslizador del reproductor por accesibilidad, sin teclas ni foco.
+        try:
+            import mando
+
+            vol = mando.MANDO.fijar_volumen(str(row["id"]), level) if mando.MANDO.available() else None
+        except Exception:  # noqa: BLE001
+            vol = None
+        if vol:
+            _levels["youtube"] = vol["level"]
+            return {"detail": "YouTube", "title": row["title"], "level": vol["level"], "vol_real": True,
+                    "muted": vol.get("muted"), "via": "volumen"}
     real = _yt_real_volume(row, fresh=True)  # 0.65: desde el volumen de verdad, si se puede leer
     steps = int(round((level - _levels["youtube"]) / 5))
     steps = max(-20, min(20, steps))
     with _lock:
         if steps:
+            _yt_need_window(row)
             if not _focus_for_keys(row["id"]):
                 raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
     if steps:
@@ -2728,6 +2930,7 @@ def _youtube_seek(raw: object) -> dict[str, Any]:
         keys = mando.teclas(mando.plan_teclas(state.get("pos") if state.get("real") else None, length, to))
         if not keys:
             raise ControlError("No sé cuánto dura el vídeo: usa −10 s y +10 s.")
+        _yt_need_window(row)
         if not _focus_for_keys(row["id"]):
             raise ControlError("No pude poner YouTube delante. Toca su ventana en el PC una vez.")
         time.sleep(0.18)
@@ -2793,6 +2996,7 @@ def _youtube_handoff() -> dict[str, Any]:
             raise ControlError("No veo YouTube. Ábrelo en el navegador de este PC.")
     if SYSTEM != "Windows" and not mando.MANDO.available():
         raise ControlError("«Seguir en el móvil» necesita Windows o, en Linux, la accesibilidad (python3 linux_yt.py --diagnostico).")
+    _yt_need_window(row)
     vid = patrocinios.video_id(mando.MANDO.direccion(str(row["id"])))
     if not vid:
         p = patrocinios.PATROCINIOS
@@ -2888,11 +3092,30 @@ def _find_youtube_unlocked() -> dict[str, str] | None:
             rows = _linux_windows()
         except ControlError:
             rows = []  # 0.68: sin wmctrl (Wayland) se busca por accesibilidad
-    row = pick_youtube(rows)
-    if row is None and SYSTEM == "Linux":
+    _yt_mem_load()
+    try:
+        import medios
+
+        sesiones = medios.sesiones_ya()
+    except Exception:  # noqa: BLE001
+        sesiones = []
+    # 0.78: la ventana de YouTube que está delante es «la última activa» (regla 3).
+    activa = next((r for r in _yt_tubes(rows) if r.get("active")), None)
+    if activa is not None:
+        remember_youtube(activa)
+    row, why = elegir_youtube(rows, sesiones)
+    if row is not None and row.get("fondo") and SYSTEM == "Linux":
+        lin = _linux_yt()
+        acc = lin.find_row() if lin else None
+        if acc is not None:
+            row, why = acc, "accesibilidad"
+    elif row is None and SYSTEM == "Linux":
         lin = _linux_yt()
         row = lin.find_row() if lin else None
+        why = "accesibilidad" if row else ""
     if row is not None:
+        row = dict(row)
+        row["motivo"] = why
         remember_youtube(row)
     return row
 

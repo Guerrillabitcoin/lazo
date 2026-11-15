@@ -839,10 +839,10 @@ class BandejaLinux(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.77")
-        self.assertEqual(pcapc.VERSION, "0.77")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
-        self.assertIn('<p class="ver">0.77', MESA)
+        self.assertEqual(lazo.VERSION, "0.78")
+        self.assertEqual(pcapc.VERSION, "0.78")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.78")
+        self.assertIn('<p class="ver">0.78', MESA)
         for ident in ('id="pc-porta"', 'id="pc-arreglar"', 'id="pc-diag"', '"/api/nombre"'):  # 0.76: el nombre común
             self.assertIn(ident, MESA)
 

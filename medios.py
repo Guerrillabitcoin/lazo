@@ -130,6 +130,25 @@ def _num(text: str) -> float:
 WATCH = _Watch()
 
 
+def sesiones_ya() -> list[dict[str, Any]]:
+    """0.78: las sesiones que ya se saben, sin esperar. En Windows, si el lector aún no está
+    en marcha, se arranca aparte y esta vez devuelve []: así elegir la ventana de YouTube
+    nunca espera al PowerShell con el candado de control.py cogido."""
+    if SYSTEM == "Windows":
+        w = WATCH
+        w.asked = time.time()
+        vivo = w.proc is not None and w.proc.poll() is None
+        if vivo and w.at and time.time() - w.at <= 6:
+            return list(w.rows)
+        if not w.broken and not vivo:
+            threading.Thread(target=w.get, name="lazo-medios", daemon=True).start()
+        return []
+    try:
+        return WATCH.get() or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def browser_session(window_title: str = "") -> dict[str, Any] | None:
     rows = WATCH.get()
     if not rows:

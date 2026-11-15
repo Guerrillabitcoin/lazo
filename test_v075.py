@@ -322,9 +322,9 @@ class RegistroDeProcesos(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.77")
-        self.assertEqual(pcapc.VERSION, "0.77")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
+        self.assertEqual(lazo.VERSION, "0.78")
+        self.assertEqual(pcapc.VERSION, "0.78")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.78")
         self.assertIn("Novedad 0.75", (ROOT / "README.md").read_text(encoding="utf-8"))
 
     def test_apk_sin_cambios(self):

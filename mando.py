@@ -158,6 +158,56 @@ function Pos($s) {
   }
   return $pos
 }
+# 0.78: botones del reproductor por accesibilidad (Invoke), sin teclas, foco ni ratón.
+function Boton($hwnd, $atajo) {
+  $win = $AE::FromHandle([IntPtr][Int64]$hwnd)
+  $p = $win.FindFirst($TS::Descendants, $condRepro)
+  if (-not $p) { return '' }  # solo dentro del reproductor de YouTube, nunca el navegador
+  $botones = $p.FindAll($TS::Descendants, (New-Object Windows.Automation.PropertyCondition($AE::ControlTypeProperty, $CT::Button)))
+  foreach ($x in $botones) {
+    $n = ([string]$x.Current.Name).ToLower().Replace(' ', '')
+    if ($n.Contains($atajo)) {
+      try { $x.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke(); return [string]$x.Current.Name } catch { return '' }
+    }
+  }
+  return ''
+}
+# 0.78: el deslizador de volumen del reproductor, fijado por accesibilidad (RangeValue).
+function FijaVol($hwnd, $nivel) {
+  $win = $AE::FromHandle([IntPtr][Int64]$hwnd)
+  if (-not $win.FindFirst($TS::Descendants, $condRepro)) { return @{ hay = $false } }
+  $v = Volumen $hwnd
+  if (-not $v.hay) { return @{ hay = $false } }
+  $s = $deslizadores[$hwnd]
+  $r = $s.GetCurrentPattern([Windows.Automation.RangeValuePattern]::Pattern)
+  $max = [double]$r.Current.Maximum
+  if ($max -le 0) { $max = 100 }
+  $r.SetValue([math]::Max(0, [math]::Min($max, $nivel * $max / 100)))
+  Start-Sleep -Milliseconds 150
+  return Volumen $hwnd
+}
+# 0.78: órdenes a los controles multimedia de Windows (la sesión del navegador), sin foco.
+function Smtc($s, $a, $seg) {
+  $c = $s.GetPlaybackInfo().Controls
+  if ($a -eq 'toggle') {
+    if ($c.IsPlayPauseToggleEnabled) { return [bool](Espera ($s.TryTogglePlayPauseAsync()) ([bool])) }
+    if ([string]$s.GetPlaybackInfo().PlaybackStatus -eq 'Playing') { return [bool](Espera ($s.TryPauseAsync()) ([bool])) }
+    return [bool](Espera ($s.TryPlayAsync()) ([bool]))
+  }
+  if ($a -eq 'next') { if (-not $c.IsNextEnabled) { return $false }; return [bool](Espera ($s.TrySkipNextAsync()) ([bool])) }
+  if ($a -eq 'prev') { if (-not $c.IsPreviousEnabled) { return $false }; return [bool](Espera ($s.TrySkipPreviousAsync()) ([bool])) }
+  if ($a -eq 'pos' -or $a -eq 'rel') {
+    if (-not $c.IsPlaybackPositionEnabled) { return $false }
+    $to = $seg
+    if ($a -eq 'rel') { $to = (Pos $s) + $seg }
+    $tl = $s.GetTimelineProperties()
+    $fin = $tl.EndTime.TotalSeconds
+    if ($fin -gt 1) { $to = [math]::Min($to, $fin - 1) }
+    $to = [math]::Max(0, $to)
+    return [bool](Espera ($s.TryChangePlaybackPositionAsync([int64][math]::Round($to * 10000000))) ([bool]))
+  }
+  return $false
+}
 while ($true) {
   $line = [Console]::In.ReadLine()
   if ($line -eq $null -or $line -eq 'fin') { break }
@@ -168,6 +218,13 @@ while ($true) {
     $hwnd = [string]$cmd.hwnd
     if ($cmd.c -eq 'vol') { $out.vol = Volumen $hwnd }
     elseif ($cmd.c -eq 'url') { $out.url = Direccion $hwnd }
+    elseif ($cmd.c -eq 'boton') { $out.boton = Boton $hwnd ([string]$cmd.atajo) }
+    elseif ($cmd.c -eq 'fijavol') { $out.vol = FijaVol $hwnd ([double]$cmd.nivel) }
+    elseif ($cmd.c -eq 'smtc') {
+      $s = Busca ([string]$cmd.titulo)
+      if (-not $s) { $out.aceptado = $false; $out.error = 'sin sesion' }
+      else { $out.aceptado = Smtc $s ([string]$cmd.a) ([double]$cmd.s) }
+    }
     elseif ($cmd.c -eq 'ir') {
       $a = [double]$cmd.a
       $out.aceptado = $false; $out.verificado = $false
@@ -323,6 +380,42 @@ class Mando:
         res = self.pedir(c="ir", titulo=str(titulo), a=round(float(segundos), 2))
         return {"ok": bool(res.get("ok", True)) and bool(res.get("verificado")),
                 "deja": bool(res.get("deja")), "pos": res.get("pos"), "error": res.get("error", "")}
+
+    # --- 0.78: órdenes sin foco ----------------------------------------------------
+    def smtc(self, titulo: str, accion: str, segundos: float = 0.0) -> bool:
+        """Play/pausa, siguiente, anterior o saltar por los controles multimedia de Windows
+        (la sesión del navegador con ese título). Funciona con la ventana detrás, minimizada
+        o con YouTube en una pestaña de fondo. True si Windows lo aceptó."""
+        if accion not in ("toggle", "next", "prev", "pos", "rel") or not str(titulo).strip():
+            return False
+        res = self.pedir(c="smtc", titulo=str(titulo), a=accion, s=round(float(segundos), 2))
+        return bool(res.get("ok", True)) and bool(res.get("aceptado"))
+
+    def boton(self, hwnd: str, atajo: str) -> str:
+        """Pulsa por accesibilidad el botón del reproductor cuyo nombre lleva el atajo, p. ej.
+        «(m)» → «Silenciar (m)». No trae la ventana delante ni mueve el ratón. Devuelve el
+        nombre del botón pulsado o "" si no se vio."""
+        if not str(hwnd).isdigit() or not atajo:
+            return ""
+        res = self.pedir(c="boton", hwnd=str(hwnd), atajo=str(atajo).lower().replace(" ", ""))
+        self.vol_cache.pop(str(hwnd), None)
+        return str(res.get("boton") or "") if res.get("ok", True) else ""
+
+    def fijar_volumen(self, hwnd: str, nivel: int) -> dict[str, Any] | None:
+        """Mueve el deslizador de volumen del reproductor a `nivel` (0-100) por accesibilidad."""
+        if not str(hwnd).isdigit():
+            return None
+        res = self.pedir(c="fijavol", hwnd=str(hwnd), nivel=max(0, min(100, int(nivel))))
+        vol = res.get("vol") if res.get("ok", True) else None
+        if not (isinstance(vol, dict) and vol.get("hay")):
+            return None
+        try:
+            out = {"level": max(0, min(100, int(round(float(vol.get("nivel")))))),
+                   "muted": es_silencio(str(vol.get("boton") or ""))}
+        except (TypeError, ValueError):
+            return None
+        self.vol_cache = {str(hwnd): (self.clock(), out)}
+        return out
 
     # --- PowerShell -------------------------------------------------------------
     def _ps(self, line: str) -> dict:

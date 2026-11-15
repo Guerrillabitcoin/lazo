@@ -750,7 +750,7 @@ def _find_youtube_row() -> dict | None:
         return None
     with control._lock:
         row = control._find_youtube_unlocked()
-    return dict(row) if row else None
+    return dict(row) if row and not row.get("fondo") else None  # 0.78: pestaña de fondo, sin ventana
 
 
 def _teclas(hwnd: str, n10: int, n5: int) -> bool:

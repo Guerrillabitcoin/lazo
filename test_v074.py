@@ -323,7 +323,7 @@ class PuntaAPunta(unittest.TestCase):
         who, _ = self.emparejar()
         ctl = pcapc.Control(self.pcs, fabrica=CapturaFalsa)
         ctl.iniciar(who)
-        self.assertEqual(pcapc._VERSIONES.get(who), pcapc.KVM_VERSION)  # 0.77: 3 (imágenes)
+        self.assertEqual(pcapc._VERSIONES.get(who), pcapc.KVM_VERSION)  # 0.78: 3 (imágenes)
         self.assertTrue(ctl.v2)
         self.assertTrue(esperar(lambda: pcapc.RECEPCION.nombre_actual() != ""))
 
@@ -481,10 +481,10 @@ class AjusteYPanel(unittest.TestCase):
 
 class Entrega(unittest.TestCase):
     def test_version(self):
-        self.assertEqual(lazo.VERSION, "0.77")
-        self.assertEqual(pcapc.VERSION, "0.77")
-        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.77")
-        self.assertIn('<p class="ver">0.77', MESA)
+        self.assertEqual(lazo.VERSION, "0.78")
+        self.assertEqual(pcapc.VERSION, "0.78")
+        self.assertEqual((ROOT / "VERSION.txt").read_text().strip(), "0.78")
+        self.assertIn('<p class="ver">0.78', MESA)
 
     def test_apk_sin_cambios(self):
         texto = (ROOT / "android" / "AndroidManifest.xml").read_text(encoding="utf-8")
